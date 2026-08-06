@@ -1,4 +1,4 @@
-# HR Dashboard — Служба персонала АЛМИ Партнер
+# Dashboard
 
 Полноценное full-stack приложение для визуализации и управления метриками HR-команды.
 Стек: **Vue 3 + Vite + Apache ECharts** (фронтенд) и **Python FastAPI + SQLAlchemy + SQLite** (бэкенд).
