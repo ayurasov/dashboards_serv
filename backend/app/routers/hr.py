@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     User, MonthRecord, EmployeeEvent, MetricValue, MetricDefinition,
-    Note, RoleEnum, Benchmark
+    Note, RoleEnum, Benchmark, TrafficLightRule
 )
 from ..deps import (
     get_current_user, require_edit, require_admin, require_metrics_edit, can_view_department
@@ -265,20 +265,33 @@ def month_analytics(month_key: str, db: Session = Depends(get_db), user: User = 
         emps = [e for e in emps if can_view_department(user, e.department)]
     hired = len([e for e in emps if e.event_type == "hired"])
     fired = len([e for e in emps if e.event_type == "fired"])
-    # Every defined metric is reported, filled or not: an unfilled metric is a data
-    # gap the service has to close, so it reads red instead of silently vanishing.
+    # Every defined metric is reported, filled or not, so a data gap is visible in
+    # the table. But an unfilled metric must NOT read as a critical (red) traffic
+    # light unless the metric is actually tracked by an enabled traffic-light rule:
+    # otherwise metrics that are not part of the traffic light would incorrectly
+    # flag the whole month/period as critical on the dashboard and summary charts.
     values = {mv.metric_key: mv for mv in mr.metric_values}
+    rules = {r.metric_key: r for r in db.query(TrafficLightRule).all()}
     metrics = []
     for d in db.query(MetricDefinition).order_by(MetricDefinition.sort_order, MetricDefinition.id).all():
         mv = values.get(d.key)
         filled = mv is not None and mv.numeric_value is not None
+        rule = rules.get(d.key)
+        light_enabled = bool(rule and rule.enabled)
+        if filled:
+            light = traffic_light_for_metric(db, d.key, mv.numeric_value)
+        else:
+            # Unfilled + tracked by an enabled rule: still a real data gap, keep it
+            # red so it stays visible as something that must be filled in.
+            # Unfilled + not tracked (no rule / disabled): neutral, never critical.
+            light = "red" if light_enabled else "gray"
         metrics.append(MetricWithLight(
             key=d.key, label=d.label, unit=d.unit, category=d.category,
             value=mv.numeric_value if mv else None,
             text_value=(mv.text_value if mv else None),
             source_note=(mv.source_note if mv else None) or "",
             direction=d.direction, filled=filled,
-            light=traffic_light_for_metric(db, d.key, mv.numeric_value) if filled else "red",
+            light=light,
         ))
     return MonthAnalytics(month_key=mr.key, label=mr.label, hired=hired, fired=fired,
                           net=hired - fired, metrics=metrics)
