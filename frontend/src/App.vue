@@ -183,6 +183,8 @@ const pageTitle = computed(() => route.meta?.title || ({
   'tp-dashboard':     'Техническая поддержка',
   'tp-registry':      'Реестр данных ТП',
   'tp-summary':       'Сводка ТП',
+  'tp-naumen':        'Аналитика Naumen',
+  'tp-naumen-org':    'Naumen — по организациям',
   'tp-traffic-light': 'Светофор ТП',
 }[route.name] || ''))
 const themeIcon = computed(() => theme.value === 'dark' ? '☀' : '🌙')
@@ -200,6 +202,8 @@ const ic = {
   target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
   // ---------- Technical Support ----------
   headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 18v-6a9 9 0 0118 0v6"/><path d="M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3zM3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3z"/></svg>',
+  naumen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>',
+  org: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="8" y="2" width="8" height="4" rx="1"/><rect x="1" y="18" width="6" height="4" rx="1"/><rect x="9" y="18" width="6" height="4" rx="1"/><rect x="17" y="18" width="6" height="4" rx="1"/><path d="M12 6v4M4 18v-4h16v4M12 10h-8v4M12 10h8v4"/></svg>',
 }
 
 // Nav items per module key. `need` gates an item behind a role capability.
@@ -222,10 +226,12 @@ const MODULE_NAV = {
   ],
   // ---------- Technical Support ----------
   tech: [
-    { to: '/tp',               label: 'Дашборд ТП',    icon: ic.headset },
-    { to: '/tp/registry',      label: 'Реестр данных', icon: ic.list },
-    { to: '/tp/summary',       label: 'Сводка',        icon: ic.chart },
-    { to: '/tp/traffic-light', label: 'Светофор',      icon: ic.light, need: 'admin' },
+    { to: '/tp',            label: 'Дашборд ТП',         icon: ic.headset },
+    { to: '/tp/registry',   label: 'Реестр данных',      icon: ic.list },
+    { to: '/tp/summary',    label: 'Сводка',             icon: ic.chart },
+    { to: '/tp/naumen',     label: 'Аналитика Naumen',   icon: ic.naumen },
+    { to: '/tp/naumen/org', label: 'Naumen по орг.',     icon: ic.org },
+    { to: '/tp/traffic-light', label: 'Светофор',        icon: ic.light, need: 'admin' },
   ],
 }
 
@@ -344,6 +350,8 @@ const PDF_REPORTS = {
   'tp-dashboard':     ['tp', 'tp_dashboard'],
   'tp-registry':      ['tp', 'tp_registry'],
   'tp-summary':       ['tp-summary', 'tp_summary'],
+  'tp-naumen':        ['tp-naumen', 'tp_naumen'],
+  'tp-naumen-org':    ['tp-naumen', 'tp_naumen_org'],
 }
 
 async function exportPdf() {

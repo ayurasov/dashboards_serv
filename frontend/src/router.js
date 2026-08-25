@@ -18,15 +18,16 @@ const routes = [
   { path: '/product/timeline', name: 'product-timeline', component: () => import('./views/PartnershipsTimeline.vue'), meta: { service: 'project_product' } },
   { path: '/product/traffic-light', name: 'product-traffic-light', component: () => import('./views/PartnershipTrafficLight.vue'), meta: { service: 'project_product' } },
   // ---------- Technical Support ----------
-  { path: '/tp', name: 'tp-dashboard', component: () => import('./views/tp/TpDashboard.vue'), meta: { service: 'tech' } },
-  { path: '/tp/registry', name: 'tp-registry', component: () => import('./views/tp/TpRegistry.vue'), meta: { service: 'tech' } },
-  { path: '/tp/summary', name: 'tp-summary', component: () => import('./views/tp/TpSummary.vue'), meta: { service: 'tech' } },
-  { path: '/tp/naumen', name: 'tp-naumen', component: () => import('./views/tp/TpNaumenDashboard.vue'), meta: { service: 'tech' } },
-  { path: '/tp/traffic-light', name: 'tp-traffic-light', component: () => import('./views/tp/TpTrafficLight.vue'), meta: { service: 'tech', admin: true } },
+  { path: '/tp',              name: 'tp-dashboard',    component: () => import('./views/tp/TpDashboard.vue'),        meta: { service: 'tech' } },
+  { path: '/tp/registry',     name: 'tp-registry',     component: () => import('./views/tp/TpRegistry.vue'),         meta: { service: 'tech' } },
+  { path: '/tp/summary',      name: 'tp-summary',      component: () => import('./views/tp/TpSummary.vue'),          meta: { service: 'tech' } },
+  { path: '/tp/naumen',       name: 'tp-naumen',       component: () => import('./views/tp/TpNaumenDashboard.vue'),   meta: { service: 'tech' } },
+  { path: '/tp/naumen/org',   name: 'tp-naumen-org',   component: () => import('./views/tp/TpNaumenOrgDashboard.vue'), meta: { service: 'tech' } },
+  { path: '/tp/traffic-light', name: 'tp-traffic-light', component: () => import('./views/tp/TpTrafficLight.vue'),  meta: { service: 'tech', admin: true } },
   // ---------- Other ----------
-  { path: '/palette', name: 'palette', component: () => import('./views/PaletteSettings.vue'), meta: { admin: true } },
-  { path: '/profile', name: 'profile', component: () => import('./views/Profile.vue') },
-  { path: '/no-access', name: 'no-access', component: () => import('./views/NoAccess.vue') },
+  { path: '/palette',    name: 'palette',    component: () => import('./views/PaletteSettings.vue'), meta: { admin: true } },
+  { path: '/profile',    name: 'profile',    component: () => import('./views/Profile.vue') },
+  { path: '/no-access',  name: 'no-access',  component: () => import('./views/NoAccess.vue') },
 ]
 
 // Home page of each service that has dashboard content.
