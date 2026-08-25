@@ -24,7 +24,7 @@ class RoleEnum(str, enum.Enum):
 # key, title, subtitle, icon, route_prefix, has_dashboard
 SERVICES = [
     ("apparat_gd", "Аппарат ГД", "Аппарат ГД", "🏛", "/apparat_gd", False),
-    ("tech", "Техническая служба", "Техническая", "⚙", "/tech", False),
+    ("tech", "Техническая поддержка", "Техподдержка", "🎧", "/tp", True),
     ("it", "ИТ служба", "ИТ", "💻", "/it", False),
     ("commercial", "Коммерческая служба", "Коммерческая", "💼", "/commercial", False),
     ("marketing", "Служба маркетинга", "Маркетинг", "📣", "/marketing", False),
@@ -345,3 +345,107 @@ class Benchmark(Base):
     description = Column(Text, default="")
     source = Column(String(300), default="")
     __table_args__ = (UniqueConstraint("metric_key", "year", name="uq_benchmark_metric_year"),)
+
+
+# ---------- Technical Support (TP) ----------
+
+# Column names matching tp-report seed_data.json exactly
+TP_DATA_COLUMNS = [
+    "year", "week", "total_in_work", "avail_total",
+    "rushydro_hours", "transneft_hours", "roscosmos_hours", "bryansk_hours",
+    "mchs_hours", "internal_sales_hours",
+    "new_received", "renewed", "ratio_solved_received",
+    "altos_rusg_email", "altos_rusg_tf", "altos_other_email", "altos_other_tf",
+    "altoffice_rusg_email", "altoffice_rusg_tf", "altoffice_other_email", "altoffice_other_tf",
+    "projserver_taken", "total_solved_week",
+    "altos_avg_time", "altos_total", "altos_1_2line", "altos_3line",
+    "altoffice_avg_time", "altoffice_total", "altoffice_1_2line", "altoffice_3line",
+    "projserver_solved",
+    "altos_avail_total", "altos_avail_1_3", "altos_avail_4_7", "altos_avail_8_10",
+    "altoffice_avail_total", "altoffice_avail_1_3", "altoffice_avail_4_7", "altoffice_avail_8_10",
+    "projserver_avail", "extra",
+]
+
+# Default traffic-light rules (mirrors tp-report DEFAULT_TRAFFIC_RULES)
+TP_DEFAULT_TRAFFIC_RULES = {
+    "total_in_work":        {"direction": "less", "green": 180, "yellow": 220, "enabled": True},
+    "avail_total":          {"direction": "less", "green": 350, "yellow": 420, "enabled": True},
+    "new_received":         {"direction": "less", "green": 25,  "yellow": 35,  "enabled": False},
+    "total_solved_week":    {"direction": "more", "green": 25,  "yellow": 18,  "enabled": True},
+    "ratio_solved_received":{"direction": "more", "green": 1,   "yellow": 0.8, "enabled": True},
+    "altos_avg_time":       {"direction": "less", "green": 24,  "yellow": 48,  "enabled": True},
+    "altoffice_avg_time":   {"direction": "less", "green": 36,  "yellow": 72,  "enabled": True},
+    "altos_avail_total":    {"direction": "more", "green": 90,  "yellow": 70,  "enabled": False},
+    "altoffice_avail_total":{"direction": "more", "green": 110, "yellow": 90,  "enabled": False},
+}
+
+
+class TpReportRow(Base):
+    """One week of technical-support data (mirrors tp-report report_rows table)."""
+    __tablename__ = "tp_report_rows"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Time dimensions
+    year   = Column(Float, nullable=True)
+    week   = Column(Float, nullable=True)
+    period = Column(String(50), nullable=True)
+    # Load / availability
+    total_in_work  = Column(Float, nullable=True)
+    avail_total    = Column(Float, nullable=True)
+    # Client hours
+    rushydro_hours        = Column(Float, nullable=True)
+    transneft_hours       = Column(Float, nullable=True)
+    roscosmos_hours       = Column(Float, nullable=True)
+    bryansk_hours         = Column(Float, nullable=True)
+    mchs_hours            = Column(Float, nullable=True)
+    internal_sales_hours  = Column(Float, nullable=True)
+    # Ticket flow
+    new_received           = Column(Float, nullable=True)
+    renewed                = Column(Float, nullable=True)
+    ratio_solved_received  = Column(Float, nullable=True)
+    # AltOS / RUSG channel
+    altos_rusg_email  = Column(Float, nullable=True)
+    altos_rusg_tf     = Column(Float, nullable=True)
+    altos_other_email = Column(Float, nullable=True)
+    altos_other_tf    = Column(Float, nullable=True)
+    # AltOffice / RUSG channel
+    altoffice_rusg_email  = Column(Float, nullable=True)
+    altoffice_rusg_tf     = Column(Float, nullable=True)
+    altoffice_other_email = Column(Float, nullable=True)
+    altoffice_other_tf    = Column(Float, nullable=True)
+    # ProjServer
+    projserver_taken   = Column(Float, nullable=True)
+    projserver_solved  = Column(Float, nullable=True)
+    projserver_avail   = Column(Float, nullable=True)
+    # Weekly totals
+    total_solved_week = Column(Float, nullable=True)
+    # AltOS SLA
+    altos_avg_time  = Column(Float, nullable=True)
+    altos_total     = Column(Float, nullable=True)
+    altos_1_2line   = Column(Float, nullable=True)
+    altos_3line     = Column(Float, nullable=True)
+    # AltOffice SLA
+    altoffice_avg_time = Column(Float, nullable=True)
+    altoffice_total    = Column(Float, nullable=True)
+    altoffice_1_2line  = Column(Float, nullable=True)
+    altoffice_3line    = Column(Float, nullable=True)
+    # Availability buckets
+    altos_avail_total  = Column(Float, nullable=True)
+    altos_avail_1_3    = Column(Float, nullable=True)
+    altos_avail_4_7    = Column(Float, nullable=True)
+    altos_avail_8_10   = Column(Float, nullable=True)
+    altoffice_avail_total = Column(Float, nullable=True)
+    altoffice_avail_1_3   = Column(Float, nullable=True)
+    altoffice_avail_4_7   = Column(Float, nullable=True)
+    altoffice_avail_8_10  = Column(Float, nullable=True)
+    # Free-form note
+    extra = Column(Text, nullable=True)
+    created_at  = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.datetime.utcnow,
+                         onupdate=datetime.datetime.utcnow)
+
+
+class TpSettings(Base):
+    """Key-value settings for the TP dashboard (traffic rules, block settings, etc.)."""
+    __tablename__ = "tp_settings"
+    key   = Column(String(80), primary_key=True)
+    value = Column(Text, nullable=False, default="{}")
