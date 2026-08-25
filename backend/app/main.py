@@ -11,7 +11,7 @@ from .database import Base, engine, ensure_added_columns
 from .seed import seed_all
 from .routers import (
     auth, users, hr, traffic_light, dashboards, dashboard_prefs, audit, pdf,
-    partnerships, modules, palette,
+    partnerships, modules, palette, tp,
 )
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -51,6 +51,7 @@ app.include_router(partnerships.router)
 app.include_router(modules.router)
 app.include_router(modules.services_router)
 app.include_router(palette.router)
+app.include_router(tp.router)
 
 
 @app.get("/api/health")
