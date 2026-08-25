@@ -21,6 +21,7 @@ const routes = [
   { path: '/tp', name: 'tp-dashboard', component: () => import('./views/tp/TpDashboard.vue'), meta: { service: 'tech' } },
   { path: '/tp/registry', name: 'tp-registry', component: () => import('./views/tp/TpRegistry.vue'), meta: { service: 'tech' } },
   { path: '/tp/summary', name: 'tp-summary', component: () => import('./views/tp/TpSummary.vue'), meta: { service: 'tech' } },
+  { path: '/tp/naumen', name: 'tp-naumen', component: () => import('./views/tp/TpNaumenDashboard.vue'), meta: { service: 'tech' } },
   { path: '/tp/traffic-light', name: 'tp-traffic-light', component: () => import('./views/tp/TpTrafficLight.vue'), meta: { service: 'tech', admin: true } },
   // ---------- Other ----------
   { path: '/palette', name: 'palette', component: () => import('./views/PaletteSettings.vue'), meta: { admin: true } },

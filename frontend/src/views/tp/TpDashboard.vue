@@ -131,6 +131,10 @@
         <span class="nav-icon">📊</span>
         <span>Сводная аналитика</span>
       </router-link>
+      <router-link to="/tp/naumen" class="nav-card">
+        <span class="nav-icon">🗂️</span>
+        <span>Аналитика заявок</span>
+      </router-link>
       <router-link to="/tp/traffic-light" class="nav-card" v-if="auth.isAdmin">
         <span class="nav-icon">🚦</span>
         <span>Настройка светофора</span>
