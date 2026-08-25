@@ -16,15 +16,19 @@ const routes = [
   { path: '/product/registry', name: 'product-registry', component: () => import('./views/PartnershipsRegistry.vue'), meta: { service: 'project_product' } },
   { path: '/product/summary', name: 'product-summary', component: () => import('./views/PartnershipsSummary.vue'), meta: { service: 'project_product' } },
   { path: '/product/timeline', name: 'product-timeline', component: () => import('./views/PartnershipsTimeline.vue'), meta: { service: 'project_product' } },
-  // Viewing the rules needs only service access; the PUT behind «Сохранить» is admin-only.
   { path: '/product/traffic-light', name: 'product-traffic-light', component: () => import('./views/PartnershipTrafficLight.vue'), meta: { service: 'project_product' } },
+  // ---------- Technical Support ----------
+  { path: '/tp', name: 'tp-dashboard', component: () => import('./views/TpDashboard.vue'), meta: { service: 'tech' } },
+  { path: '/tp/registry', name: 'tp-registry', component: () => import('./views/TpRegistry.vue'), meta: { service: 'tech' } },
+  { path: '/tp/traffic-light', name: 'tp-traffic-light', component: () => import('./views/TpTrafficLight.vue'), meta: { service: 'tech' } },
+  // ---------- Other ----------
   { path: '/palette', name: 'palette', component: () => import('./views/PaletteSettings.vue'), meta: { admin: true } },
   { path: '/profile', name: 'profile', component: () => import('./views/Profile.vue') },
   { path: '/no-access', name: 'no-access', component: () => import('./views/NoAccess.vue') },
 ]
 
 // Home page of each service that has dashboard content.
-const SERVICE_HOME = { hr: '/', project_product: '/product' }
+const SERVICE_HOME = { hr: '/', project_product: '/product', tech: '/tp' }
 
 const router = createRouter({ history: createWebHistory(), routes })
 
@@ -39,8 +43,6 @@ router.beforeEach(async (to) => {
   try {
     await auth.loadAccess()
   } catch {
-    // The API enforces access on every request, so a failed lookup must not
-    // lock the user out of the app.
     return true
   }
   if (auth.canViewService(to.meta.service)) return true

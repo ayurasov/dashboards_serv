@@ -1,277 +1,253 @@
 <template>
-  <div class="tp-dashboard">
+  <div class="tp-dashboard page-content">
     <!-- Header -->
     <div class="page-header">
-      <div class="page-header__left">
-        <h1 class="page-title">Техническая поддержка</h1>
-        <p class="page-subtitle">Еженедельный дашборд</p>
-      </div>
-      <div class="page-header__right">
-        <label class="field-label">Период:</label>
-        <select v-model="selectedPeriod" class="select-sm" @change="applyFilter">
-          <option value="">Все периоды</option>
-          <option v-for="p in periods" :key="p" :value="p">{{ p }}</option>
+      <h1 class="page-title">🎧 Техническая поддержка</h1>
+      <div class="header-controls">
+        <select v-model="selectedYear" class="filter-select" @change="load">
+          <option :value="null">Все годы</option>
+          <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
         </select>
-        <label class="field-label ml-3">Последние:</label>
-        <select v-model="lastN" class="select-sm" @change="applyFilter">
-          <option :value="0">Все</option>
-          <option :value="4">4 нед.</option>
-          <option :value="8">8 нед.</option>
-          <option :value="13">13 нед.</option>
-          <option :value="26">26 нед.</option>
-        </select>
+        <router-link to="/tp/registry" class="btn btn-secondary btn-sm">Реестр</router-link>
+        <router-link to="/tp/traffic-light" class="btn btn-secondary btn-sm">Светофор</router-link>
       </div>
     </div>
 
-    <div v-if="loading" class="loading-state">Загрузка данных...</div>
-    <div v-else-if="error" class="error-state">{{ error }}</div>
+    <div v-if="loading" class="loading-state">Загрузка данных…</div>
+    <div v-else-if="error" class="error-banner">{{ error }}</div>
 
-    <template v-else>
-      <!-- KPI cards -->
+    <template v-else-if="rows.length">
+      <!-- KPI row -->
       <div class="kpi-grid">
-        <div v-for="kpi in kpis" :key="kpi.key" class="kpi-card" :class="`kpi-card--${kpi.light}`">
-          <div class="kpi-card__label">{{ kpi.label }}</div>
-          <div class="kpi-card__value">{{ fmt(kpi.value, kpi.decimals) }}</div>
-          <div class="kpi-card__sub">{{ kpi.sub }}</div>
-          <div class="kpi-card__light" :class="`light--${kpi.light}`"></div>
+        <div class="kpi-card" v-for="kpi in kpis" :key="kpi.key">
+          <span class="kpi-label">{{ kpi.label }}</span>
+          <span class="kpi-value" :class="kpi.light">
+            {{ kpi.value !== null ? fmt(kpi.value, kpi.unit) : '—' }}
+          </span>
+          <span class="kpi-sub">{{ kpi.sub }}</span>
         </div>
       </div>
 
-      <!-- Charts row 1: load & tickets -->
+      <!-- Charts row -->
       <div class="charts-row">
         <div class="chart-card">
-          <h3 class="chart-title">Нагрузка (в работе / доступность)</h3>
-          <canvas ref="loadChart"></canvas>
+          <h3 class="chart-title">Новые обращения / Решено за неделю</h3>
+          <canvas ref="ticketsChart" height="220"></canvas>
         </div>
         <div class="chart-card">
-          <h3 class="chart-title">Поступившие / решённые заявки</h3>
-          <canvas ref="ticketChart"></canvas>
+          <h3 class="chart-title">Среднее время обработки (ч)</h3>
+          <canvas ref="avgTimeChart" height="220"></canvas>
         </div>
       </div>
 
-      <!-- Charts row 2: SLA times -->
-      <div class="charts-row">
-        <div class="chart-card">
-          <h3 class="chart-title">Среднее время решения (ч.)</h3>
-          <canvas ref="slaChart"></canvas>
-        </div>
-        <div class="chart-card">
-          <h3 class="chart-title">Клиентские часы по заказчикам</h3>
-          <canvas ref="clientChart"></canvas>
-        </div>
+      <!-- Availability bar -->
+      <div class="chart-card chart-wide">
+        <h3 class="chart-title">Доступность (нарастающим итогом)</h3>
+        <canvas ref="availChart" height="180"></canvas>
       </div>
 
-      <!-- Latest week notes -->
-      <div v-if="lastRow && lastRow.extra" class="notes-card">
-        <h3 class="chart-title">Комментарий к последней неделе</h3>
-        <p class="notes-text">{{ lastRow.extra }}</p>
+      <!-- Client hours -->
+      <div class="chart-card chart-wide">
+        <h3 class="chart-title">Часы по клиентам</h3>
+        <canvas ref="clientChart" height="180"></canvas>
       </div>
     </template>
+
+    <div v-else class="empty-state">
+      <div class="empty-icon">📭</div>
+      <p>Нет данных за выбранный период</p>
+      <router-link to="/tp/registry" class="btn btn-primary">Добавить записи</router-link>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useAuthStore } from '../stores/auth'
+import { tpApi } from '../api/tp.js'
 import Chart from 'chart.js/auto'
 
-const auth = useAuthStore()
-const apiBase = import.meta.env.VITE_API_URL || ''
-
 const rows = ref([])
-const trafficRules = ref({})
-const loading = ref(true)
+const loading = ref(false)
 const error = ref(null)
-const selectedPeriod = ref('')
-const lastN = ref(13)
+const selectedYear = ref(null)
+const rules = ref({})
 
-// Chart refs
-const loadChart = ref(null)
-const ticketChart = ref(null)
-const slaChart = ref(null)
-const clientChart = ref(null)
-let charts = []
+const ticketsChart = ref(null)
+const avgTimeChart = ref(null)
+const availChart   = ref(null)
+const clientChart  = ref(null)
 
-// ---- fetch ----
-async function fetchData() {
+let chartInstances = {}
+
+const years = computed(() => {
+  const s = new Set(rows.value.map(r => r.year).filter(Boolean))
+  return [...s].sort((a, b) => b - a)
+})
+
+const filtered = computed(() =>
+  selectedYear.value ? rows.value.filter(r => r.year === selectedYear.value) : rows.value
+)
+
+const last = computed(() => filtered.value.at(-1) || {})
+
+function calcLight(key, val) {
+  const rule = rules.value[key]
+  if (!rule || !rule.enabled || val === null || val === undefined) return ''
+  const { direction, green, yellow } = rule
+  if (direction === 'less') {
+    if (val <= green)  return 'green'
+    if (val <= yellow) return 'yellow'
+    return 'red'
+  } else {
+    if (val >= green)  return 'green'
+    if (val >= yellow) return 'yellow'
+    return 'red'
+  }
+}
+
+const kpis = computed(() => [
+  { key: 'total_in_work',       label: 'В работе',           unit: 'шт',  sub: 'обращений', value: last.value.total_in_work,       light: calcLight('total_in_work', last.value.total_in_work) },
+  { key: 'new_received',        label: 'Новых за неделю',    unit: 'шт',  sub: 'обращений', value: last.value.new_received,        light: calcLight('new_received', last.value.new_received) },
+  { key: 'total_solved_week',   label: 'Решено за неделю',   unit: 'шт',  sub: '',          value: last.value.total_solved_week,   light: calcLight('total_solved_week', last.value.total_solved_week) },
+  { key: 'ratio_solved_received', label: 'Коэф. закрытия',  unit: '',    sub: 'реш/получ', value: last.value.ratio_solved_received, light: calcLight('ratio_solved_received', last.value.ratio_solved_received) },
+  { key: 'altos_avg_time',      label: 'Ср. время AltOS',   unit: 'ч',   sub: '',          value: last.value.altos_avg_time,      light: calcLight('altos_avg_time', last.value.altos_avg_time) },
+  { key: 'altoffice_avg_time',  label: 'Ср. время AltOff',  unit: 'ч',   sub: '',          value: last.value.altoffice_avg_time,  light: calcLight('altoffice_avg_time', last.value.altoffice_avg_time) },
+])
+
+function fmt(val, unit) {
+  if (val === null || val === undefined) return '—'
+  const n = Number(val)
+  const s = Number.isInteger(n) ? n.toLocaleString('ru') : n.toFixed(2).replace('.', ',')
+  return unit ? `${s} ${unit}` : s
+}
+
+async function load() {
   loading.value = true
   error.value = null
   try {
-    const headers = { Authorization: `Bearer ${auth.token}` }
-    const [rowsRes, rulesRes] = await Promise.all([
-      fetch(`${apiBase}/api/tp/rows`, { headers }),
-      fetch(`${apiBase}/api/tp/settings/traffic_rules`, { headers }),
+    [rows.value, rules.value] = await Promise.all([
+      tpApi.getRows(),
+      tpApi.getTrafficRules(),
     ])
-    if (!rowsRes.ok) throw new Error(`rows: ${rowsRes.status}`)
-    rows.value = await rowsRes.json()
-    trafficRules.value = rulesRes.ok ? await rulesRes.json() : {}
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
+    await nextTick()
+    drawCharts()
   }
 }
 
-// ---- filter ----
-const filtered = computed(() => {
-  let data = rows.value.slice()
-  if (selectedPeriod.value) data = data.filter(r => r.period === selectedPeriod.value)
-  if (lastN.value > 0) data = data.slice(-lastN.value)
-  return data
-})
+function destroyAll() {
+  Object.values(chartInstances).forEach(c => c?.destroy())
+  chartInstances = {}
+}
 
-const periods = computed(() => [...new Set(rows.value.map(r => r.period).filter(Boolean))])
-const lastRow = computed(() => filtered.value[filtered.value.length - 1] || null)
+function drawCharts() {
+  destroyAll()
+  const data = filtered.value
+  if (!data.length) return
 
-// ---- traffic light ----
-function getLight(key, value) {
-  const rule = trafficRules.value[key]
-  if (!rule || !rule.enabled || value == null) return 'gray'
-  const { direction, green, yellow } = rule
-  if (direction === 'less') {
-    if (value <= green) return 'green'
-    if (value <= yellow) return 'yellow'
-    return 'red'
-  } else {
-    if (value >= green) return 'green'
-    if (value >= yellow) return 'yellow'
-    return 'red'
+  const labels = data.map(r => `${r.year ?? ''}w${r.week ?? ''}`)
+
+  // 1. Tickets
+  if (ticketsChart.value) {
+    chartInstances.tickets = new Chart(ticketsChart.value, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Новых',   data: data.map(r => r.new_received),      borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.08)', tension: .3, fill: true },
+          { label: 'Решено',  data: data.map(r => r.total_solved_week), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.08)',  tension: .3, fill: true },
+        ],
+      },
+      options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } },
+    })
+  }
+
+  // 2. Avg time
+  if (avgTimeChart.value) {
+    chartInstances.avgTime = new Chart(avgTimeChart.value, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'AltOS',    data: data.map(r => r.altos_avg_time),    borderColor: '#8b5cf6', tension: .3 },
+          { label: 'AltOffice',data: data.map(r => r.altoffice_avg_time),borderColor: '#f59e0b', tension: .3 },
+        ],
+      },
+      options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } },
+    })
+  }
+
+  // 3. Availability
+  if (availChart.value) {
+    chartInstances.avail = new Chart(availChart.value, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'AltOS',    data: data.map(r => r.altos_avail_total),    backgroundColor: 'rgba(59,130,246,.7)' },
+          { label: 'AltOffice',data: data.map(r => r.altoffice_avail_total),backgroundColor: 'rgba(139,92,246,.7)' },
+          { label: 'ProjServer',data: data.map(r => r.projserver_avail),    backgroundColor: 'rgba(34,197,94,.7)' },
+        ],
+      },
+      options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } },
+    })
+  }
+
+  // 4. Client hours
+  if (clientChart.value) {
+    const lastRow = data.at(-1) || {}
+    chartInstances.client = new Chart(clientChart.value, {
+      type: 'bar',
+      data: {
+        labels: ['РусГидро','Транснефть','Роскосмос','Брянск','МЧС','Внутренние'],
+        datasets: [{
+          label: 'Часы (посл. неделя)',
+          data: [
+            lastRow.rushydro_hours, lastRow.transneft_hours, lastRow.roscosmos_hours,
+            lastRow.bryansk_hours,  lastRow.mchs_hours,      lastRow.internal_sales_hours,
+          ],
+          backgroundColor: ['#3b82f6','#8b5cf6','#f59e0b','#22c55e','#ef4444','#6b7280'],
+        }],
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
+    })
   }
 }
 
-function avg(key) {
-  const vals = filtered.value.map(r => r[key]).filter(v => v != null)
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
-}
-function last(key) {
-  return lastRow.value ? lastRow.value[key] : null
-}
-function fmt(v, dec = 0) {
-  if (v == null) return '—'
-  return Number(v).toLocaleString('ru-RU', { maximumFractionDigits: dec })
-}
-
-const kpis = computed(() => [
-  { key: 'total_in_work', label: 'В работе', value: last('total_in_work'), light: getLight('total_in_work', last('total_in_work')), sub: 'посл. неделя', decimals: 0 },
-  { key: 'avail_total', label: 'Доступность (всего)', value: last('avail_total'), light: getLight('avail_total', last('avail_total')), sub: 'посл. неделя', decimals: 0 },
-  { key: 'new_received', label: 'Новых заявок', value: last('new_received'), light: getLight('new_received', last('new_received')), sub: 'за неделю', decimals: 0 },
-  { key: 'total_solved_week', label: 'Решено за неделю', value: last('total_solved_week'), light: getLight('total_solved_week', last('total_solved_week')), sub: 'посл. неделя', decimals: 0 },
-  { key: 'ratio_solved_received', label: 'Коэф. решения', value: last('ratio_solved_received'), light: getLight('ratio_solved_received', last('ratio_solved_received')), sub: 'решено/поступило', decimals: 2 },
-  { key: 'altos_avg_time', label: 'SLA AltOS (ч.)', value: avg('altos_avg_time'), light: getLight('altos_avg_time', avg('altos_avg_time')), sub: `среднее за ${filtered.value.length} нед.`, decimals: 1 },
-  { key: 'altoffice_avg_time', label: 'SLA AltOffice (ч.)', value: avg('altoffice_avg_time'), light: getLight('altoffice_avg_time', avg('altoffice_avg_time')), sub: `среднее за ${filtered.value.length} нед.`, decimals: 1 },
-])
-
-// ---- charts ----
-const palette = [
-  'rgba(1,105,111,0.85)', 'rgba(218,113,1,0.85)', 'rgba(161,44,123,0.85)',
-  'rgba(67,122,34,0.85)', 'rgba(0,100,148,0.85)', 'rgba(122,57,187,0.85)',
-]
-
-function makeLabels() {
-  return filtered.value.map(r => r.period || `${r.year}-W${String(r.week).padStart(2,'0')}`)
-}
-
-function destroyCharts() {
-  charts.forEach(c => c.destroy())
-  charts = []
-}
-
-function buildCharts() {
-  destroyCharts()
-  const labels = makeLabels()
-
-  const mk = (ref, config) => {
-    if (!ref.value) return
-    const c = new Chart(ref.value, config)
-    charts.push(c)
-  }
-
-  const lineOpts = (datasets) => ({
-    type: 'line',
-    data: { labels, datasets },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } },
-  })
-
-  mk(loadChart, lineOpts([
-    { label: 'В работе', data: filtered.value.map(r => r.total_in_work), borderColor: palette[0], backgroundColor: palette[0].replace('0.85', '0.1'), tension: 0.3, fill: true },
-    { label: 'Доступность', data: filtered.value.map(r => r.avail_total), borderColor: palette[1], backgroundColor: palette[1].replace('0.85', '0.1'), tension: 0.3, fill: true },
-  ]))
-
-  mk(ticketChart, lineOpts([
-    { label: 'Новых', data: filtered.value.map(r => r.new_received), borderColor: palette[2], tension: 0.3 },
-    { label: 'Решено', data: filtered.value.map(r => r.total_solved_week), borderColor: palette[3], tension: 0.3 },
-  ]))
-
-  mk(slaChart, lineOpts([
-    { label: 'AltOS ср.вр. (ч.)', data: filtered.value.map(r => r.altos_avg_time), borderColor: palette[0], tension: 0.3 },
-    { label: 'AltOffice ср.вр. (ч.)', data: filtered.value.map(r => r.altoffice_avg_time), borderColor: palette[4], tension: 0.3 },
-  ]))
-
-  // Client hours bar
-  const clientKeys = ['rushydro_hours','transneft_hours','roscosmos_hours','bryansk_hours','mchs_hours','internal_sales_hours']
-  const clientLabels = ['РусГидро','Транснефть','РосКосмос','Брянск','МЧС','Внутр./Продажи']
-  mk(clientChart, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: clientKeys.map((k, i) => ({
-        label: clientLabels[i],
-        data: filtered.value.map(r => r[k]),
-        backgroundColor: palette[i % palette.length],
-      })),
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
-  })
-}
-
-function applyFilter() {
-  nextTick(buildCharts)
-}
-
-onMounted(async () => {
-  await fetchData()
-  await nextTick()
-  buildCharts()
-})
-
-watch(filtered, () => nextTick(buildCharts))
+onMounted(load)
+watch(filtered, () => nextTick(drawCharts))
 </script>
 
 <style scoped>
 .tp-dashboard { padding: var(--space-6); }
-.page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-6); }
-.page-title { font-size: var(--text-xl); font-weight: 700; color: var(--color-text); margin: 0; }
-.page-subtitle { font-size: var(--text-sm); color: var(--color-text-muted); margin: 0; }
-.page-header__right { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.field-label { font-size: var(--text-sm); color: var(--color-text-muted); }
-.ml-3 { margin-left: var(--space-3); }
-.select-sm { padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-size: var(--text-sm); }
+.page-header   { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); flex-wrap: wrap; gap: var(--space-3); }
+.page-title    { font-size: var(--text-xl); font-weight: 700; }
+.header-controls { display: flex; gap: var(--space-2); align-items: center; }
+.filter-select { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--text-sm); }
 
-.loading-state, .error-state { padding: var(--space-12); text-align: center; color: var(--color-text-muted); }
-.error-state { color: var(--color-error); }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+.kpi-card  { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
+.kpi-label { font-size: var(--text-xs); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.kpi-value { font-size: var(--text-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi-value.green  { color: var(--color-success); }
+.kpi-value.yellow { color: var(--color-gold); }
+.kpi-value.red    { color: var(--color-notification); }
+.kpi-sub   { font-size: var(--text-xs); color: var(--color-text-faint); }
 
-/* KPI grid */
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
-.kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); position: relative; overflow: hidden; box-shadow: var(--shadow-sm); }
-.kpi-card__label { font-size: var(--text-sm); color: var(--color-text-muted); margin-bottom: var(--space-1); }
-.kpi-card__value { font-size: var(--text-xl); font-weight: 700; color: var(--color-text); font-variant-numeric: tabular-nums; }
-.kpi-card__sub { font-size: var(--text-xs); color: var(--color-text-faint); margin-top: var(--space-1); }
-.kpi-card__light { position: absolute; top: var(--space-3); right: var(--space-3); width: 10px; height: 10px; border-radius: 50%; }
-.light--green { background: var(--color-success); }
-.light--yellow { background: var(--color-gold); }
-.light--red { background: var(--color-error); }
-.light--gray { background: var(--color-text-faint); }
-.kpi-card--green { border-left: 3px solid var(--color-success); }
-.kpi-card--yellow { border-left: 3px solid var(--color-gold); }
-.kpi-card--red { border-left: 3px solid var(--color-error); }
+.charts-row  { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-bottom: var(--space-4); }
+.chart-card  { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); }
+.chart-wide  { margin-bottom: var(--space-4); }
+.chart-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); margin-bottom: var(--space-3); }
 
-/* Charts */
-.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-bottom: var(--space-4); }
-@media (max-width: 768px) { .charts-row { grid-template-columns: 1fr; } }
-.chart-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); box-shadow: var(--shadow-sm); }
-.chart-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text); margin: 0 0 var(--space-3) 0; }
+.loading-state { text-align: center; padding: var(--space-16); color: var(--color-text-muted); }
+.error-banner  { background: var(--color-error-highlight); color: var(--color-error); padding: var(--space-4); border-radius: var(--radius-md); margin-bottom: var(--space-4); }
+.empty-state   { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); padding: var(--space-16); color: var(--color-text-muted); }
+.empty-icon    { font-size: 3rem; }
 
-/* Notes */
-.notes-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); margin-top: var(--space-4); box-shadow: var(--shadow-sm); }
-.notes-text { font-size: var(--text-base); color: var(--color-text); line-height: 1.7; max-width: none; }
+@media (max-width: 768px) {
+  .charts-row { grid-template-columns: 1fr; }
+}
 </style>
