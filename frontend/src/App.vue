@@ -141,7 +141,6 @@ const GROUPS_KEY = 'hr_nav_groups'
 const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
 
 function applyCollapsed() {
-  // Drives --sw, so the sidebar and the main content margin stay in sync.
   document.documentElement.setAttribute('data-sidebar', collapsed.value ? 'collapsed' : 'full')
 }
 applyCollapsed()
@@ -180,6 +179,11 @@ const pageTitle = computed(() => route.meta?.title || ({
   'product-timeline': 'Хронология партнёрств', 'product-summary': 'Сводка партнёрств',
   palette: 'Цветовая палитра', profile: 'Профиль',
   'data-entry': 'Данные месяца', benchmarks: 'Бенчмарки и цели',
+  // ---------- Technical Support ----------
+  'tp-dashboard':     'Техническая поддержка',
+  'tp-registry':      'Реестр данных ТП',
+  'tp-summary':       'Сводка ТП',
+  'tp-traffic-light': 'Светофор ТП',
 }[route.name] || ''))
 const themeIcon = computed(() => theme.value === 'dark' ? '☀' : '🌙')
 
@@ -194,6 +198,8 @@ const ic = {
   palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 000 20c1.1 0 2-.9 2-2 0-.5-.2-1-.6-1.4-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4A4.7 4.7 0 0022 12 10 10 0 0012 2z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
   target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
+  // ---------- Technical Support ----------
+  headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M3 18v-6a9 9 0 0118 0v6"/><path d="M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3zM3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3z"/></svg>',
 }
 
 // Nav items per module key. `need` gates an item behind a role capability.
@@ -214,6 +220,13 @@ const MODULE_NAV = {
     { to: '/product/timeline', label: 'Хронология', icon: ic.clock },
     { to: '/product/traffic-light', label: 'Светофор', icon: ic.light },
   ],
+  // ---------- Technical Support ----------
+  tech: [
+    { to: '/tp',               label: 'Дашборд ТП',    icon: ic.headset },
+    { to: '/tp/registry',      label: 'Реестр данных', icon: ic.list },
+    { to: '/tp/summary',       label: 'Сводка',        icon: ic.chart },
+    { to: '/tp/traffic-light', label: 'Светофор',      icon: ic.light, need: 'admin' },
+  ],
 }
 
 // Admin-only group; user management and the audit trail live here, not in the modules.
@@ -226,6 +239,8 @@ const ADMIN_NAV = [
 const FALLBACK_MODULES = [
   { key: 'hr', title: 'Служба персонала', subtitle: 'Персонал', icon: '📊', route_prefix: '/', sort_order: 0 },
   { key: 'project_product', title: 'Проектный и продуктовый офис', subtitle: 'Технологические партнёрства', icon: '🤝', route_prefix: '/product', sort_order: 1 },
+  // ---------- Technical Support ----------
+  { key: 'tech', title: 'Техническая поддержка', subtitle: 'Техподдержка', icon: '🎧', route_prefix: '/tp', sort_order: 2 },
 ]
 
 const ACCESS_LABELS = {
@@ -277,7 +292,6 @@ function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.setAttribute('data-theme', theme.value)
   localStorage.setItem('hr_theme', theme.value)
-  // The *-l background variants are derived per theme, so recompute them.
   palette.apply()
 }
 
@@ -289,8 +303,6 @@ async function loadShell() {
     // Badges degrade to none; the API stays the real gate.
   }
   try {
-    // An empty list is a legitimate answer for a user without access, so only
-    // an outright failure falls back to the built-in modules.
     modules.value = await api.get('/modules') || []
   } catch {
     modules.value = FALLBACK_MODULES
@@ -319,8 +331,7 @@ function logout() {
   router.push('/login')
 }
 
-// Which backend report the topbar button pulls, per route. Pages not listed here
-// fall back to the HR dashboard report.
+// Which backend report the topbar button pulls, per route.
 const PDF_REPORTS = {
   registry: ['registry', 'hr_registry'],
   summary: ['summary', 'hr_summary'],
@@ -329,6 +340,10 @@ const PDF_REPORTS = {
   'product-registry': ['partnerships', 'partnerships_registry'],
   'product-summary': ['partnerships-summary', 'partnerships_summary'],
   'product-timeline': ['partnerships', 'partnerships_timeline'],
+  // ---------- Technical Support ----------
+  'tp-dashboard':     ['tp', 'tp_dashboard'],
+  'tp-registry':      ['tp', 'tp_registry'],
+  'tp-summary':       ['tp-summary', 'tp_summary'],
 }
 
 async function exportPdf() {
