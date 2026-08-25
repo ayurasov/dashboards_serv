@@ -10,11 +10,14 @@ from .models import (
     User, Department, MonthRecord, EmployeeEvent, MetricDefinition, MetricValue,
     TrafficLightRule, Benchmark, RoleEnum, user_departments,
     DashboardModule, Partnership, ColorPalette, UserServiceAccess,
+    TpReportRow, TpSettings, TP_DATA_COLUMNS,
     SERVICES, SERVICE_KEYS
 )
 from .security import hash_password
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+# tp-report seed data lives two directories up from backend/app/
+TP_SEED_PATH = Path(__file__).resolve().parent.parent.parent / "tp-report" / "seed_data.json"
 
 DEPARTMENTS = [
     ("ИТ-служба", "IT"),
@@ -68,8 +71,8 @@ LEGACY_MODULE_KEYS = {"product_partnerships": "project_product"}
 # username -> [(service_key, access_level)]
 SERVICE_ACCESS = {
     "admin": [(key, "admin") for key in SERVICE_KEYS],
-    "hr_head": [("hr", "admin"), ("project_product", "read")],
-    "viewer": [("hr", "read"), ("project_product", "read")],
+    "hr_head": [("hr", "admin"), ("project_product", "read"), ("tech", "read")],
+    "viewer": [("hr", "read"), ("project_product", "read"), ("tech", "read")],
     "it_viewer": [("it", "read"), ("hr", "read")],
 }
 
@@ -297,6 +300,7 @@ def seed_all(db=None):
         _seed_service_access(db)
         _seed_palette(db)
         _seed_partnerships(db)
+        _seed_tp_rows(db)
 
         db.commit()
         print("Seed completed successfully.")
@@ -418,6 +422,38 @@ def _seed_partnerships(db):
             last_modified=_opt_date(r.get("last_modified")),
         ))
     db.flush()
+
+
+def _seed_tp_rows(db):
+    """Seed TP weekly rows from tp-report/seed_data.json.
+
+    Idempotent: skips import if any rows already exist in tp_report_rows.
+    The JSON is the canonical source exported from tp-report/data/tp_report.db.
+    """
+    if db.query(TpReportRow).first():
+        return
+
+    # Try the repo-level path first; fall back to DATA_DIR for Docker deployments
+    # where the tp-report directory may have been copied alongside backend/app/data/.
+    candidates = [
+        TP_SEED_PATH,
+        DATA_DIR / "tp_seed_data.json",
+    ]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        print("[seed] tp_seed_data.json not found — skipping TP rows.")
+        return
+
+    with path.open(encoding="utf-8") as f:
+        records = json.load(f)
+
+    for r in records:
+        kwargs = {col: r.get(col) for col in TP_DATA_COLUMNS}
+        kwargs["period"] = r.get("period") or ""
+        db.add(TpReportRow(**kwargs))
+
+    db.flush()
+    print(f"[seed] Loaded {len(records)} TP weekly rows from {path.name}.")
 
 
 if __name__ == "__main__":
