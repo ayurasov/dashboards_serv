@@ -1,231 +1,323 @@
 <template>
-  <div class="tp-registry">
-    <div class="page-header">
-      <h1>Реестр данных ТП</h1>
-      <div class="hd-actions" v-if="auth.canEdit">
-        <label class="btn btn-g">
-          <input type="file" accept=".csv" @change="importCsv" style="display:none">
-          📥 Импорт CSV
-        </label>
-        <button class="btn btn-p" @click="openCreate">+ Добавить строку</button>
+  <div v-if="loading" class="tempty">Загрузка…</div>
+  <template v-else>
+    <!-- ── Toolbar ── -->
+    <div class="filters">
+      <input class="srch" placeholder="Поиск по периоду…" v-model="f.search">
+
+      <select class="cfsel" v-model="f.year">
+        <option value="">Все годы</option>
+        <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+      </select>
+
+      <button class="btn btn-g" :disabled="!active.length" @click="reset">Сбросить</button>
+
+      <button v-if="canEdit" class="btn btn-p" @click="openNew">+ Строка</button>
+
+      <button class="btn btn-g" @click="doExport" title="Скачать CSV">↓ CSV</button>
+    </div>
+
+    <div class="tinfo">
+      Показано {{ filtered.length }} из {{ rows.length }}
+      <span v-if="active.length"> · фильтров: {{ active.length }}</span>
+    </div>
+
+    <!-- ── Table ── -->
+    <div class="twrap">
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr>
+              <th v-for="c in VISIBLE_COLS" :key="c.key" @click="setSort(c.key)">
+                {{ c.label }}<span class="smark">{{ sortMark(c.key) }}</span>
+              </th>
+              <th v-if="canEdit"></th>
+            </tr>
+            <!-- per-column filter row -->
+            <tr class="frow">
+              <th v-for="c in VISIBLE_COLS" :key="c.key">
+                <select v-if="c.key === 'year'" class="cfsel" v-model="f.year" @click.stop>
+                  <option value="">Все</option>
+                  <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+                </select>
+                <input v-else class="cfin" v-model="f[c.key]" :placeholder="'…'" @click.stop>
+              </th>
+              <th v-if="canEdit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in filtered" :key="r.id">
+              <td v-for="c in VISIBLE_COLS" :key="c.key" :class="tdClass(c, r)">
+                <span v-if="c.key === 'period'" class="sb s-period">{{ r.period || '—' }}</span>
+                <span v-else-if="c.traffic && trafficColor(c.key, r[c.key])" class="tl-dot" :class="'tl-' + trafficColor(c.key, r[c.key])"></span>
+                <span v-if="c.key !== 'period'">{{ fmt(c, r[c.key]) }}</span>
+              </td>
+              <td v-if="canEdit">
+                <button class="btn btn-g" style="font-size:.75rem;padding:2px 6px" @click="openEdit(r)">✎</button>
+              </td>
+            </tr>
+            <tr v-if="!filtered.length"><td :colspan="VISIBLE_COLS.length + (canEdit?1:0)" class="tempty">Нет данных</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="filter-bar">
-      <select v-model="filterYear">
-        <option value="">Все годы</option>
-        <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-      </select>
-      <input v-model="search" placeholder="Поиск по периоду…" class="fi" style="width:200px">
-    </div>
-
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Год</th><th>Неделя</th><th>Период</th>
-            <th>В работе</th><th>Доступность</th><th>Решено</th>
-            <th>Коэф.</th><th>AltOS ср.вр.</th><th>AltOffice ср.вр.</th>
-            <th v-if="auth.canEdit">Действия</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in filteredRows" :key="row.id">
-            <td>{{ row.year }}</td>
-            <td>{{ row.week }}</td>
-            <td>{{ row.period || '—' }}</td>
-            <td class="num">{{ fmt(row.total_in_work) }}</td>
-            <td class="num">{{ fmt(row.avail_total) }}</td>
-            <td class="num">{{ fmt(row.total_solved_week) }}</td>
-            <td class="num">{{ fmtDec(row.ratio_solved_received, 2) }}</td>
-            <td class="num">{{ fmt(row.altos_avg_time) }}</td>
-            <td class="num">{{ fmt(row.altoffice_avg_time) }}</td>
-            <td v-if="auth.canEdit" class="actions">
-              <button class="btn btn-g" @click="openEdit(row)">✏</button>
-              <button class="btn btn-g btn-danger" @click="confirmDelete(row)">🗑</button>
-            </td>
-          </tr>
-          <tr v-if="!filteredRows.length">
-            <td :colspan="auth.canEdit ? 10 : 9" style="text-align:center;color:var(--color-text-muted);padding:var(--space-8)">Нет данных</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Modal -->
+    <!-- ── Modal ── -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal=false">
-      <div class="modal" style="max-width:760px;max-height:85vh;overflow-y:auto">
+      <div class="modal modal-wide">
         <div class="mh">
-          <span class="mt">{{ editRow?.id ? 'Редактировать' : 'Добавить' }} строку</span>
+          <span class="mt">{{ editing?.id ? 'Редактировать строку' : 'Новая строка' }}</span>
           <button class="mc" @click="showModal=false">✕</button>
         </div>
-        <form @submit.prevent="saveRow">
-          <div class="form-grid">
-            <div class="fgi" v-for="col in formCols" :key="col.key">
-              <label class="fl">{{ col.label }}</label>
-              <input class="fi" :type="col.type || 'number'" v-model="form[col.key]" :step="col.step || 'any'" style="width:100%">
+
+        <!-- group fields -->
+        <div v-for="grp in FIELD_GROUPS" :key="grp.label" class="modal-group">
+          <div class="modal-group-title">{{ grp.label }}</div>
+          <div class="fg flex-wrap">
+            <div v-for="c in grp.cols" :key="c.key" class="fgi">
+              <label class="fl">{{ c.label }}</label>
+              <input class="fi" :type="c.key==='period'?'text':'number'" v-model="form[c.key]"
+                     :step="c.key.includes('ratio')?'0.01':'1'" :placeholder="c.label">
             </div>
           </div>
-          <div class="fac"><span></span>
-            <button type="button" class="btn btn-g" @click="showModal=false">Отмена</button>
-            <button type="submit" class="btn btn-p">Сохранить</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
 
-    <!-- Delete confirm -->
-    <div v-if="deleteTarget" class="modal-overlay" @click.self="deleteTarget=null">
-      <div class="modal modal-sm">
-        <div class="mh"><span class="mt">Удалить строку?</span><button class="mc" @click="deleteTarget=null">✕</button></div>
-        <p style="padding:var(--space-4);color:var(--color-text-muted)">Неделя {{ deleteTarget.week }}, {{ deleteTarget.year }} г. Это действие нельзя отменить.</p>
-        <div class="fac" style="padding:var(--space-4)">
-          <span></span>
-          <button class="btn btn-g" @click="deleteTarget=null">Отмена</button>
-          <button class="btn btn-p btn-danger" @click="doDelete">Удалить</button>
+        <div class="fac" style="margin-top:16px">
+          <button v-if="editing?.id" class="btn btn-d" @click="deleteRow">Удалить</button>
+          <div class="right">
+            <button class="btn btn-g" @click="showModal=false">Отмена</button>
+            <button class="btn btn-p" @click="saveRow">Сохранить</button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </template>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { tpApi } from '../../api/tp.js'
 import { useAuthStore } from '../../stores/auth.js'
-import { toastOk } from '../../composables/useToast.js'
+import { useTableFilters, textMatch } from '../../composables/useTableFilters.js'
 
 const auth = useAuthStore()
-const rows = ref([])
-const loading = ref(false)
-const filterYear = ref('')
-const search = ref('')
+const canEdit = computed(() => auth.canEdit)
+const loading = ref(true)
+const rows    = ref([])
+const traffic = ref({})
 const showModal = ref(false)
-const editRow = ref(null)
-const deleteTarget = ref(null)
-const form = ref({})
+const editing   = ref(null)
+const form      = ref({})
 
-const years = computed(() => [...new Set(rows.value.map(r => r.year))].sort((a, b) => a - b))
-const filteredRows = computed(() => {
-  let r = [...rows.value].sort((a, b) => a.year - b.year || a.week - b.week)
-  if (filterYear.value !== '') r = r.filter(x => x.year === Number(filterYear.value))
-  if (search.value) r = r.filter(x => String(x.period || '').toLowerCase().includes(search.value.toLowerCase()))
-  return r
-})
-
-const formCols = [
-  { key: 'year', label: 'Год', step: '1' }, { key: 'week', label: 'Неделя', step: '1' },
-  { key: 'period', label: 'Период', type: 'text' },
-  { key: 'total_in_work', label: 'В работе' }, { key: 'avail_total', label: 'Доступность (всего)' },
-  { key: 'rushydro_hours', label: 'РусГидро, ч.' }, { key: 'transneft_hours', label: 'Транснефть, ч.' },
-  { key: 'roscosmos_hours', label: 'Роскосмос, ч.' }, { key: 'bryansk_hours', label: 'Брянск, ч.' },
-  { key: 'mchs_hours', label: 'МЧС, ч.' }, { key: 'internal_sales_hours', label: 'Внутр. продажи, ч.' },
-  { key: 'new_received', label: 'Новых получено' }, { key: 'renewed', label: 'Возобновлено' },
-  { key: 'ratio_solved_received', label: 'Коэф. решения' },
-  { key: 'altos_rusg_email', label: 'AltOS РусГ Email' }, { key: 'altos_rusg_tf', label: 'AltOS РусГ TF' },
-  { key: 'altos_other_email', label: 'AltOS Other Email' }, { key: 'altos_other_tf', label: 'AltOS Other TF' },
-  { key: 'altoffice_rusg_email', label: 'AltOffice РусГ Email' }, { key: 'altoffice_rusg_tf', label: 'AltOffice РусГ TF' },
-  { key: 'altoffice_other_email', label: 'AltOffice Other Email' }, { key: 'altoffice_other_tf', label: 'AltOffice Other TF' },
-  { key: 'projserver_taken', label: 'ПС Принято' }, { key: 'projserver_solved', label: 'ПС Решено' }, { key: 'projserver_avail', label: 'ПС Доступность' },
-  { key: 'total_solved_week', label: 'Решено за неделю' },
-  { key: 'altos_avg_time', label: 'AltOS ср. время' }, { key: 'altos_total', label: 'AltOS Всего' },
-  { key: 'altos_1_2line', label: 'AltOS 1-2 лин.' }, { key: 'altos_3line', label: 'AltOS 3 лин.' },
-  { key: 'altoffice_avg_time', label: 'AltOffice ср. время' }, { key: 'altoffice_total', label: 'AltOffice Всего' },
-  { key: 'altoffice_1_2line', label: 'AltOffice 1-2 лин.' }, { key: 'altoffice_3line', label: 'AltOffice 3 лин.' },
-  { key: 'altos_avail_total', label: 'AltOS Дост. всего' }, { key: 'altos_avail_1_3', label: 'AltOS 1-3 дн.' },
-  { key: 'altos_avail_4_7', label: 'AltOS 4-7 дн.' }, { key: 'altos_avail_8_10', label: 'AltOS 8-10 дн.' },
-  { key: 'altoffice_avail_total', label: 'AltOffice Дост. всего' }, { key: 'altoffice_avail_1_3', label: 'AltOffice 1-3 дн.' },
-  { key: 'altoffice_avail_4_7', label: 'AltOffice 4-7 дн.' }, { key: 'altoffice_avail_8_10', label: 'AltOffice 8-10 дн.' },
-  { key: 'extra', label: 'Доп. данные', type: 'text' },
+// ── Column definitions (matches DATA_COLUMNS in app.py) ──────────────────────
+const ALL_COLS = [
+  { key:'year',                label:'Год',                          group:'base' },
+  { key:'week',                label:'Неделя',                       group:'base' },
+  { key:'period',              label:'Период',                       group:'base' },
+  { key:'total_in_work',       label:'В работе (всего)',             group:'load',   traffic:true },
+  { key:'avail_total',         label:'Доступность (всего)',          group:'load',   traffic:true },
+  { key:'new_received',        label:'Новых получено',               group:'load',   traffic:true },
+  { key:'renewed',             label:'Возобновлено',                 group:'load' },
+  { key:'ratio_solved_received',label:'Коэф. решения',              group:'load',   traffic:true },
+  { key:'total_solved_week',   label:'Решено за неделю',            group:'load',   traffic:true },
+  { key:'rushydro_hours',      label:'РусГидро (ч)',                group:'clients' },
+  { key:'transneft_hours',     label:'Транснефть (ч)',              group:'clients' },
+  { key:'roscosmos_hours',     label:'Роскосмос (ч)',               group:'clients' },
+  { key:'bryansk_hours',       label:'Брянск (ч)',                  group:'clients' },
+  { key:'mchs_hours',          label:'МЧС (ч)',                     group:'clients' },
+  { key:'internal_sales_hours',label:'Internal Sales (ч)',          group:'clients' },
+  { key:'altos_avg_time',      label:'AltOS ср.время (ч)',          group:'altos',  traffic:true },
+  { key:'altos_total',         label:'AltOS всего',                 group:'altos' },
+  { key:'altos_1_2line',       label:'AltOS 1-2 линия',            group:'altos' },
+  { key:'altos_3line',         label:'AltOS 3 линия',              group:'altos' },
+  { key:'altos_avail_total',   label:'AltOS дост. всего',          group:'altos',  traffic:true },
+  { key:'altos_avail_1_3',     label:'AltOS дост. 1-3',            group:'altos' },
+  { key:'altos_avail_4_7',     label:'AltOS дост. 4-7',            group:'altos' },
+  { key:'altos_avail_8_10',    label:'AltOS дост. 8-10',           group:'altos' },
+  { key:'altos_rusg_email',    label:'AltOS РусГ email',           group:'altos' },
+  { key:'altos_rusg_tf',       label:'AltOS РусГ TF',              group:'altos' },
+  { key:'altos_other_email',   label:'AltOS прочие email',         group:'altos' },
+  { key:'altos_other_tf',      label:'AltOS прочие TF',            group:'altos' },
+  { key:'altoffice_avg_time',  label:'AltOffice ср.время (ч)',     group:'altoffice', traffic:true },
+  { key:'altoffice_total',     label:'AltOffice всего',            group:'altoffice' },
+  { key:'altoffice_1_2line',   label:'AltOffice 1-2 линия',       group:'altoffice' },
+  { key:'altoffice_3line',     label:'AltOffice 3 линия',         group:'altoffice' },
+  { key:'altoffice_avail_total',label:'AltOffice дост. всего',    group:'altoffice', traffic:true },
+  { key:'altoffice_avail_1_3', label:'AltOffice дост. 1-3',       group:'altoffice' },
+  { key:'altoffice_avail_4_7', label:'AltOffice дост. 4-7',       group:'altoffice' },
+  { key:'altoffice_avail_8_10',label:'AltOffice дост. 8-10',      group:'altoffice' },
+  { key:'altoffice_rusg_email',label:'AltOffice РусГ email',      group:'altoffice' },
+  { key:'altoffice_rusg_tf',   label:'AltOffice РусГ TF',         group:'altoffice' },
+  { key:'altoffice_other_email',label:'AltOffice прочие email',   group:'altoffice' },
+  { key:'altoffice_other_tf',  label:'AltOffice прочие TF',       group:'altoffice' },
+  { key:'projserver_taken',    label:'ProjServer принято',        group:'projserver' },
+  { key:'projserver_solved',   label:'ProjServer решено',         group:'projserver' },
+  { key:'projserver_avail',    label:'ProjServer доступность',    group:'projserver' },
+  { key:'extra',               label:'Доп. данные',               group:'extra' },
 ]
 
-function fmt(v) { return v != null ? Number(v).toLocaleString('ru-RU') : '—' }
-function fmtDec(v, d) { return v != null ? Number(v).toFixed(d) : '—' }
+// Columns shown in the table (compact view — base + key metrics)
+const VISIBLE_KEYS = ['year','week','period','total_in_work','avail_total','new_received',
+  'ratio_solved_received','total_solved_week','altos_avg_time','altoffice_avg_time']
+const VISIBLE_COLS = ALL_COLS.filter(c => VISIBLE_KEYS.includes(c.key))
 
-function openCreate() {
-  editRow.value = null
+// Modal field groups
+const FIELD_GROUPS = [
+  { label: 'Базовые', cols: ALL_COLS.filter(c => c.group === 'base') },
+  { label: 'Нагрузка', cols: ALL_COLS.filter(c => c.group === 'load') },
+  { label: 'Клиенты (часы)', cols: ALL_COLS.filter(c => c.group === 'clients') },
+  { label: 'AltOS', cols: ALL_COLS.filter(c => c.group === 'altos') },
+  { label: 'AltOffice', cols: ALL_COLS.filter(c => c.group === 'altoffice') },
+  { label: 'ProjServer', cols: ALL_COLS.filter(c => c.group === 'projserver') },
+  { label: 'Прочее', cols: ALL_COLS.filter(c => c.group === 'extra') },
+]
+
+const DEFAULTS = { search: '', year: '' }
+for (const c of VISIBLE_COLS) DEFAULTS[c.key] = ''
+
+const { f, setSort, sortMark, reset, active, sortRows } =
+  useTableFilters(DEFAULTS, { sortKey: 'year', sortDir: 'desc' })
+
+const yearOptions = computed(() =>
+  [...new Set(rows.value.map(r => r.year).filter(Boolean))].sort((a, b) => b - a))
+
+const filtered = computed(() => {
+  const list = rows.value.filter(r => {
+    if (f.year && String(r.year) !== String(f.year)) return false
+    if (f.search && !textMatch(String(r.period || ''), f.search)) return false
+    for (const c of VISIBLE_COLS) {
+      if (c.key === 'year' || c.key === 'period') continue
+      if (f[c.key] && !textMatch(String(r[c.key] ?? ''), f[c.key])) return false
+    }
+    return true
+  })
+  return sortRows(list)
+})
+
+function fmt(col, val) {
+  if (val == null || val === '') return '—'
+  if (col.key === 'ratio_solved_received') return Number(val).toFixed(2)
+  if (col.key === 'year' || col.key === 'week') return String(Math.round(val))
+  if (typeof val === 'number') return Number.isInteger(val) ? val : val.toFixed(1)
+  return val
+}
+
+function tdClass(col, row) {
+  const classes = ['td-muted']
+  if (col.key === 'year' || col.key === 'week') classes.push('td-num')
+  return classes
+}
+
+function trafficColor(key, val) {
+  const rule = traffic.value[key]
+  if (!rule || !rule.enabled || val == null) return null
+  const v = Number(val)
+  if (rule.direction === 'less') {
+    if (v <= rule.green) return 'green'
+    if (v <= rule.yellow) return 'yellow'
+    return 'red'
+  } else {
+    if (v >= rule.green) return 'green'
+    if (v >= rule.yellow) return 'yellow'
+    return 'red'
+  }
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const [r, s] = await Promise.all([tpApi.rows(), tpApi.getSetting('traffic_rules')])
+    rows.value = r
+    traffic.value = s || {}
+  } finally { loading.value = false }
+}
+
+function openNew() {
+  editing.value = {}
   form.value = {}
+  ALL_COLS.forEach(c => { form.value[c.key] = '' })
   showModal.value = true
 }
-function openEdit(row) {
-  editRow.value = row
-  form.value = { ...row }
+
+function openEdit(r) {
+  editing.value = { ...r }
+  form.value = { ...r }
   showModal.value = true
 }
-function confirmDelete(row) { deleteTarget.value = row }
+
+function payload() {
+  const p = {}
+  ALL_COLS.forEach(c => {
+    const v = form.value[c.key]
+    p[c.key] = (c.key === 'period') ? (v || null) : (v === '' || v == null ? null : Number(v))
+  })
+  return p
+}
 
 async function saveRow() {
   try {
-    if (editRow.value?.id) {
-      await tpApi.updateRow(editRow.value.id, form.value)
-      toastOk('Строка обновлена')
+    if (editing.value?.id) {
+      await tpApi.updateRow(editing.value.id, payload())
     } else {
-      await tpApi.createRow(form.value)
-      toastOk('Строка добавлена')
+      await tpApi.createRow(payload())
     }
+    await load()
     showModal.value = false
-    rows.value = await tpApi.getRows()
-  } catch (e) { alert('Ошибка: ' + e.message) }
+  } catch { /* toast handled by client */ }
 }
 
-async function doDelete() {
+async function deleteRow() {
+  if (!confirm('Удалить строку?')) return
   try {
-    await tpApi.deleteRow(deleteTarget.value.id)
-    toastOk('Строка удалена')
-    deleteTarget.value = null
-    rows.value = await tpApi.getRows()
-  } catch (e) { alert('Ошибка: ' + e.message) }
+    await tpApi.deleteRow(editing.value.id)
+    await load()
+    showModal.value = false
+  } catch { /* toast handled by client */ }
 }
 
-async function importCsv(e) {
-  const file = e.target.files[0]
-  if (!file) return
-  const text = await file.text()
-  const lines = text.trim().split('\n')
-  const headers = lines[0].split(';').map(h => h.trim().replace(/^"|"+$/g, ''))
-  const rowsData = lines.slice(1).map(line => {
-    const vals = line.split(';').map(v => v.trim().replace(/^"|"+$/g, ''))
-    const obj = {}
-    headers.forEach((h, i) => { obj[h] = vals[i] === '' ? null : isNaN(vals[i]) ? vals[i] : Number(vals[i]) })
-    return obj
-  })
-  try {
-    const res = await tpApi.bulkImport(rowsData)
-    toastOk(`Импортировано: ${res.imported}, пропущено: ${res.skipped}`)
-    rows.value = await tpApi.getRows()
-  } catch (e) { alert('Ошибка импорта: ' + e.message) }
-  e.target.value = ''
+async function doExport() {
+  const url = `/api/tp/export`
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'tp_report.csv'
+  a.click()
 }
 
-onMounted(async () => { rows.value = await tpApi.getRows() })
+onMounted(load)
 </script>
 
 <style scoped>
-.tp-registry { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-5); }
-.page-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
-.page-header h1 { font-size: var(--text-xl); font-weight: 700; }
-.hd-actions { display: flex; gap: var(--space-2); }
-.filter-bar { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
-.filter-bar select, .filter-bar .fi { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--text-sm); }
-.table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
-.data-table { width: 100%; font-size: var(--text-sm); }
-.data-table th { background: var(--color-surface-offset); padding: var(--space-3) var(--space-3); text-align: left; font-weight: 600; white-space: nowrap; border-bottom: 1px solid var(--color-border); }
-.data-table td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-divider); }
-.data-table tr:last-child td { border-bottom: none; }
-.data-table tr:hover td { background: var(--color-surface-offset); }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-.actions { display: flex; gap: var(--space-1); white-space: nowrap; }
-.btn-danger { color: var(--color-error) !important; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); padding: var(--space-4); }
-.modal-overlay { position: fixed; inset: 0; background: oklch(0 0 0 / .4); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: var(--space-4); }
-.modal { background: var(--color-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: 100%; }
-.modal-sm { max-width: 420px; }
-.mh { display: flex; justify-content: space-between; align-items: center; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
-.mt { font-weight: 600; font-size: var(--text-lg); }
-.mc { background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--color-text-muted); padding: var(--space-1); }
-.fgi { display: flex; flex-direction: column; gap: var(--space-1); }
-.fl { font-size: var(--text-xs); font-weight: 500; color: var(--color-text-muted); }
-.fi { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text); font-size: var(--text-sm); }
-.fac { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-4); border-top: 1px solid var(--color-border); }
+.modal-wide { max-width: 860px; }
+.modal-group { margin-top: 14px; }
+.modal-group-title {
+  font-size: var(--text-xs, .75rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--color-muted, #888);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+.flex-wrap { flex-wrap: wrap; gap: 8px; }
+.fgi { min-width: 180px; flex: 1 1 180px; }
+.tl-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.tl-green  { background: #22c55e; }
+.tl-yellow { background: #eab308; }
+.tl-red    { background: #ef4444; }
+.s-period {
+  background: var(--color-primary-highlight, #e0f2fe);
+  color: var(--color-primary, #0369a1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: .75rem;
+  font-weight: 600;
+}
+.td-num { font-variant-numeric: tabular-nums; }
 </style>
