@@ -2,14 +2,29 @@
   <div class="tp-dashboard">
     <div class="page-header">
       <h1>Техническая поддержка</h1>
-      <div class="period-selector">
-        <select v-model="selectedYear" @change="onPeriodChange">
+
+      <div class="tp-filterbar">
+        <div class="chip-row">
+          <button
+            v-for="q in quickPeriods"
+            :key="q.val"
+            class="qchip"
+            :class="{ active: quickPeriod === q.val }"
+            type="button"
+            @click="setQuickPeriod(q.val)"
+          >{{ q.label }}</button>
+        </div>
+
+        <select class="fsel" v-model="selectedYear" @change="onYearChange">
+          <option :value="null">Все годы</option>
           <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
         </select>
-        <select v-model="selectedWeek">
+        <select class="fsel" v-model="selectedWeek" @change="onWeekChange">
           <option value="">Все недели</option>
           <option v-for="w in weeks" :key="w" :value="w">Неделя {{ w }}</option>
         </select>
+
+        <button class="btn btn-g" type="button" @click="resetFilters">Сбросить</button>
       </div>
     </div>
 
@@ -155,8 +170,18 @@ const trafficRules = ref({})
 const loading = ref(false)
 const selectedYear = ref(null)
 const selectedWeek = ref('')
+const quickPeriod = ref('all')
 const chartCanvas = ref(null)
 let chartInstance = null
+
+const quickPeriods = [
+  { label: 'Две недели', val: 2 },
+  { label: 'Месяц', val: 4 },
+  { label: '8 недель', val: 8 },
+  { label: '13 недель', val: 13 },
+  { label: 'Полгода', val: 26 },
+  { label: 'Всё время', val: 'all' },
+]
 
 const years = computed(() => [...new Set(rows.value.map(r => r.year))].sort((a, b) => a - b))
 const weeks = computed(() => {
@@ -174,11 +199,14 @@ const filteredRows = computed(() => {
   let r = sortedRows.value
   if (selectedYear.value) r = r.filter(x => x.year === selectedYear.value)
   if (selectedWeek.value !== '') r = r.filter(x => x.week === Number(selectedWeek.value))
+  if (quickPeriod.value !== 'all' && !selectedYear.value && selectedWeek.value === '') {
+    r = r.slice(-quickPeriod.value)
+  }
   return r
 })
 
 const currentRow = computed(() => filteredRows.value[filteredRows.value.length - 1] ?? null)
-const chartData = computed(() => sortedRows.value.slice(-20))
+const chartData = computed(() => filteredRows.value.slice(-20))
 
 const clientCols = [
   { key: 'rushydro_hours', label: 'РусГидро' },
@@ -207,7 +235,24 @@ function trafficClass(key, value) {
   }
 }
 
-function onPeriodChange() {
+function setQuickPeriod(val) {
+  quickPeriod.value = val
+  selectedYear.value = null
+  selectedWeek.value = ''
+}
+
+function onYearChange() {
+  selectedWeek.value = ''
+  if (selectedYear.value) quickPeriod.value = 'custom'
+}
+
+function onWeekChange() {
+  if (selectedWeek.value !== '') quickPeriod.value = 'custom'
+}
+
+function resetFilters() {
+  quickPeriod.value = 'all'
+  selectedYear.value = null
   selectedWeek.value = ''
 }
 
@@ -217,9 +262,6 @@ async function loadAll() {
     const [r, tr] = await Promise.all([tpApi.getRows(), tpApi.getSetting('traffic_rules')])
     rows.value = r
     trafficRules.value = tr
-    if (!selectedYear.value && years.value.length) {
-      selectedYear.value = years.value[years.value.length - 1]
-    }
   } catch (e) {
     console.error('TP load error', e)
   } finally {
@@ -257,10 +299,20 @@ onMounted(loadAll)
 
 <style scoped>
 .tp-dashboard { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-5); }
-.page-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
-.page-header h1 { font-size: var(--text-xl); font-weight: 700; }
-.period-selector { display: flex; gap: var(--space-2); }
-.period-selector select { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--text-sm); }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--space-3); }
+.page-header h1 { font-size: var(--text-xl); font-weight: 700; white-space: nowrap; }
+
+.tp-filterbar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.qchip { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); transition: all var(--transition-interactive); white-space: nowrap; }
+.qchip:hover { background: var(--color-surface-offset); color: var(--color-text); }
+.qchip.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.tp-filterbar select.fsel { min-width: 110px; }
+
+@media (max-width: 900px) {
+  .page-header { flex-direction: column; align-items: stretch; }
+  .tp-filterbar { justify-content: flex-start; margin-left: 0; }
+}
 
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: var(--space-3); }
 .kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); text-align: center; position: relative; overflow: hidden; }
