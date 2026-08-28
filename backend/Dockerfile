@@ -1,21 +1,21 @@
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: build Vue.js frontend
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS frontend-builder
 
-WORKDIR /app/frontend
+WORKDIR /build/frontend
 
 COPY frontend/package*.json ./
 RUN npm ci --prefer-offline
 
 COPY frontend/ ./
 RUN npm run build
-# Output: /app/frontend/dist
+# Output: /build/frontend/dist
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Python backend + serve built SPA
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS backend
 
 # System deps: curl for healthcheck
@@ -31,12 +31,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Application source
 COPY backend/ ./backend/
 
-# Copy compiled frontend into the place FastAPI expects (FRONTEND_DIST in main.py)
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
+# Built frontend dist — FastAPI main.py resolves:
+#   FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+# which under /app equals /app/frontend/dist
+COPY --from=frontend-builder /build/frontend/dist ./frontend/dist/
 
-# Copy tp-report seed data so _seed_tp_rows() can find it under DATA_DIR
-# If tp-report/seed_data.json doesn't exist yet, the COPY is a no-op warning; seed skips gracefully.
-COPY tp-report/seed_data.json ./backend/app/data/tp_seed_data.json 2>/dev/null || true
+# TP seed data: seed.py looks for DATA_DIR/tp_seed_data.json as Docker fallback.
+# The file must exist in the repo at tp-report/seed_data.json.
+# If it is absent, remove this line — seed.py skips TP rows gracefully.
+COPY tp-report/seed_data.json ./backend/app/data/tp_seed_data.json
 
 # Persistent SQLite volume mount point
 RUN mkdir -p /data

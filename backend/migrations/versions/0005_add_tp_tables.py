@@ -1,20 +1,19 @@
 """Add tp_report_rows and tp_settings tables.
 
 Revision ID: 0005_add_tp_tables
-Revises: (previous head)
+Revises:     0001_initial_schema
 Create Date: 2026-08-25
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = '0005_add_tp_tables'
-down_revision = None   # set to the actual previous revision ID if known
+down_revision = '0001_initial_schema'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # tp_report_rows ----------------------------------------------------------
     op.create_table(
         'tp_report_rows',
         sa.Column('id',   sa.Integer(), primary_key=True, autoincrement=True),
@@ -65,7 +64,6 @@ def upgrade() -> None:
         sa.Column('updated_at',  sa.DateTime(), nullable=True),
     )
 
-    # tp_settings -------------------------------------------------------------
     op.create_table(
         'tp_settings',
         sa.Column('key',   sa.String(80), primary_key=True),
