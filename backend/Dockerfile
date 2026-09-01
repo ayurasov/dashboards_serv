@@ -6,8 +6,12 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /build/frontend
 
 COPY frontend/package.json ./
-# Avoid the corrupted/stale lockfile while the image is built.
-RUN npm install --no-package-lock --prefer-online --no-audit --no-fund
+# package-lock.json currently contains invalid integrity metadata for Chart.js.
+# Install directly from the registry and disable npm's local cache so a corrupted
+# tarball cannot be reused across Docker builds.
+RUN npm cache clean --force \
+    && npm install --no-package-lock --prefer-online --cache /tmp/npm-cache --no-audit --no-fund \
+    && npm cache clean --force
 
 COPY frontend/ ./
 RUN npm run build
