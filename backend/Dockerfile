@@ -5,10 +5,9 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /build/frontend
 
-COPY frontend/package*.json ./
-# npm install intentionally used here because the repository's lockfile may lag
-# package.json during feature integration; it repairs the lock graph in the image.
-RUN npm install --prefer-offline --no-audit --no-fund
+COPY frontend/package.json ./
+# Avoid the corrupted/stale lockfile while the image is built.
+RUN npm install --no-package-lock --prefer-online --no-audit --no-fund
 
 COPY frontend/ ./
 RUN npm run build
