@@ -53,7 +53,7 @@ input,select,textarea{font:inherit;color:inherit}
 .topbar-row{min-height:56px;padding:var(--sp2) 0;display:flex;align-items:center;gap:var(--sp4)}
 .topbar-head{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .topbar-title{font-size:1.0625rem;font-weight:700;letter-spacing:-.02em}
-.topbar-sub{font-size:.75rem;color:var(--c-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar-sub{font-size:.75rem;color:var(--c-muted);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .topbar-actions{display:flex;gap:var(--sp2);align-items:center}
 .btn{display:inline-flex;align-items:center;gap:var(--sp2);padding:var(--sp2) var(--sp3);border-radius:var(--r1);font-size:.8125rem;font-weight:500;transition:background .16s,box-shadow .16s;border:1px solid transparent;white-space:nowrap}
 .btn-p{background:var(--c-red);color:#fff}.btn-p:hover{background:var(--c-red-h);box-shadow:var(--sh1)}

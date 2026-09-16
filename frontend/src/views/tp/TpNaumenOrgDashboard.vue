@@ -3,11 +3,7 @@
   <div v-else class="tp-dash">
 
     <div class="tp-head">
-      <div class="tp-head-l">
-        <h1 class="tp-title">Сводная аналитика процессов ТП</h1>
-        <div class="tp-sub">Сопоставление отчёта ТП и заявок Naumen {{ mode === 'week' ? 'по ISO-неделям' : 'по месяцам' }} · {{ all.length }} {{ unit(all.length) }}</div>
-      </div>
-      <div class="tp-filters">
+            <div class="tp-filters">
         <div class="tp-f-row">
           <span class="fl">Разрядность</span>
           <div class="chip-row">
@@ -274,17 +270,17 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-head-l{min-width:260px;}
 .tp-title{font-size:1.25rem;font-weight:700;letter-spacing:-.02em;}
 .tp-sub{font-size:.8125rem;color:var(--c-muted);margin-top:2px;}
-.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:column;gap:var(--sp3);min-width:300px;flex:1;max-width:480px;}
-.tp-f-row{display:flex;flex-direction:column;gap:var(--sp1);}
-.tp-f-controls{flex-direction:row;gap:var(--sp3);align-items:flex-end;flex-wrap:wrap;}
-.tp-f-col{display:flex;flex-direction:column;gap:var(--sp1);min-width:130px;flex:1;}
-.tp-f-col .fsel{width:100%;}
+.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--sp2) var(--sp5);min-width:0;flex:1 1 100%;max-width:100%;}
+.tp-f-row{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:var(--sp1) var(--sp3);}
+.tp-f-controls{gap:var(--sp3) var(--sp4);align-items:center;}
+.tp-f-col{display:flex;flex-direction:row;align-items:center;gap:var(--sp1);min-width:0;flex:0 0 auto;}
+.tp-f-col .fsel{width:auto;}
 .tp-f-meta{font-size:.75rem;color:var(--c-faint);}
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
 .chip{padding:4px 10px;border-radius:99px;border:1px solid var(--c-div);background:var(--c-surf2);font-size:.75rem;cursor:pointer;transition:all .15s;user-select:none;color:var(--c-muted);font-weight:500;}
 .chip.active{background:var(--c-red);color:#fff;border-color:var(--c-red);}
 .chip:hover:not(.active){background:var(--c-off);color:var(--c-txt);}
-.tp-f-bottom{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);}
+.tp-f-bottom{display:flex;align-items:center;gap:var(--sp3);margin-left:auto;}
 .tp-section{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;margin:var(--sp8) 0 var(--sp4);display:flex;align-items:center;gap:var(--sp3);}
 .tp-section:first-of-type{margin-top:0;}
 .tp-tag{font-size:.6875rem;font-weight:600;color:var(--c-muted);background:var(--c-off);padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;}
@@ -293,6 +289,6 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-badge-mid::before{background:var(--c-warn);}
 .tp-table-tools{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);padding:var(--sp3) var(--sp4);font-size:.75rem;flex-wrap:wrap;}
 .tscroll{max-height:540px;overflow-y:auto;}
-.kpi-val{font-size:clamp(1.9rem, 1.5rem + 1.6vw, 2.7rem);}
+.kpi-val{font-size:clamp(1.75rem, 1.4rem + 1vw, 2.15rem);}
 @media(max-width:1100px){.tp-head{flex-direction:column;}.tp-filters{max-width:100%;}}
 </style>

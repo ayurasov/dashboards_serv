@@ -2,16 +2,8 @@
   <div v-if="loading" class="tempty">Загрузка…</div>
   <div v-else class="tp-dash">
 
-    <!-- Page header + filters block (top-right) -->
+    <!-- Filters block (full width) -->
     <div class="tp-head">
-      <div class="tp-head-l">
-        <h1 class="tp-title">Отчёт технической поддержки по неделям</h1>
-        <div class="tp-sub">Заявки, трудозатраты по клиентам, AlterOS / AlterOffice / Project Server · {{ yearsLabel }}</div>
-        <div v-if="clientInfo" class="tp-client-note">
-          Активен фильтр по клиенту: {{ clientInfo.label }} — влияет на все графики и таблицу ниже
-        </div>
-      </div>
-
       <div class="tp-filters">
         <div class="tp-f-row">
           <span class="fl">Быстрый период</span>
@@ -66,6 +58,10 @@
         </details>
       </div>
     </div>
+
+            <div v-if="clientInfo" class="tp-client-note">
+              Активен фильтр по клиенту: {{ clientInfo.label }} — влияет на все графики и таблицу ниже
+            </div>
 
     <!-- Traffic light -->
     <template v-if="blockSettings.traffic">
@@ -771,12 +767,12 @@ onUnmounted(() => { destroyAll(); themeObserver?.disconnect() })
 .tp-title{font-size:1.25rem;font-weight:700;letter-spacing:-.02em;}
 .tp-sub{font-size:.8125rem;color:var(--c-muted);margin-top:2px;}
 .tp-client-note{font-size:.8125rem;color:var(--c-red);font-weight:600;margin-top:var(--sp3);background:var(--c-red-l);padding:var(--sp2) var(--sp4);border-radius:var(--r2);display:inline-block;}
-.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:column;gap:var(--sp3);min-width:360px;flex:1;max-width:720px;}
-.tp-f-row{display:flex;flex-direction:column;gap:var(--sp1);}
-.tp-f-controls{flex-direction:row;gap:var(--sp3);align-items:flex-end;flex-wrap:wrap;}
-.tp-f-col{display:flex;flex-direction:column;gap:var(--sp1);min-width:150px;flex:1;}
-.tp-f-col .fsel{width:100%;}
-.tp-f-bottom{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);}
+.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--sp2) var(--sp5);min-width:0;flex:1 1 100%;max-width:100%;}
+.tp-f-row{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:var(--sp1) var(--sp3);}
+.tp-f-controls{gap:var(--sp3) var(--sp4);align-items:center;}
+.tp-f-col{display:flex;flex-direction:row;align-items:center;gap:var(--sp1);min-width:0;flex:0 0 auto;}
+.tp-f-col .fsel{width:auto;}
+.tp-f-bottom{display:flex;align-items:center;gap:var(--sp3);margin-left:auto;}
 .tp-f-meta{font-size:.75rem;color:var(--c-faint);}
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
 .chip{padding:4px 10px;border-radius:99px;border:1px solid var(--c-div);background:var(--c-surf2);font-size:.75rem;cursor:pointer;transition:all .15s;user-select:none;color:var(--c-muted);font-weight:500;}
@@ -793,7 +789,7 @@ onUnmounted(() => { destroyAll(); themeObserver?.disconnect() })
 .tp-traffic-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--sp4);margin-bottom:var(--sp6);}
 .tp-traffic-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp3);margin-bottom:var(--sp3);}
 .tp-traffic-title{font-weight:600;font-size:.8125rem;}
-.tp-traffic-value{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;}
+.tp-traffic-value{font-size:clamp(1.75rem, 1.4rem + 1vw, 2.15rem);font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;}
 .tp-traffic-meta{font-size:.75rem;color:var(--c-muted);}
 .light-dot{width:14px;height:14px;margin-top:4px;}
 .tp-badge-mid{background:var(--c-warn-l);color:var(--c-warn);}

@@ -180,11 +180,11 @@ const pageTitle = computed(() => route.meta?.title || ({
   palette: 'Цветовая палитра', profile: 'Профиль',
   'data-entry': 'Данные месяца', benchmarks: 'Бенчмарки и цели',
   // ---------- Technical Support ----------
-  'tp-dashboard':     'Дашборд',
+  'tp-dashboard':     'Отчёт техническной поддержки (Заявки, трудозатраты по клиентам, АльтерОС / АльтерОфис / Project Server)',
   'tp-registry':      'Реестр данных ТП',
   'tp-summary':       'Сводка ТП',
-  'tp-naumen':        'Аналитика Naumen',
-  'tp-naumen-org':    'Naumen — по организациям',
+  'tp-naumen':        'Аналитика заявок Naumen (регистрация, решения, просрочки, возобновления, время обработки)',
+  'tp-naumen-org':    'Сводная аналитка процессов ТП (отчёт ТП vs заявки Naumen)',
   'tp-traffic-light': 'Светофор ТП',
 }[route.name] || ''))
 const themeIcon = computed(() => theme.value === 'dark' ? '☀' : '🌙')

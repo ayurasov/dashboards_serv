@@ -16,11 +16,7 @@
   <div v-else class="tp-dash">
 
     <div class="tp-head">
-      <div class="tp-head-l">
-        <h1 class="tp-title">Аналитика заявок Naumen</h1>
-        <div class="tp-sub">Экспорт SD: Импортозамещение (AlterOS) · {{ periodLabel }}</div>
-      </div>
-      <div class="tp-filters">
+            <div class="tp-filters">
         <div class="tp-f-row">
           <span class="fl">Быстрый период</span>
           <div class="chip-row">
@@ -316,12 +312,12 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-head-l{min-width:260px;}
 .tp-title{font-size:1.25rem;font-weight:700;letter-spacing:-.02em;}
 .tp-sub{font-size:.8125rem;color:var(--c-muted);margin-top:2px;}
-.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:column;gap:var(--sp3);min-width:340px;flex:1;max-width:640px;}
-.tp-f-row{display:flex;flex-direction:column;gap:var(--sp1);}
-.tp-f-controls{flex-direction:row;gap:var(--sp3);align-items:flex-end;flex-wrap:wrap;}
-.tp-f-col{display:flex;flex-direction:column;gap:var(--sp1);min-width:150px;flex:1;}
-.tp-f-col .fsel{width:100%;}
-.tp-f-bottom{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);}
+.tp-filters{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp4) var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--sp2) var(--sp5);min-width:0;flex:1 1 100%;max-width:100%;}
+.tp-f-row{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:var(--sp1) var(--sp3);}
+.tp-f-controls{gap:var(--sp3) var(--sp4);align-items:center;}
+.tp-f-col{display:flex;flex-direction:row;align-items:center;gap:var(--sp1);min-width:0;flex:0 0 auto;}
+.tp-f-col .fsel{width:auto;}
+.tp-f-bottom{display:flex;align-items:center;gap:var(--sp3);margin-left:auto;}
 .tp-f-meta{font-size:.75rem;color:var(--c-faint);}
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
 .chip{padding:4px 10px;border-radius:99px;border:1px solid var(--c-div);background:var(--c-surf2);font-size:.75rem;cursor:pointer;transition:all .15s;user-select:none;color:var(--c-muted);font-weight:500;}
@@ -334,6 +330,6 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-badge-mid{background:var(--c-warn-l);color:var(--c-warn);}
 .tp-badge-mid::before{background:var(--c-warn);}
 .tscroll{max-height:520px;overflow-y:auto;}
-.kpi-val{font-size:clamp(1.9rem, 1.5rem + 1.6vw, 2.7rem);}
+.kpi-val{font-size:clamp(1.75rem, 1.4rem + 1vw, 2.15rem);}
 @media(max-width:1100px){.tp-head{flex-direction:column;}.tp-filters{max-width:100%;}}
 </style>
