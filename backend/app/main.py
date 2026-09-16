@@ -11,7 +11,7 @@ from .database import Base, engine, ensure_added_columns
 from .seed import seed_all
 from .routers import (
     auth, users, hr, traffic_light, dashboards, dashboard_prefs, audit, pdf,
-    partnerships, modules, palette, tp,
+    partnerships, modules, palette, tp, naumen,
 )
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -25,9 +25,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="HR Dashboard API — АЛМИ Партнер",
-    version="1.0.0",
-    description="API службы персонала с ролевой моделью, аналитикой и экспортом",
+    title="Dashboards API — АЛМИ Партнер",
+    version="1.1.0",
+    description="API системы дашбордов компании с ролевой моделью, аналитикой и экспортом",
     lifespan=lifespan,
 )
 
@@ -52,6 +52,7 @@ app.include_router(modules.router)
 app.include_router(modules.services_router)
 app.include_router(palette.router)
 app.include_router(tp.router)
+app.include_router(naumen.router)
 
 
 @app.get("/api/health")

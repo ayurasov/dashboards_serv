@@ -5,7 +5,7 @@
         <img src="/assets/logo-sidebar.png" width="34" height="34" alt="АЛМИ Партнер">
         <span class="login-brand-name">АЛМИ Партнер</span>
       </div>
-      <h1 class="login-title">Служба персонала</h1>
+      <h1 class="login-title">Дашборды компании</h1>
       <p class="login-sub">Вход в систему</p>
       <form @submit.prevent="doLogin">
         <div class="fgi" style="margin-bottom:12px">
