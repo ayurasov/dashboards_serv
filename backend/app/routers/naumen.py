@@ -192,6 +192,7 @@ def naumen_match(_: User = Depends(_require_read), db: Session = Depends(get_db)
             rushydro_week[wk] += 1
 
     weeks = []
+    month_tp = {}   # 'YYYY-MM' -> aggregated tp metrics
     for row in tp_rows:
         key = (int(row.year), int(row.week))
         weeks.append({
@@ -209,8 +210,66 @@ def naumen_match(_: User = Depends(_require_read), db: Session = Depends(get_db)
             "naumen_rushydro": rushydro_week.get(key, 0),
             "naumen_avg_resolve_hours": _avg(resolve_hours.get(key, [])),
         })
+        # month bucket by the ISO week's Monday
+        try:
+            mk = datetime.fromisocalendar(int(row.year), int(row.week), 1).strftime("%Y-%m")
+        except ValueError:
+            mk = None
+        if mk:
+            m = month_tp.setdefault(mk, {
+                "tp_new_received": 0, "tp_solved": 0, "tp_rushydro_hours": 0,
+                "tp_in_work": [], "tp_altos_avg_time": []})
+            if row.new_received is not None:
+                m["tp_new_received"] += row.new_received
+            if row.total_solved_week is not None:
+                m["tp_solved"] += row.total_solved_week
+            if row.rushydro_hours is not None:
+                m["tp_rushydro_hours"] += row.rushydro_hours
+            if row.total_in_work is not None:
+                m["tp_in_work"].append(row.total_in_work)
+            if row.altos_avg_time is not None:
+                m["tp_altos_avg_time"].append(row.altos_avg_time)
 
-    return {"weeks": weeks, "weeks_count": len(weeks)}
+    # Naumen monthly aggregates straight from ticket dates
+    month_nm = defaultdict(lambda: {
+        "registered": 0, "solved": 0, "overdue": 0,
+        "resolve_hours": [], "rushydro": 0})
+    for t in tickets:
+        if t.registered_at:
+            mk = t.registered_at.strftime("%Y-%m")
+            month_nm[mk]["registered"] += 1
+            if t.overdue:
+                month_nm[mk]["overdue"] += 1
+            if t.solved_at:
+                month_nm[mk]["resolve_hours"].append(
+                    (t.solved_at - t.registered_at).total_seconds() / 3600)
+            org = (t.org or "").lower()
+            if any(mk2 in org for mk2 in RUSG_MARKERS):
+                month_nm[mk]["rushydro"] += 1
+        if t.solved_at:
+            month_nm[t.solved_at.strftime("%Y-%m")]["solved"] += 1
+
+    months = []
+    for mk in sorted(set(month_tp) | set(month_nm)):
+        tp = month_tp.get(mk, {})
+        nm = month_nm.get(mk, {})
+        months.append({
+            "period": mk,
+            "year": int(mk[:4]),
+            "month": mk,
+            "tp_new_received": tp.get("tp_new_received") if tp else None,
+            "tp_solved": tp.get("tp_solved") if tp else None,
+            "tp_in_work": _avg(tp.get("tp_in_work", []) or []),
+            "tp_rushydro_hours": tp.get("tp_rushydro_hours") if tp else None,
+            "tp_altos_avg_time": _avg(tp.get("tp_altos_avg_time", []) or []),
+            "naumen_registered": nm.get("registered", 0),
+            "naumen_solved": nm.get("solved", 0),
+            "naumen_overdue": nm.get("overdue", 0),
+            "naumen_rushydro": nm.get("rushydro", 0),
+            "naumen_avg_resolve_hours": _avg(nm.get("resolve_hours", []) or []),
+        })
+
+    return {"weeks": weeks, "months": months, "weeks_count": len(weeks)}
 
 
 # ---------- xlsx import ----------

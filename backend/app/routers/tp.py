@@ -534,6 +534,54 @@ def export_csv(
     )
 
 
+# ---------- Export (xlsx, same layout as the source weekly report) ----------
+
+XLSX_HEADERS = [
+    ["Год", "№ недели", "Итого в работе заявок", "Трудозатраты Чел/ЧАСОВ", "", "", "", "", "", "", "Принято новых заявок ", "", "", "", "", "", "", "", "", "", "", "", "Решено заявок ", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    ["", "", "", "ВСЕГО Доступно", "ТП РусГидро", "ТП ТрансНефть", "ТП Роскосмос", "ТП Брянск", "ТП МЧС", "Внутрение задачи + SALES", "Итого полученных за неделю", "Возобнолено  за неделю", "Отношение решеных/полученным", "Поддержка AlterOS", "", "", "", "Поддержка AlterOffice", "", "", "", "Project Server", "", "", "", "", "", "", "", "", "", "", "Поддержка AlterOS", "", "", "", "Поддержка AlterOffice", "", "", "", "Поддержка Project Server", ""],
+    ["", "", "", "", "", "", "", "", "", "", "", "", "", "Русгидро", "", "Остальные клиенты", "", "Русгидро", "", "Остальные клиенты", "", "", "Итого решено за неделю", "Поддержка AlterOS", "", "", "", "Поддержка AlterOffice", "", "", "", "Project Server", "", "из них 1- 2-я линия", "", "3-я линния", "", "из них 1- 2-я линия", "", "3-я линния", "", ""],
+    ["", "", "", "", "", "", "", "", "", "", "", "", "", "Обращения полученые по email", "Приняли в ТФ режиме", "Обращения полученые по email", "Приняли в ТФ режиме", "Обращения полученые по email", "Приняли в ТФ режиме", "Обращения полученые по email", "Приняли в ТФ режиме", "Принято в работу", "", "Среднее время решения заявки", "Итого", "из них 1- 2-я линия", "3-я линния", "Среднее время решения заявки", "Итого", "из них 1- 2-я линия", "3-я линния", "", "Итого", "сложность заявки  1-3", "сложность заявки  4-7", "сложность заявки            8-10", "Итого", "сложность заявки  1-3", "сложность заявки  4-7", "сложность заявки            8-10", "", ""],
+]
+XLSX_IDX_BY_KEY = {key: idx for idx, key in XLSX_COL_MAP.items()}
+
+
+@router.get("/export/xlsx")
+def export_xlsx(
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_read),
+):
+    """Download all TP rows as an xlsx in the same layout as the source
+    weekly report (4 header rows, data from row 5)."""
+    from openpyxl import Workbook
+
+    rows = (
+        db.query(TpReportRow)
+        .order_by(TpReportRow.year, TpReportRow.week)
+        .all()
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Лист1"
+    for header in XLSX_HEADERS:
+        ws.append(header)
+    for row in rows:
+        d = _row_to_dict(row)
+        out: list = [None] * 42
+        for key, idx in XLSX_IDX_BY_KEY.items():
+            v = d.get(key)
+            if v is not None and key in ("year", "week") and float(v).is_integer():
+                v = int(v)
+            out[idx] = v
+        ws.append(out)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="tp_report.xlsx"'},
+    )
+
+
 # ---------- Settings ----------
 
 SETTING_KEYS = {"traffic_rules", "block_settings", "color_palette"}
