@@ -160,8 +160,8 @@ class MetricValueIn(BaseModel):
 class MetricValueOut(BaseModel):
     metric_key: str
     numeric_value: float | None
-    text_value: str
-    source_note: str
+    text_value: str | None = ""
+    source_note: str | None = ""
     class Config:
         from_attributes = True
 
@@ -501,3 +501,15 @@ class PeriodSummary(BaseModel):
     fired: int
     net: int
     metrics: dict
+
+
+class RangeAnalytics(BaseModel):
+    """Aggregated metrics for an inclusive month range (dashboard period)."""
+    label: str
+    from_month: str
+    to_month: str
+    months_count: int
+    hired: int
+    fired: int
+    net: int
+    metrics: list[MetricWithLight]

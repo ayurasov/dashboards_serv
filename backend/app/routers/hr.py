@@ -13,7 +13,7 @@ from ..deps import (
 from ..schemas import (
     MonthCreate, MonthUpdate, MonthOut, EmployeeEventCreate, EmployeeEventOut,
     MetricValueIn, MetricValueOut, MetricDefinitionOut, NoteCreate, NoteOut,
-    MonthAnalytics, PeriodSummary, MetricWithLight, BenchmarkOut, BenchmarkUpdate,
+    MonthAnalytics, PeriodSummary, MetricWithLight, RangeAnalytics, BenchmarkOut, BenchmarkUpdate,
     BenchmarkCreate
 )
 from ..analytics import (
@@ -265,26 +265,18 @@ def month_analytics(month_key: str, db: Session = Depends(get_db), user: User = 
         emps = [e for e in emps if can_view_department(user, e.department)]
     hired = len([e for e in emps if e.event_type == "hired"])
     fired = len([e for e in emps if e.event_type == "fired"])
-    # Every defined metric is reported, filled or not, so a data gap is visible in
-    # the table. But an unfilled metric must NOT read as a critical (red) traffic
-    # light unless the metric is actually tracked by an enabled traffic-light rule:
-    # otherwise metrics that are not part of the traffic light would incorrectly
-    # flag the whole month/period as critical on the dashboard and summary charts.
+    # Every defined metric is reported, filled or not, so a data gap stays
+    # visible in the table; an unfilled metric reads as red.
     values = {mv.metric_key: mv for mv in mr.metric_values}
-    rules = {r.metric_key: r for r in db.query(TrafficLightRule).all()}
     metrics = []
     for d in db.query(MetricDefinition).order_by(MetricDefinition.sort_order, MetricDefinition.id).all():
         mv = values.get(d.key)
         filled = mv is not None and mv.numeric_value is not None
-        rule = rules.get(d.key)
-        light_enabled = bool(rule and rule.enabled)
         if filled:
             light = traffic_light_for_metric(db, d.key, mv.numeric_value)
         else:
-            # Unfilled + tracked by an enabled rule: still a real data gap, keep it
-            # red so it stays visible as something that must be filled in.
-            # Unfilled + not tracked (no rule / disabled): neutral, never critical.
-            light = "red" if light_enabled else "gray"
+            # A data gap must stay visible, so an unfilled metric is always red.
+            light = "red"
         metrics.append(MetricWithLight(
             key=d.key, label=d.label, unit=d.unit, category=d.category,
             value=mv.numeric_value if mv else None,
@@ -305,6 +297,7 @@ def period_summary(period_type: str = "quarter", from_period: str = "", to_perio
     if period_type not in ("quarter", "half", "year"):
         raise HTTPException(400, "Тип периода: quarter, half, year")
     months = get_months_sorted(db)
+    defs = db.query(MetricDefinition).order_by(MetricDefinition.sort_order, MetricDefinition.id).all()
     years = sorted(set(m.year for m in months))
     results = []
     for year in years:
@@ -318,7 +311,7 @@ def period_summary(period_type: str = "quarter", from_period: str = "", to_perio
             ms = months_in_period(months, year, period_type, idx)
             if not ms:
                 continue
-            agg = aggregate_months(ms)
+            agg = aggregate_months(ms, defs)
             results.append(PeriodSummary(
                 label=period_label(year, period_type, idx),
                 months_count=agg["months_count"],
@@ -335,6 +328,64 @@ def period_summary(period_type: str = "quarter", from_period: str = "", to_perio
     if lo > hi:
         lo, hi = hi, lo
     return results[lo:hi + 1]
+
+
+@router.get("/analytics/range", response_model=RangeAnalytics)
+def range_analytics(from_month: str, to_month: str,
+                    db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Aggregated metrics for an inclusive month range (`YYYY-MM` — `YYYY-MM`).
+
+    Rates are averaged over the filled months, counts summed, cumulative state
+    metrics (headcount, adaptation headcount) take the latest value — matching
+    each metric definition's `aggregation`. An unfilled metric is reported red.
+    """
+    if not (len(from_month) == 7 and len(to_month) == 7):
+        raise HTTPException(400, "Формат месяца: YYYY-MM")
+    if from_month > to_month:
+        from_month, to_month = to_month, from_month
+    months = [m for m in get_months_sorted(db) if from_month <= m.key <= to_month]
+    defs = db.query(MetricDefinition).order_by(MetricDefinition.sort_order, MetricDefinition.id).all()
+    values_by_key: dict[str, list] = {d.key: [] for d in defs}
+    for m in months:
+        for mv in m.metric_values:
+            if mv.numeric_value is not None and mv.metric_key in values_by_key:
+                values_by_key[mv.metric_key].append(mv.numeric_value)
+    metrics = []
+    for d in defs:
+        values = values_by_key[d.key]
+        filled = bool(values)
+        if not filled:
+            value = None
+            light = "red"
+        else:
+            agg = d.aggregation or "latest"
+            if agg == "sum":
+                value = sum(values)
+            elif agg == "latest":
+                value = values[-1]
+            elif agg == "max":
+                value = max(values)
+            else:
+                value = sum(values) / len(values)
+            value = round(value, 4)
+            light = traffic_light_for_metric(db, d.key, value)
+        metrics.append(MetricWithLight(
+            key=d.key, label=d.label, unit=d.unit, category=d.category,
+            value=value, text_value=None, source_note="",
+            direction=d.direction, filled=filled, light=light,
+        ))
+    hired = sum(len([e for e in m.employees if e.event_type == "hired"]) for m in months)
+    fired = sum(len([e for e in m.employees if e.event_type == "fired"]) for m in months)
+    if len(months) > 1:
+        label = f"{months[0].label} — {months[-1].label}"
+    else:
+        label = months[0].label if months else from_month
+    return RangeAnalytics(
+        label=label,
+        from_month=from_month, to_month=to_month,
+        months_count=len(months), hired=hired, fired=fired, net=hired - fired,
+        metrics=metrics,
+    )
 
 
 @router.get("/benchmarks", response_model=list[BenchmarkOut])

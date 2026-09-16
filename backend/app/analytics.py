@@ -27,8 +27,13 @@ def metric_values_map(mr: MonthRecord) -> dict[str, float | None]:
     return out
 
 
-def aggregate_months(months: list[MonthRecord]) -> dict:
-    """Aggregate stats across a set of months."""
+def aggregate_months(months: list[MonthRecord], defs: list[MetricDefinition] | None = None) -> dict:
+    """Aggregate stats across a set of months.
+
+    Per-metric aggregation follows the metric definition (`avg` for rates,
+    `sum` for counts, `latest` for cumulative state metrics such as headcount;
+    `latest` also remains the fallback for definitions missing from the DB).
+    """
     hired = sum(len([e for e in m.employees if e.event_type == "hired"]) for m in months)
     fired = sum(len([e for e in m.employees if e.event_type == "fired"]) for m in months)
     # gather all metric keys
@@ -36,11 +41,9 @@ def aggregate_months(months: list[MonthRecord]) -> dict:
     for m in months:
         for mv in m.metric_values:
             all_keys.add(mv.metric_key)
-    defs = {}
-    # metric aggregation
+    agg_by_key = {d.key: (d.aggregation or "latest") for d in (defs or [])}
     agg_metrics = {}
     for key in all_keys:
-        defn = None
         values = []
         for m in months:
             mv = next((x for x in m.metric_values if x.metric_key == key), None)
@@ -48,12 +51,7 @@ def aggregate_months(months: list[MonthRecord]) -> dict:
                 values.append(mv.numeric_value)
         if not values:
             continue
-        agg = "avg"
-        # find definition
-        defs_row = None
-        # avg by default; latest for turnover-like
-        if key in ("turnover", "turnover_company", "probation_pass_rate", "probation_pass_rate_adaptation", "offers_accepted_pct"):
-            agg = "latest"
+        agg = agg_by_key.get(key, "latest")
         if agg == "latest":
             val = values[-1]
         elif agg == "sum":
