@@ -230,7 +230,7 @@ const MODULE_NAV = {
     { to: '/tp/registry',   label: 'Реестр данных',      icon: ic.list },
     { to: '/tp/summary',    label: 'Сводка',             icon: ic.chart },
     { to: '/tp/naumen',     label: 'Аналитика Naumen',   icon: ic.naumen },
-    { to: '/tp/naumen/org', label: 'Naumen по орг.',     icon: ic.org },
+    { to: '/tp/naumen/org', label: 'Сводная аналитика',   icon: ic.org },
     { to: '/tp/traffic-light', label: 'Светофор',        icon: ic.light, need: 'admin' },
   ],
 }
@@ -288,7 +288,7 @@ const activeModule = computed(() => {
   return best
 })
 
-const activeModuleTitle = computed(() => activeModule.value?.title || 'Служба персонала')
+const activeModuleTitle = computed(() => activeModule.value?.title || 'Дашборды компании')
 
 function isActive(to) {
   return to === '/' ? route.path === '/' : route.path === to
