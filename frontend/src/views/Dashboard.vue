@@ -15,21 +15,19 @@
               style="font-size:.75rem;padding:4px 10px" @click="quickRange(q.n)">{{ q.label }}</button>
       <button class="btn" :class="{ 'btn-p': activeQuick === 'all' }"
               style="font-size:.75rem;padding:4px 10px" @click="allRange">Всё время</button>
-      <div class="tinfo" style="flex:1;margin:0;text-align:right">
-        {{ rangeLabel }} · месяцев: {{ rangeMonths.length }}
-      </div>
+      <div style="flex:1"></div>
       <button v-if="canEdit" class="btn btn-g" @click="openNewMonth">+ Месяц</button>
       <button class="btn btn-g" @click="showSettings=true">⚙ Настройки дашборда</button>
-      <button class="btn btn-g" @click="autoLayout">⌗ Авторасположение</button>
     </div>
 
-    <!-- Widget grid: order, size and visibility come from the saved layout -->
+    <!-- Widget grid: order, size and visibility come from the saved layout.
+         Notes is single-month only, so it disappears for a multi-month range. -->
     <div class="wgrid" ref="gridEl">
       <div
-        v-for="w in visibleWidgets"
+        v-for="w in shownWidgets"
         :key="w.key"
         class="wcell"
-        :class="['size-' + w.size, { dragging: dragKey === w.key, 'drop-target': overKey === w.key }]"
+        :class="['size-' + w.size, { dragging: dragKey === w.key, 'drop-target': overKey === w.key, resizing: resizeKey === w.key }]"
         :data-cell="w.key"
         @dragover="dragOver(w.key, $event)"
         @drop="onDrop(w.key, $event)"
@@ -45,6 +43,10 @@
             <div class="kpi">
               <div class="kpi-lbl">Чистый прирост</div>
               <div class="kpi-val" :style="{color: currentAnalytics.net>=0?'var(--c-ok)':'var(--c-err)'}">{{ currentAnalytics.net>=0?'+':'' }}{{ currentAnalytics.net }}</div>
+              <div class="kpi-sub" style="display:flex;gap:12px">
+                <span style="color:var(--c-ok);font-weight:600">↑ нанято {{ currentAnalytics.hired }}</span>
+                <span style="color:var(--c-err);font-weight:600">↓ уволено {{ currentAnalytics.fired }}</span>
+              </div>
               <div class="kpi-sub" v-if="prevAnalytics">
                 <span class="dtrend" :class="trendClass(currentAnalytics.net, prevAnalytics.net, 'higher')">
                   {{ trendArrow(currentAnalytics.net, prevAnalytics.net) }}
@@ -55,15 +57,18 @@
               <div class="kpi-sub td-muted" v-else>нет данных для сравнения</div>
             </div>
             <div class="kpi">
-              <div class="kpi-lbl">Движение персонала</div>
-              <div class="kpi-val" style="color:var(--c-ok)">+{{ currentAnalytics.hired }}</div>
+              <div class="kpi-lbl">Увольнения</div>
+              <div class="kpi-val" style="color:var(--c-err)">−{{ currentAnalytics.fired }}</div>
               <div class="kpi-sub">
-                <span style="color:var(--c-err)">−{{ currentAnalytics.fired }}</span>
-                <span class="td-muted" v-if="prevAnalytics">
-                  · <span class="dtrend" :class="trendClass(currentAnalytics.fired, prevAnalytics.fired, 'lower')">
-                    {{ trendArrow(currentAnalytics.fired, prevAnalytics.fired) }} {{ deltaText(currentAnalytics.fired - prevAnalytics.fired) }}
-                  </span>
+                <span style="color:var(--c-err)">по инициативе компании: {{ fireSplit.company }}</span>
+                <span class="td-muted">·</span>
+                <span style="color:var(--c-warn)">по собственному: {{ fireSplit.own }}</span>
+              </div>
+              <div class="kpi-sub" v-if="prevAnalytics">
+                <span class="dtrend" :class="trendClass(currentAnalytics.fired, prevAnalytics.fired, 'lower')">
+                  {{ trendArrow(currentAnalytics.fired, prevAnalytics.fired) }} {{ deltaText(currentAnalytics.fired - prevAnalytics.fired) }}
                 </span>
+                к пред. периоду
               </div>
             </div>
             <div class="kpi" v-for="m in topMetrics" :key="m.key" :class="'light-' + m.light">
@@ -102,18 +107,20 @@
                 </button>
               </template>
               <template v-else-if="w.key === 'notes'">Заметки — {{ singleMonth?.label || '—' }}</template>
-              <template v-else-if="w.key === 'employees'">Сотрудники — {{ singleMonth?.label || '—' }}</template>
+              <template v-else-if="w.key === 'employees'">Сотрудники — {{ rangeLabel }}</template>
               <template v-else>{{ title(w.key) }}</template>
             </span>
             <span v-if="w.key === 'metrics'" style="display:flex;gap:6px">
               <router-link v-if="canEnterData" class="btn btn-g" style="font-size:.75rem;padding:4px 8px" :to="dataEntryLink">Данные</router-link>
             </span>
             <button v-if="w.key === 'notes' && canEdit" class="btn btn-g" style="font-size:.75rem;padding:4px 8px" @click="openEditNotes">✎ Изменить</button>
-            <button v-if="CHART_OPTIONS[w.key]" class="cgear-btn" type="button"
-                    title="Размер по ширине (соседи подстроятся)" @click="cycleSize(w)">⇔</button>
+            <!-- Drag-to-resize handles: height (bottom edge, free) and width
+                 (right edge, snaps to the preset spans). -->
             <template v-if="CHART_OPTIONS[w.key]">
-              <button class="cgear-btn" type="button" title="Ниже" @click="bumpHeight(w, -40)">↧</button>
-              <button class="cgear-btn" type="button" title="Выше" @click="bumpHeight(w, 40)">↥</button>
+              <div class="rz rz-h" title="Потяните, чтобы изменить высоту"
+                   @mousedown="startResize(w, 'h', $event)"></div>
+              <div class="rz rz-w" title="Потяните, чтобы изменить ширину"
+                   @mousedown="startResize(w, 'w', $event)"></div>
             </template>
             <chart-settings
               v-if="CHART_OPTIONS[w.key]"
@@ -129,6 +136,7 @@
             v-if="CHART_OPTIONS[w.key]"
             :option="chartOption(w)"
             :height="chartHeight(w)"
+            :fill="true"
             :colors="chartColors(w)"
             @click="CHART_CLICKS[w.key]"
           />
@@ -173,18 +181,18 @@
             <div v-else class="notes-card">{{ singleMonth?.notes || 'Нет заметок' }}</div>
           </template>
 
-          <!-- Employee events of the selected month -->
+          <!-- Employee events across the whole selected period -->
           <div v-else-if="w.key === 'employees'" class="twrap">
             <div class="tscroll">
               <table>
                 <thead><tr><th>Тип</th><th>ФИО</th><th>Дата</th></tr></thead>
                 <tbody>
-                  <tr v-for="e in (singleMonth?.employees || [])" :key="e.id">
+                  <tr v-for="e in periodEmployees" :key="e.id">
                     <td><span class="sb" :class="e.event_type==='hired'?'s-hired':'s-fired'">{{ e.event_type==='hired'?'Приём':'Увольнение' }}</span></td>
                     <td class="td-p">{{ e.full_name }}</td>
                     <td class="td-muted">{{ formatDate(e.event_date) }}</td>
                   </tr>
-                  <tr v-if="!singleMonth?.employees?.length"><td colspan="3" class="tempty">Нет событий</td></tr>
+                  <tr v-if="!periodEmployees.length"><td colspan="3" class="tempty">Нет событий</td></tr>
                 </tbody>
               </table>
             </div>
@@ -223,7 +231,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client.js'
 import { useAuthStore } from '../stores/auth.js'
@@ -252,10 +260,10 @@ const metricsCard = ref(null)
 const lightFilter = ref('')
 const stageFilter = ref(null)
 
-// `kind` drives «Авторасположение»: kpi → 1/3, chart → 1/2, wide_chart → 2/3, table → full.
+// `kind` drives the default sizes.
 const WIDGET_CATALOG = [
   { key: 'kpi', title: 'KPI-карточки', size: 'large', kind: 'kpi' },
-  { key: 'move', title: 'Движение персонала', size: 'medium', kind: 'chart' },
+  { key: 'move', title: 'Увольнения по инициативе', size: 'medium', kind: 'chart' },
   { key: 'hire_fire', title: 'Приём / увольнение по месяцам', size: 'medium', kind: 'chart' },
   { key: 'turnover', title: 'Текучесть кадров (%)', size: 'medium', kind: 'chart' },
   { key: 'funnel', title: 'Воронка найма', size: 'medium', kind: 'chart' },
@@ -264,11 +272,11 @@ const WIDGET_CATALOG = [
   { key: 'notes', title: 'Заметки месяца', size: 'small', kind: 'chart' },
   { key: 'light_stack', title: 'Распределение метрик по светофору', size: 'large', kind: 'wide_chart' },
   { key: 'metrics', title: 'Метрики периода', size: 'large', kind: 'table' },
-  { key: 'employees', title: 'Сотрудники месяца', size: 'wide', kind: 'table' },
+  { key: 'employees', title: 'Сотрудники периода', size: 'wide', kind: 'table' },
 ]
 
 const { layout, ordered, visibleWidgets, title, setSettings,
-        load: loadLayout, save: saveLayout, saveQuiet, resetLayout, autoLayout, move } =
+        load: loadLayout, save: saveLayout, saveQuiet, resetLayout, move } =
   useWidgetLayout('hr', WIDGET_CATALOG)
 const { dragKey, overKey, dragStart, dragOver, drop: onDrop, dragEnd } = useDragReorder(onMoveEnd)
 const { gridEl, equalize } = useRowEqualize()
@@ -323,8 +331,16 @@ const activeQuick = computed(() => {
 
 const rangeMonths = computed(() =>
   months.value.filter(m => fromMonth.value <= m.key && m.key <= toMonth.value))
-// Month-bound widgets (notes, employees, data-entry link) follow the last month of the range.
+// Month-bound widgets (notes, funnel, data-entry link) follow the last month of the range.
 const singleMonth = computed(() => rangeMonths.value.at(-1) || null)
+const isSingleMonth = computed(() => rangeMonths.value.length <= 1)
+// Notes only make sense for one month — hide the widget for a multi-month range.
+const shownWidgets = computed(() =>
+  visibleWidgets.value.filter(w => w.key !== 'notes' || isSingleMonth.value))
+// All employee events of the selected period, for the employees widget.
+const periodEmployees = computed(() =>
+  rangeMonths.value.flatMap(m => m.employees || [])
+    .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))))
 const rangeLabel = computed(() => {
   const n = rangeMonths.value.length
   if (!n) return 'нет данных за период'
@@ -422,17 +438,29 @@ const prevMetrics = computed(() => {
 
 function fmt(val, unit) {
   if (val === null || val === undefined) return '—'
-  if (unit === '%') return val.toFixed(2).replace('.', ',') + '%'
+  if (unit === '%') {
+    // At most two decimals in KPI/cards, without trailing zeros.
+    const n = Math.round(val * 100) / 100
+    return (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, '')).replace('.', ',') + '%'
+  }
   if (unit === 'дн.') return val.toFixed(1).replace('.', ',') + ' дн.'
   if (unit === 'чел.' || unit === 'шт.') return Math.round(val) + ' ' + unit
   return String(val).replace('.', ',')
 }
 
+// Fired split by dismissal initiative across the whole period.
+const fireSplit = computed(() => {
+  const g = (k) => (currentAnalytics.value?.metrics || []).find(m => m.key === k)?.value ?? 0
+  return { company: Math.round(g('fired_by_company')), own: Math.round(g('fired_by_own')) }
+})
+
 function formatDate(d) { return new Date(d).toLocaleDateString('ru-RU') }
 
 function deltaText(diff) {
   if (!diff) return '0'
-  return (diff > 0 ? '+' : '') + (Math.abs(diff) < 1 ? diff.toFixed(2).replace('.', ',') : diff)
+  // Deltas also read as percentages, so keep at most two decimals.
+  const r = Math.round(diff * 100) / 100
+  return (r > 0 ? '+' : '') + String(r).replace('.', ',')
 }
 
 function trendArrow(cur, prev) {
@@ -489,52 +517,70 @@ function funnelGreenShades(hex, count) {
 
 function baseHeight(size) { return size === 'large' || size === 'wide' ? 280 : 220 }
 
-// A taller neighbour raises the whole row; the chart then stretches to fill the
-// freed space (see `stretchCharts` below), so content follows the card height.
-const stretch = ref({})
-const STRETCH_MAX = 600
-
-function stretchCharts() {
-  const grid = gridEl.value
-  if (!grid) return
-  const out = {}
-  for (const w of visibleWidgets.value) {
-    if (!CHART_OPTIONS[w.key]) continue
-    const cell = grid.querySelector(`[data-cell="${w.key}"]`)
-    if (!cell) continue
-    const titleRow = cell.querySelector('.ctitle-row')?.offsetHeight || 0
-    // .ccard vertical padding (2 × var(--sp5)) plus a small breathing room.
-    const avail = cell.offsetHeight - titleRow - 34
-    if (avail > 0) out[w.key] = Math.min(avail, STRETCH_MAX)
-  }
-  stretch.value = out
-}
-
-function chartHeight(w) {
-  const base = chartHeightOf(w.settings, baseHeight(w.size))
-  const s = stretch.value[w.key]
-  return s ? Math.max(base, Math.min(s, STRETCH_MAX)) : Math.min(base, HEIGHT_MAX)
-}
+// The natural (minimum) chart height: user-dragged height or the size default.
+// Actual height comes from flex — the chart fills the card, and the card fills
+// the equalized row (see .echart-fill in style.css).
+function chartHeight(w) { return chartHeightOf(w.settings, baseHeight(w.size)) }
 function chartOption(w) { return applyChartSettings(CHART_OPTIONS[w.key].value, w.settings) }
 function chartColors(w) { return w.settings?.colors?.length ? w.settings.colors : null }
 
 const SIZES = ['small', 'medium', 'wide', 'large']
+// Column spans mirrored from .wcell.size-* in style.css.
+const SPANS = { small: 2, medium: 3, wide: 4, large: 6 }
 
-/** Cycles the widget between the preset widths; the row reflows automatically. */
-function cycleSize(w) {
-  const row = layout.value.find(x => x.key === w.key)
-  if (!row) return
-  row.size = SIZES[(SIZES.indexOf(row.size) + 1) % SIZES.length]
-  saveQuiet()
+// ---------- Drag-to-resize ----------
+
+// Pulling the bottom edge changes this chart's height (and with it its row);
+// pulling the right edge snaps between the preset widths.
+const resizeKey = ref('')
+let resizeCtx = null
+
+function startResize(w, mode, ev) {
+  ev.preventDefault()
+  ev.stopPropagation()
+  resizeKey.value = w.key
+  resizeCtx = { mode, startY: ev.clientY, startX: ev.clientX, key: w.key }
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', onResizeEnd)
 }
 
-/** Steps the chart height up/down within the sane 200–500 px band. */
-function bumpHeight(w, delta) {
-  const row = layout.value.find(x => x.key === w.key)
+function onResizeMove(ev) {
+  const ctx = resizeCtx
+  if (!ctx) return
+  const row = layout.value.find(x => x.key === ctx.key)
   if (!row) return
-  const cur = chartHeightOf(row.settings, baseHeight(row.size))
-  const next = Math.min(Math.max(cur + delta, HEIGHT_MIN), HEIGHT_MAX)
-  setSettings(w.key, { ...(row.settings || {}), height: next })
+  if (ctx.mode === 'h') {
+    const delta = ev.clientY - ctx.startY
+    if (Math.abs(delta) < 3) return
+    const cur = chartHeightOf(row.settings, baseHeight(row.size))
+    const next = Math.min(Math.max(cur + delta, HEIGHT_MIN), HEIGHT_MAX)
+    ctx.startY = ev.clientY
+    row.settings = { ...(row.settings || {}), height: next }
+  } else {
+    const grid = gridEl.value
+    if (!grid) return
+    // A full grid-column width of pointer travel per size step, so one drag
+    // gesture moves exactly one size at a time.
+    const step = grid.clientWidth / 6
+    const delta = ev.clientX - ctx.startX
+    if (Math.abs(delta) < step) return
+    ctx.startX = ev.clientX
+    const dir = delta > 0 ? 1 : -1
+    const idx = SIZES.indexOf(row.size)
+    row.size = SIZES[Math.min(Math.max(idx + dir, 0), SIZES.length - 1)]
+  }
+}
+
+function onResizeEnd() {
+  resizeKey.value = ''
+  resizeCtx = null
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', onResizeEnd)
+  saveQuiet()
+  // Re-run the row equalizer after the resize settles — the passes queued by
+  // the mid-drag mutations can complete before the final chart minHeight is
+  // rendered, leaving a stale (too tall) row pin.
+  requestAnimationFrame(() => requestAnimationFrame(equalize))
 }
 
 async function onMoveEnd(fromKey, toKey) {
@@ -570,18 +616,17 @@ const hireFireOpt = computed(() => {
   }
 })
 
-/** Turnover split by dismissal initiative: company decisions vs. employee's own will. */
+/** Dismissals split by initiative: company decisions vs. employee's own will. */
 const moveOpt = computed(() => {
   const ms = rangeMonths.value
   const tl = palette.trafficLight
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['Принято','По инициативе компании','По собственному желанию'], bottom: 0, textStyle: { fontSize: 10 } },
+    legend: { data: ['По инициативе компании', 'По собственному желанию'], bottom: 0, textStyle: { fontSize: 10 } },
     grid: { left: 35, right: 12, top: 12, bottom: 46 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
     yAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
     series: [
-      { name: 'Принято', type: 'bar', data: ms.map(m => m.hired_count), itemStyle: { color: tl.green } },
       { name: 'По инициативе компании', type: 'bar', stack: 'fired', data: ms.map(m => monthValue(m.key, 'fired_by_company')), itemStyle: { color: tl.red } },
       { name: 'По собственному желанию', type: 'bar', stack: 'fired', data: ms.map(m => monthValue(m.key, 'fired_by_own')), itemStyle: { color: tl.yellow } },
     ],
@@ -627,38 +672,38 @@ const dynamicsOpt = computed(() => {
   }
 })
 
-/** Headcount per department, derived from hire/fire events across all months. */
+/** Headcount per department at the END of the selected period: cumulative
+ *  hires minus fires from the first month of data up to the range end.
+ *  Departments that ended up empty are dropped — that was the noise. */
 const departmentRows = computed(() => {
   const acc = new Map()
   for (const m of months.value) {
+    if (m.key > toMonth.value) break
     for (const e of (m.employees || [])) {
       const dept = e.department || 'Без отдела'
-      const cur = acc.get(dept) || { hired: 0, fired: 0 }
-      if (e.event_type === 'fired') cur.fired += 1
-      else cur.hired += 1
-      acc.set(dept, cur)
+      const cur = acc.get(dept) || 0
+      acc.set(dept, cur + (e.event_type === 'fired' ? -1 : 1))
     }
   }
   return [...acc.entries()]
-    .map(([name, v]) => ({ name, ...v, net: v.hired - v.fired }))
-    .sort((a, b) => a.net - b.net)
+    .map(([name, count]) => ({ name, count }))
+    .filter(r => r.count > 0)
+    .sort((a, b) => b.count - a.count)
 })
 
-// Same semantic green/red as the hire/fire chart above — positive vs. negative
-// headcount movement, not a decorative series.
+// A plain headcount structure: one series, sorted largest first.
 const departmentsOpt = computed(() => {
   const rows = departmentRows.value
   if (!rows.length) return { title: { text: 'Нет данных по подразделениям', left: 'center', top: 'middle', textStyle: { fontSize: 12, color: '#8a8880' } } }
-  const tl = palette.trafficLight
+  const color = palette.chartColors[0]
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['Принято','Уволено'], bottom: 0, textStyle: { fontSize: 10 } },
-    grid: { left: 110, right: 20, top: 10, bottom: 40 },
+    grid: { left: 130, right: 30, top: 10, bottom: 20 },
     xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'category', data: rows.map(r => r.name), axisLabel: { fontSize: 10, width: 100, overflow: 'truncate' } },
+    yAxis: { type: 'category', inverse: true, data: rows.map(r => r.name), axisLabel: { fontSize: 10, width: 120, overflow: 'truncate' } },
     series: [
-      { name: 'Принято', type: 'bar', stack: 'total', data: rows.map(r => r.hired), itemStyle: { color: tl.green } },
-      { name: 'Уволено', type: 'bar', stack: 'total', data: rows.map(r => r.fired), itemStyle: { color: tl.red } },
+      { name: 'Численность', type: 'bar', data: rows.map(r => r.count), itemStyle: { color }, barMaxWidth: 22,
+        label: { show: true, position: 'right', fontSize: 10 } },
     ],
   }
 })
@@ -852,12 +897,17 @@ async function createMonth() {
   } catch { /* the API layer already surfaced the reason as a toast */ }
 }
 
-// Row equalization first (it sets the row min-heights), then the charts stretch
-// to whatever height their card got.
-watch([visibleWidgets, currentAnalytics, months, rangeMonths], () => {
+// Row equalization gives every widget in a grid row the height of the tallest
+// one; the flex-filled chart then follows the card automatically. Extra rAF
+// passes let a just-changed chart minHeight settle before the row re-measures
+// (a single pass can measure mid-update and pin a stale height).
+watch([visibleWidgets, layout, currentAnalytics, months, rangeMonths], () => {
   nextTick(() => {
     equalize()
-    requestAnimationFrame(() => requestAnimationFrame(stretchCharts))
+    requestAnimationFrame(() => {
+      equalize()
+      requestAnimationFrame(equalize)
+    })
   })
 }, { deep: true })
 

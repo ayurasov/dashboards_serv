@@ -1,5 +1,6 @@
 <template>
-  <div ref="el" :style="{ width: '100%', height: height + 'px' }"></div>
+  <div ref="el" class="echart" :class="{ 'echart-fill': fill }"
+       :style="fill ? { width: '100%', minHeight: height + 'px' } : { width: '100%', height: height + 'px' }"></div>
 </template>
 
 <script setup>
@@ -10,6 +11,9 @@ const props = defineProps({
   option: { type: Object, required: true },
   height: { type: Number, default: 240 },
   colors: { type: Array, default: null },
+  // `fill` makes the wrapper a flex item that grows to the card's leftover
+  // space (min-height = `height`), instead of a fixed-height box.
+  fill: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['click'])

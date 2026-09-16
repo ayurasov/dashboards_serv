@@ -5,20 +5,26 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
  *
  * Rows are discovered from the rendered layout rather than from the widget list,
  * because the grid reflows at narrow widths and a "row" is then a single cell.
+ *
+ * Each scheduled run performs several passes on consecutive animation frames:
+ * clear pins → measure → pin, repeat. That makes it converge even when a chart's
+ * own minHeight (or a table) settles one frame after the mutation that scheduled
+ * the run — a single pass could measure mid-update and pin a stale height.
+ * The passes stop early once nothing changes; identical writes produce no resize
+ * events, so the ResizeObserver doesn't keep it alive forever.
  */
 export function useRowEqualize() {
   const gridEl = ref(null)
   let observer = null
-  let raf = 0
-  let equalizing = false
+  let passLeft = 0
+  let queued = false
 
-  function equalize() {
+  function pass() {
     const grid = gridEl.value
     if (!grid) return
     const cells = [...grid.children].filter(el => el.classList?.contains('wcell'))
     if (!cells.length) return
 
-    equalizing = true
     for (const el of cells) el.style.minHeight = ''
 
     const rows = new Map()
@@ -33,26 +39,30 @@ export function useRowEqualize() {
       const tallest = Math.max(...group.map(el => el.offsetHeight))
       for (const el of group) el.style.minHeight = tallest + 'px'
     }
-    // Release the guard only after the browser has settled the new heights,
-    // otherwise our own writes retrigger the observer.
-    requestAnimationFrame(() => { equalizing = false })
+  }
+
+  function run() {
+    queued = false
+    if (passLeft-- <= 0) return
+    pass()
+    if (passLeft > 0) requestAnimationFrame(run)
   }
 
   function schedule() {
-    if (equalizing) return
-    cancelAnimationFrame(raf)
-    raf = requestAnimationFrame(equalize)
+    passLeft = 4
+    if (queued) return
+    queued = true
+    requestAnimationFrame(run)
   }
 
   onMounted(() => {
-    nextTick(equalize)
+    nextTick(schedule)
     observer = new ResizeObserver(schedule)
     if (gridEl.value) observer.observe(gridEl.value)
     window.addEventListener('resize', schedule)
   })
 
   onUnmounted(() => {
-    cancelAnimationFrame(raf)
     observer?.disconnect()
     window.removeEventListener('resize', schedule)
   })

@@ -259,6 +259,23 @@ tr.row-unfilled:hover td{background:var(--c-err-l)}
 @media(max-width:1100px){.wcell,.wcell.size-small,.wcell.size-medium,.wcell.size-wide{grid-column:span 6}}
 .wcell.dragging{opacity:.4}
 .wcell.drop-target{outline:2px dashed var(--c-red);outline-offset:3px;border-radius:var(--r3)}
+.wcell.resizing{outline:2px dashed var(--c-red);outline-offset:-2px;border-radius:var(--r3)}
+/* Drag-to-resize grips: bottom edge = height, right edge = width (snap). */
+.wcell>.ccard{position:relative;display:flex;flex-direction:column}
+.wcell>.ccard .ctitle-row{flex:none}
+.echart{flex:none}
+/* echarts pins its inner div with inline width/height; that inline size would
+   drive the wrapper and block shrinking — the wrapper must own its size. */
+.echart>div{width:100%!important;height:100%!important}
+.echart-fill{flex:1 1 auto}
+.twrap{flex:1 1 auto;overflow:auto}
+.rz{position:absolute;z-index:6;touch-action:none;user-select:none}
+.rz-h{left:10px;right:10px;bottom:-5px;height:10px;cursor:ns-resize}
+.rz-h::after{content:'';display:block;width:42px;height:3px;margin:2px auto 0;border-radius:2px;background:var(--c-div);transition:background .15s}
+.rz-h:hover::after{background:var(--c-red)}
+.rz-w{top:10px;bottom:12px;right:-5px;width:10px;cursor:ew-resize}
+.rz-w::after{content:'';display:block;width:3px;height:42px;margin:auto 2px;border-radius:2px;background:var(--c-div);transition:background .15s}
+.rz-w:hover::after{background:var(--c-red)}
 .whandle{cursor:grab;color:var(--c-faint);font-size:.875rem;line-height:1;padding:0 4px;user-select:none}
 .whandle:active{cursor:grabbing}
 .ctitle-row{display:flex;align-items:center;gap:var(--sp2);margin-bottom:var(--sp3)}
