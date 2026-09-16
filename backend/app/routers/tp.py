@@ -21,7 +21,7 @@ import csv
 import io
 import json
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -309,6 +309,124 @@ def bulk_import(
         db.add(TpReportRow(**item.model_dump()))
     db.commit()
     return {"ok": True, "count": len(body.rows)}
+
+
+# ---------- File import (xlsx in the weekly-report format, or export CSV) ----
+
+# Column index → data key for the "Итоговый отчет ТП по неделям" xlsx layout
+# (4 header rows, data starts at row 5).
+XLSX_COL_MAP = {
+    0: "year", 1: "week", 2: "total_in_work", 3: "avail_total",
+    4: "rushydro_hours", 5: "transneft_hours", 6: "roscosmos_hours",
+    7: "bryansk_hours", 8: "mchs_hours", 9: "internal_sales_hours",
+    10: "new_received", 11: "renewed", 12: "ratio_solved_received",
+    13: "altos_rusg_email", 14: "altos_rusg_tf", 15: "altos_other_email", 16: "altos_other_tf",
+    17: "altoffice_rusg_email", 18: "altoffice_rusg_tf", 19: "altoffice_other_email", 20: "altoffice_other_tf",
+    21: "projserver_taken", 22: "total_solved_week",
+    23: "altos_avg_time", 24: "altos_total", 25: "altos_1_2line", 26: "altos_3line",
+    27: "altoffice_avg_time", 28: "altoffice_total", 29: "altoffice_1_2line", 30: "altoffice_3line",
+    31: "projserver_solved",
+    32: "altos_avail_total", 33: "altos_avail_1_3", 34: "altos_avail_4_7", 35: "altos_avail_8_10",
+    36: "altoffice_avail_total", 37: "altoffice_avail_1_3", 38: "altoffice_avail_4_7", 39: "altoffice_avail_8_10",
+    40: "projserver_avail",
+}
+
+
+def _csv_key_by_header() -> dict:
+    """Header name (export label or raw key) → data key."""
+    m = {k: k for k in list(TP_DATA_COLUMNS) + ["period"]}
+    for k, meta in _META_BY_KEY.items():
+        m[meta["label"]] = k
+        m[meta["label"].lower()] = k
+    return m
+
+
+def _to_num(v):
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", ".").replace(" ", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_xlsx(raw: bytes) -> list[dict]:
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    ws = wb["Лист1"] if "Лист1" in wb.sheetnames else wb.worksheets[0]
+    records = []
+    for r in ws.iter_rows(min_row=5, values_only=True):
+        if not r or r[0] is None or r[1] is None:
+            continue
+        rec = {}
+        for idx, key in XLSX_COL_MAP.items():
+            if idx >= len(r):
+                break
+            v = r[idx]
+            rec[key] = _to_num(v)
+        if rec.get("year") is None or rec.get("week") is None:
+            continue
+        rec["period"] = f"{int(rec['year'])}-W{int(rec['week']):02d}"
+        records.append(rec)
+    return records
+
+
+def _parse_csv(raw: bytes) -> list[dict]:
+    text = raw.decode("utf-8-sig")
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration:
+        return []
+    key_by_header = _csv_key_by_header()
+    keys = [key_by_header.get(h.strip()) or key_by_header.get(h.strip().lower()) for h in header]
+    records = []
+    for vals in reader:
+        if not vals or not any(v.strip() for v in vals):
+            continue
+        rec = {}
+        for key, v in zip(keys, vals):
+            if not key or key == "id":
+                continue
+            v = v.strip()
+            if key == "period":
+                rec[key] = v or None
+            else:
+                rec[key] = _to_num(v)
+        if rec.get("year") is None or rec.get("week") is None:
+            continue
+        if not rec.get("period"):
+            rec["period"] = f"{int(rec['year'])}-W{int(rec['week']):02d}"
+        records.append(rec)
+    return records
+
+
+@router.post("/rows/import")
+async def import_rows(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_admin),
+):
+    """Replace all rows from an uploaded xlsx (weekly-report format) or CSV
+    (same format as /export). Admin-only."""
+    raw = await file.read()
+    name = (file.filename or "").lower()
+    if name.endswith(".csv"):
+        records = _parse_csv(raw)
+    elif name.endswith(".xlsx") or name.endswith(".xlsm"):
+        records = _parse_xlsx(raw)
+    else:
+        raise HTTPException(400, "Поддерживаются только .xlsx и .csv")
+    if not records:
+        raise HTTPException(400, "Не найдено ни одной строки с годом и неделей")
+    db.query(TpReportRow).delete()
+    for rec in records:
+        db.add(TpReportRow(**rec))
+    db.commit()
+    return {"ok": True, "count": len(records)}
 
 
 # ---------- Summary (aggregated KPIs for dashboard cards) ----------

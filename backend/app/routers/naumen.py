@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -54,8 +54,23 @@ def _avg(vals):
 # ---------- Aggregates ----------
 
 @router.get("/summary")
-def naumen_summary(_: User = Depends(_require_read), db: Session = Depends(get_db)):
+def naumen_summary(
+    year: Optional[str] = Query(None, description="Год регистрации (например 2026)"),
+    org: Optional[str] = Query(None, description="Организация (точное имя)"),
+    months: Optional[int] = Query(None, ge=1, le=120, description="Последние N месяцев от самого свежего месяца"),
+    _: User = Depends(_require_read),
+    db: Session = Depends(get_db),
+):
     tickets = db.query(NaumenTicket).order_by(NaumenTicket.registered_at).all()
+    if year:
+        tickets = [t for t in tickets if t.registered_at and str(t.registered_at.year) == str(year)]
+    if org:
+        tickets = [t for t in tickets if t.org == org]
+    if months:
+        mkeys = sorted({t.registered_at.strftime("%Y-%m") for t in tickets if t.registered_at})
+        if mkeys:
+            first = mkeys[max(0, len(mkeys) - months)]
+            tickets = [t for t in tickets if t.registered_at and t.registered_at.strftime("%Y-%m") >= first]
     if not tickets:
         return {"empty": True}
 
