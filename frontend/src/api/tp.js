@@ -17,11 +17,24 @@ async function uploadFile(url, file) {
   return res.json()
 }
 
+async function downloadFile(url, filename) {
+  const token = localStorage.getItem('hr_token')
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!res.ok) throw new Error('Ошибка экспорта')
+  const blob = await res.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 export const tpApi = {
   rows:        ()      => api.get('/tp/rows'),
   columns:     ()      => api.get('/tp/columns'),
   summary:     (w=8)   => api.get(`/tp/summary?weeks=${w}`),
   export:      ()      => api.get('/tp/export', { responseType: 'blob' }),
+  exportXlsx:  ()      => downloadFile('/api/tp/export/xlsx', 'Итоговый отчет ТП по неделям.xlsx'),
   createRow:   (body)  => api.post('/tp/rows', body),
   updateRow:   (id, b) => api.put(`/tp/rows/${id}`, b),
   deleteRow:   (id)    => api.del(`/tp/rows/${id}`),

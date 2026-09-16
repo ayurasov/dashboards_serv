@@ -14,7 +14,7 @@
 
       <button v-if="canEdit" class="btn btn-p" @click="openNew">+ Строка</button>
 
-      <button class="btn btn-g" @click="doExport" title="Скачать CSV">↓ CSV</button>
+      <button class="btn btn-g" @click="doExport" title="Скачать xlsx в формате исходного отчёта">↓ xlsx</button>
 
       <button v-if="canAdmin" class="btn btn-p" @click="pickImport" title="Загрузить xlsx/csv (заменит все строки)">↑ Импорт xlsx/csv</button>
       <input ref="importInput" type="file" accept=".xlsx,.xlsm,.csv" style="display:none" @change="doImport">
@@ -281,11 +281,7 @@ async function deleteRow() {
 }
 
 async function doExport() {
-  const url = `/api/tp/export`
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'tp_report.csv'
-  a.click()
+  try { await tpApi.exportXlsx() } catch (e) { alert(e?.message || 'Ошибка экспорта') }
 }
 
 function pickImport() {

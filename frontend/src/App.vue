@@ -180,7 +180,7 @@ const pageTitle = computed(() => route.meta?.title || ({
   palette: 'Цветовая палитра', profile: 'Профиль',
   'data-entry': 'Данные месяца', benchmarks: 'Бенчмарки и цели',
   // ---------- Technical Support ----------
-  'tp-dashboard':     'Техническая поддержка',
+  'tp-dashboard':     'Дашборд',
   'tp-registry':      'Реестр данных ТП',
   'tp-summary':       'Сводка ТП',
   'tp-naumen':        'Аналитика Naumen',

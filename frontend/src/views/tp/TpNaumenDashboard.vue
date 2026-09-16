@@ -334,5 +334,6 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-badge-mid{background:var(--c-warn-l);color:var(--c-warn);}
 .tp-badge-mid::before{background:var(--c-warn);}
 .tscroll{max-height:520px;overflow-y:auto;}
+.kpi-val{font-size:clamp(1.9rem, 1.5rem + 1.6vw, 2.7rem);}
 @media(max-width:1100px){.tp-head{flex-direction:column;}.tp-filters{max-width:100%;}}
 </style>

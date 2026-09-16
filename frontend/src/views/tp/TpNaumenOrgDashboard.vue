@@ -5,9 +5,16 @@
     <div class="tp-head">
       <div class="tp-head-l">
         <h1 class="tp-title">Сводная аналитика процессов ТП</h1>
-        <div class="tp-sub">Сопоставление еженедельного отчёта ТП и заявок Naumen по ISO-неделям · {{ weeksCount }} недель</div>
+        <div class="tp-sub">Сопоставление отчёта ТП и заявок Naumen {{ mode === 'week' ? 'по ISO-неделям' : 'по месяцам' }} · {{ all.length }} {{ unit(all.length) }}</div>
       </div>
       <div class="tp-filters">
+        <div class="tp-f-row">
+          <span class="fl">Разрядность</span>
+          <div class="chip-row">
+            <span class="chip" :class="{ active: mode === 'week' }" @click="mode = 'week'">Недели</span>
+            <span class="chip" :class="{ active: mode === 'month' }" @click="mode = 'month'">Месяцы</span>
+          </div>
+        </div>
         <div class="tp-f-row">
           <span class="fl">Быстрый период</span>
           <div class="chip-row">
@@ -24,7 +31,7 @@
           </div>
         </div>
         <div class="tp-f-bottom">
-          <div class="tp-f-meta">{{ rows.length }} недель в выборке · сопоставление по году и номеру ISO-недели</div>
+          <div class="tp-f-meta">{{ rows.length }} {{ unit(rows.length) }} в выборке · сопоставление {{ mode === 'week' ? 'по году и номеру ISO-недели' : 'по календарным месяцам' }}</div>
           <button class="btn btn-g" @click="resetFilters">Сбросить</button>
         </div>
       </div>
@@ -32,8 +39,8 @@
 
     <!-- KPI -->
     <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-lbl">Заявок по отчёту ТП</div><div class="kpi-val">{{ fmt(sum(rows, 'tp_new_received')) }}</div><div class="kpi-sub">принято за выбранные недели</div></div>
-      <div class="kpi"><div class="kpi-lbl">Зарегистрировано в Naumen</div><div class="kpi-val">{{ fmt(sum(rows, 'naumen_registered')) }}</div><div class="kpi-sub">за те же недели</div></div>
+      <div class="kpi"><div class="kpi-lbl">Заявок по отчёту ТП</div><div class="kpi-val">{{ fmt(sum(rows, 'tp_new_received')) }}</div><div class="kpi-sub">принято за выбранный период</div></div>
+      <div class="kpi"><div class="kpi-lbl">Зарегистрировано в Naumen</div><div class="kpi-val">{{ fmt(sum(rows, 'naumen_registered')) }}</div><div class="kpi-sub">за тот же период</div></div>
       <div class="kpi" :class="coverageClass"><div class="kpi-lbl">Покрытие отчёта заявками Naumen</div><div class="kpi-val">{{ coverage }}%</div><div class="kpi-sub">доля Naumen от принятых по отчёту</div></div>
       <div class="kpi"><div class="kpi-lbl">Просрочено в Naumen</div><div class="kpi-val">{{ fmt(sum(rows, 'naumen_overdue')) }}</div><div class="kpi-sub">{{ overduePct }}% от зарегистрированных</div></div>
       <div class="kpi"><div class="kpi-lbl">Ср. время решения по отчёту</div><div class="kpi-val">{{ fmtAvg(avgOf(rows, 'tp_altos_avg_time')) }}</div><div class="kpi-sub">AlterOS, ч</div></div>
@@ -41,7 +48,7 @@
     </div>
 
     <!-- Weekly charts -->
-    <div class="tp-section">Поток заявок по неделям</div>
+    <div class="tp-section">Поток заявок {{ mode === 'week' ? 'по неделям' : 'по месяцам' }}</div>
     <div class="cgrid-2">
       <div class="ccard"><div class="ctitle">Принято: отчёт ТП vs Naumen</div><div class="chart-box tp-tall"><canvas ref="cReceived"></canvas></div></div>
       <div class="ccard"><div class="ctitle">Решено: отчёт ТП vs Naumen</div><div class="chart-box tp-tall"><canvas ref="cSolved"></canvas></div></div>
@@ -52,20 +59,20 @@
     </div>
     <div class="cgrid-2">
       <div class="ccard"><div class="ctitle">Среднее время решения, ч: отчёт vs Naumen</div><div class="chart-box tp-tall"><canvas ref="cAvg"></canvas></div></div>
-      <div class="ccard"><div class="ctitle">Просроченные заявки Naumen по неделям</div><div class="chart-box tp-tall"><canvas ref="cOverdue"></canvas></div></div>
+      <div class="ccard"><div class="ctitle">Просроченные заявки Naumen {{ mode === 'week' ? 'по неделям' : 'по месяцам' }}</div><div class="chart-box tp-tall"><canvas ref="cOverdue"></canvas></div></div>
     </div>
 
     <!-- Match table -->
-    <div class="tp-section">Недели детально <span class="tp-tag">отчёт + Naumen</span></div>
+    <div class="tp-section">{{ mode === 'week' ? 'Недели' : 'Месяцы' }} детально <span class="tp-tag">отчёт + Naumen</span></div>
     <div class="twrap">
       <div class="tp-table-tools">
-        <span class="td-muted">Расхождение — разница между принятыми по отчёту ТП и зарегистрированными в Naumen за ту же неделю.</span>
+        <span class="td-muted">Расхождение — разница между принятыми по отчёту ТП и зарегистрированными в Naumen за тот же {{ mode === 'week' ? 'период (неделю)' : 'месяц' }}.</span>
       </div>
       <div class="tscroll">
         <table>
           <thead>
             <tr>
-              <th>Неделя</th>
+              <th>{{ mode === 'week' ? 'Неделя' : 'Месяц' }}</th>
               <th>Принято (отчёт)</th>
               <th>Наумен</th>
               <th>Расхожд.</th>
@@ -107,11 +114,13 @@ import { tpApi } from '../../api/tp.js'
 import Chart from 'chart.js/auto'
 
 const loading = ref(true)
-const all = ref([])
+const mode = ref('week')           // 'week' | 'month'
+const allWeeks = ref([])
+const allMonths = ref([])
 const year = ref('all')
 const quick = ref('all')
 
-const QUICK = [
+const QUICK_WEEKS = [
   { v: '1',  label: 'Последняя неделя' },
   { v: '2',  label: '2 недели' },
   { v: '4',  label: 'Месяц' },
@@ -120,6 +129,22 @@ const QUICK = [
   { v: '26', label: 'Полгода' },
   { v: 'all', label: 'Всё время' },
 ]
+const QUICK_MONTHS = [
+  { v: '1',  label: 'Последний месяц' },
+  { v: '3',  label: '3 месяца' },
+  { v: '6',  label: '6 месяцев' },
+  { v: '12', label: '12 месяцев' },
+  { v: 'all', label: 'Всё время' },
+]
+const QUICK = computed(() => mode.value === 'week' ? QUICK_WEEKS : QUICK_MONTHS)
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
+}
+const unit = n => mode.value === 'week' ? plural(n, 'неделя', 'недели', 'недель') : plural(n, 'месяц', 'месяца', 'месяцев')
+const all = computed(() => mode.value === 'week' ? allWeeks.value : allMonths.value)
 
 function resetFilters() {
   year.value = 'all'
@@ -130,7 +155,6 @@ const cReceived = ref(null), cSolved = ref(null), cBacklog = ref(null),
       cRusg = ref(null), cAvg = ref(null), cOverdue = ref(null)
 const charts = {}
 
-const weeksCount = computed(() => all.value.length)
 const years = computed(() => [...new Set(all.value.map(r => r.year))].sort())
 const rows = computed(() => {
   let rs = all.value
@@ -226,13 +250,15 @@ function renderAll() {
   ])
 }
 
-watch([year, quick], async () => { await nextTick(); renderAll() })
+watch(mode, () => { quick.value = 'all' })
+watch([year, quick, mode], async () => { await nextTick(); renderAll() })
 
 let themeObserver = null
 onMounted(async () => {
   try {
     const res = await tpApi.naumenMatch()
-    all.value = res.weeks || []
+    allWeeks.value = res.weeks || []
+    allMonths.value = res.months || []
     loading.value = false
     await nextTick()
     renderAll()
@@ -267,5 +293,6 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-badge-mid::before{background:var(--c-warn);}
 .tp-table-tools{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);padding:var(--sp3) var(--sp4);font-size:.75rem;flex-wrap:wrap;}
 .tscroll{max-height:540px;overflow-y:auto;}
+.kpi-val{font-size:clamp(1.9rem, 1.5rem + 1.6vw, 2.7rem);}
 @media(max-width:1100px){.tp-head{flex-direction:column;}.tp-filters{max-width:100%;}}
 </style>

@@ -69,16 +69,14 @@
 
     <!-- Traffic light -->
     <template v-if="blockSettings.traffic">
-      <div class="tp-section">Светофор <span class="tp-tag">контроль метрик текущей недели</span></div>
-      <div v-if="!lastRow" class="tempty">Нет данных для оценки светофора</div>
-      <div v-else-if="!trafficCards.length" class="tempty">Все метрики светофора отключены — включите их в разделе «Светофор»</div>
+      <div class="tp-section">Светофор <span class="tp-tag">контроль метрик выбранного периода</span></div>
+      <div v-if="!trafficCards.length" class="tempty">Нет данных для оценки светофора за выбранный период</div>
       <div v-else class="tp-traffic-grid">
         <div v-for="c in trafficCards" :key="c.key" class="ccard tp-traffic-card">
           <div class="tp-traffic-head">
             <div>
               <div class="tp-traffic-title">{{ c.label }}</div>
               <div class="tp-traffic-value">{{ c.val }}</div>
-              <div class="tp-traffic-meta">Неделя: {{ c.period }}</div>
             </div>
             <span class="light-dot" :class="'light-' + c.status"></span>
           </div>
@@ -369,8 +367,15 @@ const projKpis = computed(() => {
 })
 
 // ---------- traffic cards ----------
-// Metrics aggregated as an average over the interval; the rest as a sum.
+// Sum metrics aggregate over the interval (thresholds scale with its length);
+// the rest are level/ratio metrics averaged over the interval.
 const AVG_METRICS = new Set(['total_in_work', 'ratio_solved_received', 'altos_avg_time', 'altoffice_avg_time'])
+
+// Rows of the currently selected interval (what the charts show).
+function intervalRows() {
+  if (quick.value !== 'all') return RAW.value.slice(-parseInt(quick.value))
+  return filtered.value
+}
 
 // Delta vs the previous interval of the same length:
 // quick = N weeks  → last N rows vs the N rows before them
@@ -399,19 +404,39 @@ function intervalDelta(key) {
   return { cls, text: `${arrow} ${Math.abs(pct).toFixed(1)}% ${suffix}` }
 }
 
+// Traffic evaluation on interval-aggregated values: sum-metric thresholds
+// are multiplied by the interval length (in weeks) for the comparison.
+function evaluateTrafficScaled(key, value, factor) {
+  const rule = trafficRules.value[key]
+  if (!rule || !rule.enabled) return { status: 'gray', label: 'Отключено' }
+  if (value == null) return { status: 'red', label: 'Нет данных' }
+  const g = Number(rule.green) * factor
+  const y = Number(rule.yellow) * factor
+  if (rule.direction === 'less') {
+    if (value <= g) return { status: 'green', label: 'Норма' }
+    if (value <= y) return { status: 'yellow', label: 'Внимание' }
+    return { status: 'red', label: 'Критично' }
+  }
+  if (value >= g) return { status: 'green', label: 'Норма' }
+  if (value >= y) return { status: 'yellow', label: 'Внимание' }
+  return { status: 'red', label: 'Критично' }
+}
+
 const trafficCards = computed(() => {
-  const row = lastRow.value
-  if (!row) return []
+  const rows = intervalRows()
+  if (!rows.length) return []
+  const n = rows.length
   return TRAFFIC_METRICS
     .filter(m => trafficRules.value[m.key]?.enabled)
     .map(m => {
-      const value = row[m.key]
-      const st = evaluateTraffic(m.key, value)
+      const isSum = !AVG_METRICS.has(m.key)
+      const vals = rows.map(d => d[m.key]).filter(v => v != null)
+      const value = vals.length ? (isSum ? vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0) / vals.length) : null
+      const st = evaluateTrafficScaled(m.key, value, isSum ? n : 1)
       return {
         key: m.key,
         label: m.label,
         val: value == null ? '—' : (m.key === 'ratio_solved_received' ? Number(value).toFixed(2) : Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 2 })),
-        period: row.period,
         status: st.status,
         stateLabel: st.label,
         badgeClass: st.status === 'green' ? 's-hired' : st.status === 'yellow' ? 'tp-badge-mid' : 's-fired',

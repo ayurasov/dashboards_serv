@@ -24,7 +24,7 @@
               <th>{{ nowLabel }}</th>
               <th>{{ prevLabel }}</th>
               <th>Изменение</th>
-              <th>Статус</th>
+              <th>Динамика</th>
             </tr>
           </thead>
           <tbody>
@@ -35,9 +35,8 @@
               <td :class="deltaClass(m.key, m.delta)" style="font-variant-numeric:tabular-nums">
                 {{ fmtDelta(m.key, m.delta) }}
               </td>
-              <td>
-                <span v-if="m.status" class="sb" :class="'s-' + m.status">{{ TL_LABEL[m.status] }}</span>
-                <span v-else class="td-muted">—</span>
+              <td :class="pctClass(m.key, m.pct)" style="font-variant-numeric:tabular-nums">
+                {{ fmtPct(m.pct) }}
               </td>
             </tr>
             <tr v-if="!metrics.length"><td colspan="5" class="tempty">Нет данных</td></tr>
@@ -115,7 +114,6 @@ function pluralLabel(prefixMany, prefixOne) {
 // ── metrics ──
 const metrics = computed(() => {
   const cols = meta.value.filter(m => !['year', 'week', 'period'].includes(m.key))
-  const last = nowRows.value[nowRows.value.length - 1]
   const agg = (rows, key) => {
     if (!rows.length) return null
     const vals = rows.map(r => r[key]).filter(v => v != null)
@@ -127,8 +125,10 @@ const metrics = computed(() => {
     const key = m.key
     const now = agg(nowRows.value, key)
     const prev = agg(prevRows.value, key)
-    return { key, label: m.label, now, prev, delta: (now != null && prev != null) ? now - prev : null,
-      status: last ? trafficColor(key, last[key]) : null }
+    const pct = (now != null && prev != null && prev !== 0)
+      ? (now - prev) / Math.abs(prev) * 100 : null
+    return { key, label: m.label, now, prev,
+      delta: (now != null && prev != null) ? now - prev : null, pct }
   })
 })
 
@@ -163,6 +163,14 @@ function deltaClass(key, delta) {
   if (!dir || Math.abs(delta) < 1e-9) return 'td-muted'
   const good = dir === 'less' ? delta < 0 : delta > 0
   return good ? 'text-ok' : 'text-bad'
+}
+function pctClass(key, pct) {
+  return deltaClass(key, pct)
+}
+function fmtPct(pct) {
+  if (pct == null) return '—'
+  const sign = pct > 0 ? '+' : ''
+  return sign + pct.toFixed(1) + '%'
 }
 
 onMounted(async () => {
