@@ -67,18 +67,6 @@
       </div>
     </div>
 
-    <!-- KPI -->
-    <template v-if="blockSettings.kpi">
-      <div class="tp-section">Ключевые показатели <span class="tp-tag">KPI</span></div>
-      <div class="kpi-grid">
-        <div v-for="k in kpis" :key="k.label" class="kpi">
-          <div class="kpi-lbl">{{ k.label }}</div>
-          <div class="kpi-val">{{ k.val != null ? k.fmt(k.val) : '—' }}</div>
-          <div v-if="k.delta" class="tp-kpi-delta" :class="k.delta.cls">{{ k.delta.text }}</div>
-        </div>
-      </div>
-    </template>
-
     <!-- Traffic light -->
     <template v-if="blockSettings.traffic">
       <div class="tp-section">Светофор <span class="tp-tag">контроль метрик текущей недели</span></div>
@@ -94,6 +82,7 @@
             </div>
             <span class="light-dot" :class="'light-' + c.status"></span>
           </div>
+          <div v-if="c.delta" class="tp-kpi-delta" :class="c.delta.cls">{{ c.delta.text }}</div>
           <span class="sb" :class="c.badgeClass">{{ c.stateLabel }}</span>
         </div>
       </div>
@@ -220,6 +209,7 @@ const RAW = ref([])
 
 // ---------- filters ----------
 const QUICK = [
+  { v: '1',  label: 'Последняя неделя' },
   { v: '2',  label: '2 недели' },
   { v: '4',  label: 'Месяц' },
   { v: '8',  label: '8 недель' },
@@ -264,7 +254,6 @@ const TRAFFIC_METRICS = [
   { key: 'altoffice_avail_total', label: 'AlterOffice доступность, ч' },
 ]
 const BLOCKS = [
-  { key: 'kpi', label: 'Ключевые показатели (KPI)' },
   { key: 'traffic', label: 'Светофор' },
   { key: 'trends', label: 'Динамика и структура заявок' },
   { key: 'altos', label: 'AlterOS' },
@@ -368,42 +357,6 @@ function evaluateTraffic(key, value) {
   return { status: 'red', label: 'Критично' }
 }
 
-// ---------- KPI ----------
-const kpis = computed(() => {
-  const f = filtered.value
-  if (!f.length) return []
-  const half = Math.max(1, Math.floor(f.length / 2))
-  const first = f.slice(0, half), second = f.slice(half)
-  const delta = (a, b) => {
-    if (a == null || b == null || a === 0) return null
-    const pct = ((b - a) / Math.abs(a)) * 100
-    const cls = pct > 3 ? 'up' : pct < -3 ? 'down' : 'flat'
-    const arrow = pct > 3 ? '▲' : pct < -3 ? '▼' : '—'
-    return { cls, text: `${arrow} ${Math.abs(pct).toFixed(1)}% ко 1-й половине периода` }
-  }
-  if (clientInfo.value) {
-    const ck = clientInfo.value.key
-    return [
-      { label: `Трудозатраты: ${clientInfo.value.label}, ч`, val: sum(f, ck), fmt: ru, delta: delta(sum(first, ck), sum(second, ck)) },
-      { label: 'Всего в работе (посл.)', val: f[f.length - 1].total_in_work, fmt: Math.round, delta: delta(avg(first, 'total_in_work'), avg(second, 'total_in_work')) },
-      { label: 'Суммарные трудозатраты, ч', val: sum(f, 'avail_total'), fmt: ru, delta: delta(sum(first, 'avail_total'), sum(second, 'avail_total')) },
-      { label: 'Доля клиента в трудозатратах', val: (sum(f, ck) / Math.max(1, sum(f, 'avail_total'))) * 100, fmt: v => v.toFixed(1) + '%' },
-      { label: 'Принято новых заявок', val: sum(f, 'new_received'), fmt: ru, delta: delta(sum(first, 'new_received'), sum(second, 'new_received')) },
-      { label: 'Решено заявок', val: sum(f, 'total_solved_week'), fmt: ru, delta: delta(sum(first, 'total_solved_week'), sum(second, 'total_solved_week')) },
-    ]
-  }
-  return [
-    { label: 'Всего в работе (посл.)', val: f[f.length - 1].total_in_work, fmt: Math.round, delta: delta(avg(first, 'total_in_work'), avg(second, 'total_in_work')) },
-    { label: 'Суммарные трудозатраты, ч', val: sum(f, 'avail_total'), fmt: ru, delta: delta(sum(first, 'avail_total'), sum(second, 'avail_total')) },
-    { label: 'Принято новых заявок', val: sum(f, 'new_received'), fmt: ru, delta: delta(sum(first, 'new_received'), sum(second, 'new_received')) },
-    { label: 'Решено заявок', val: sum(f, 'total_solved_week'), fmt: ru, delta: delta(sum(first, 'total_solved_week'), sum(second, 'total_solved_week')) },
-    { label: 'Средн. решено/получено', val: avg(f, 'ratio_solved_received'), fmt: v => v.toFixed(2), delta: delta(avg(first, 'ratio_solved_received'), avg(second, 'ratio_solved_received')) },
-    { label: 'AlterOS: всего решено', val: sum(f, 'altos_total'), fmt: ru, delta: delta(sum(first, 'altos_total'), sum(second, 'altos_total')) },
-    { label: 'AlterOffice: всего решено', val: sum(f, 'altoffice_total'), fmt: ru, delta: delta(sum(first, 'altoffice_total'), sum(second, 'altoffice_total')) },
-    { label: 'AlterOS: ср.время реш., ч', val: avg(f, 'altos_avg_time'), fmt: v => v.toFixed(1), delta: delta(avg(first, 'altos_avg_time'), avg(second, 'altos_avg_time')) },
-  ]
-})
-
 const projKpis = computed(() => {
   const f = filtered.value
   if (!f.length) return []
@@ -416,6 +369,36 @@ const projKpis = computed(() => {
 })
 
 // ---------- traffic cards ----------
+// Metrics aggregated as an average over the interval; the rest as a sum.
+const AVG_METRICS = new Set(['total_in_work', 'ratio_solved_received', 'altos_avg_time', 'altoffice_avg_time'])
+
+// Delta vs the previous interval of the same length:
+// quick = N weeks  → last N rows vs the N rows before them
+// quick = all      → second half of the selection vs the first half
+function intervalDelta(key) {
+  const f = filtered.value
+  if (!f.length) return null
+  let nowRows, prevRows, suffix
+  if (quick.value !== 'all') {
+    const n = parseInt(quick.value)
+    nowRows = RAW.value.slice(-n)
+    prevRows = RAW.value.length > n ? RAW.value.slice(-2 * n, -n) : []
+    suffix = 'к пред. периоду'
+  } else {
+    const half = Math.max(1, Math.floor(f.length / 2))
+    prevRows = f.slice(0, half)
+    nowRows = f.slice(half)
+    suffix = 'ко 1-й половине периода'
+  }
+  const agg = rows => rows.length ? (AVG_METRICS.has(key) ? avg(rows, key) : sum(rows, key)) : null
+  const a = agg(prevRows), b = agg(nowRows)
+  if (a == null || b == null || a === 0) return null
+  const pct = ((b - a) / Math.abs(a)) * 100
+  const cls = pct > 3 ? 'up' : pct < -3 ? 'down' : 'flat'
+  const arrow = pct > 3 ? '▲' : pct < -3 ? '▼' : '—'
+  return { cls, text: `${arrow} ${Math.abs(pct).toFixed(1)}% ${suffix}` }
+}
+
 const trafficCards = computed(() => {
   const row = lastRow.value
   if (!row) return []
@@ -432,6 +415,7 @@ const trafficCards = computed(() => {
         status: st.status,
         stateLabel: st.label,
         badgeClass: st.status === 'green' ? 's-hired' : st.status === 'yellow' ? 'tp-badge-mid' : 's-fired',
+        delta: intervalDelta(m.key),
       }
     })
 })

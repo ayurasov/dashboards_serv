@@ -9,6 +9,10 @@
       </label>
     </div>
   </div>
+  <div v-else-if="noMatch" class="tempty">
+    Нет данных по выбранным фильт­рам.
+    <div style="margin-top:16px"><button class="btn btn-g" @click="resetFilters">Сбросить филь­тры</button></div>
+  </div>
   <div v-else class="tp-dash">
 
     <div class="tp-head">
@@ -17,14 +21,22 @@
         <div class="tp-sub">Экспорт SD: Импортозамещение (AlterOS) · {{ periodLabel }}</div>
       </div>
       <div class="tp-filters">
-        <div class="tp-f-row tp-f-controls">
-          <div class="tp-f-col">
-            <span class="fl">Год регистрации</span>
-            <select class="fsel" v-model="year">
-              <option value="all">Все годы</option>
-              <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-            </select>
+        <div class="tp-f-row">
+          <span class="fl">Быстрый период</span>
+          <div class="chip-row">
+            <span v-for="q in QUICK" :key="q.v" class="chip" :class="{ active: quick === q.v }"
+                  @click="quick = q.v">{{ q.label }}</span>
           </div>
+        </div>
+        <div class="tp-f-row">
+          <span class="fl">Год регистрации</span>
+          <div class="chip-row">
+            <span class="chip" :class="{ active: year === 'all' }" @click="year = 'all'">Все</span>
+            <span v-for="y in years" :key="y" class="chip" :class="{ active: year === String(y) }"
+                  @click="year = String(y)">{{ y }}</span>
+          </div>
+        </div>
+        <div class="tp-f-row tp-f-controls">
           <div class="tp-f-col">
             <span class="fl">Организация</span>
             <select class="fsel" v-model="org">
@@ -34,11 +46,14 @@
           </div>
         </div>
         <div class="tp-f-bottom">
-          <div class="tp-f-meta">{{ filteredMonths.length }} месяцев · {{ filteredOrgs.length }} организаций</div>
-          <label v-if="isAdmin" class="btn btn-g" style="cursor:pointer">
-            {{ importing ? 'Импорт…' : 'Импорт xlsx' }}
-            <input type="file" accept=".xlsx" style="display:none" @change="onImport" :disabled="importing">
-          </label>
+          <div class="tp-f-meta">{{ (d.months || []).length }} месяцев · {{ (d.orgs || []).length }} организаций</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-g" @click="resetFilters">Сбросить</button>
+            <label v-if="isAdmin" class="btn btn-g" style="cursor:pointer">
+              {{ importing ? 'Импорт…' : 'Импорт xlsx' }}
+              <input type="file" accept=".xlsx" style="display:none" @change="onImport" :disabled="importing">
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -109,10 +124,21 @@ const isAdmin = computed(() => auth.isAdmin || auth.canAdminService('tech'))
 
 const loading = ref(true)
 const empty = ref(false)
+const noMatch = ref(false)
 const importing = ref(false)
 const d = ref({})
+const dAll = ref({})   // unfiltered summary — source of year/org options
+const quick = ref('all')
 const year = ref('all')
 const org = ref('all')
+
+const QUICK = [
+  { v: '1',  label: 'Последний месяц' },
+  { v: '3',  label: '3 месяца' },
+  { v: '6',  label: '6 месяцев' },
+  { v: '12', label: '12 месяцев' },
+  { v: 'all', label: 'Всё время' },
+]
 
 const cFlow = ref(null), cOverdue = ref(null), cProc = ref(null), cResolve = ref(null),
       cOrgs = ref(null), cChannels = ref(null), cStatuses = ref(null)
@@ -124,16 +150,18 @@ const periodLabel = computed(() => {
   const l = new Date(d.value.last).toLocaleDateString('ru-RU', { month: 'short', year: 'numeric' })
   return `${f} — ${l}`
 })
-const years = computed(() => [...new Set((d.value.months || []).map(m => m.month.slice(0, 4)))].sort())
-const orgOptions = computed(() => (d.value.orgs || []).slice(0, 30))
+const years = computed(() => [...new Set((dAll.value.months || []).map(m => m.month.slice(0, 4)))].sort())
+const orgOptions = computed(() => (dAll.value.orgs || []))
 
-const filteredMonths = computed(() => {
-  let ms = d.value.months || []
-  if (year.value !== 'all') ms = ms.filter(m => m.month.startsWith(String(year.value)))
-  return ms
-})
+const filteredMonths = computed(() => d.value.months || [])
 const filteredOrgs = computed(() => d.value.orgs || [])
 const orgRows = computed(() => filteredOrgs.value)
+
+function resetFilters() {
+  quick.value = 'all'
+  year.value = 'all'
+  org.value = 'all'
+}
 
 const pct = v => d.value.total ? Math.round(v / d.value.total * 1000) / 10 : 0
 const fmtH = v => v == null ? '—' : Math.round(v).toLocaleString('ru-RU')
@@ -237,8 +265,18 @@ function renderAll() {
 async function load() {
   loading.value = true
   try {
-    const res = await tpApi.naumenSummary()
-    if (res.empty) { empty.value = true; return }
+    const params = {}
+    if (quick.value !== 'all') params.months = parseInt(quick.value)
+    if (year.value !== 'all') params.year = year.value
+    if (org.value !== 'all') params.org = org.value
+    const [res, all] = await Promise.all([tpApi.naumenSummary(params), dAll.value.months ? Promise.resolve(null) : tpApi.naumenSummary()])
+    if (all) dAll.value = all.empty ? {} : all
+    if (res.empty) {
+      noMatch.value = !!(dAll.value.months && dAll.value.months.length)
+      if (!noMatch.value) { empty.value = true }
+      return
+    }
+    noMatch.value = false
     d.value = res
     loading.value = false
     await nextTick()
@@ -262,7 +300,7 @@ async function onImport(e) {
   }
 }
 
-watch([year, org], async () => { await nextTick(); renderAll() })
+watch([quick, year, org], async () => { await load() })
 
 let themeObserver = null
 onMounted(async () => {
@@ -285,6 +323,10 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-f-col .fsel{width:100%;}
 .tp-f-bottom{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);}
 .tp-f-meta{font-size:.75rem;color:var(--c-faint);}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{padding:4px 10px;border-radius:99px;border:1px solid var(--c-div);background:var(--c-surf2);font-size:.75rem;cursor:pointer;transition:all .15s;user-select:none;color:var(--c-muted);font-weight:500;}
+.chip.active{background:var(--c-red);color:#fff;border-color:var(--c-red);}
+.chip:hover:not(.active){background:var(--c-off);color:var(--c-txt);}
 .tp-section{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;margin:var(--sp8) 0 var(--sp4);display:flex;align-items:center;gap:var(--sp3);}
 .tp-section:first-of-type{margin-top:0;}
 .tp-tag{font-size:.6875rem;font-weight:600;color:var(--c-muted);background:var(--c-off);padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;}

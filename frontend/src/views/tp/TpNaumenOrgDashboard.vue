@@ -8,25 +8,25 @@
         <div class="tp-sub">Сопоставление еженедельного отчёта ТП и заявок Naumen по ISO-неделям · {{ weeksCount }} недель</div>
       </div>
       <div class="tp-filters">
-        <div class="tp-f-row tp-f-controls">
-          <div class="tp-f-col">
-            <span class="fl">Год</span>
-            <select class="fsel" v-model="year">
-              <option value="all">Все годы</option>
-              <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-            </select>
-          </div>
-          <div class="tp-f-col">
-            <span class="fl">Быстрый период</span>
-            <select class="fsel" v-model.number="lastN">
-              <option :value="0">Всё время</option>
-              <option :value="13">13 недель</option>
-              <option :value="26">26 недель</option>
-              <option :value="52">52 недели</option>
-            </select>
+        <div class="tp-f-row">
+          <span class="fl">Быстрый период</span>
+          <div class="chip-row">
+            <span v-for="q in QUICK" :key="q.v" class="chip" :class="{ active: quick === q.v }"
+                  @click="quick = q.v">{{ q.label }}</span>
           </div>
         </div>
-        <div class="tp-f-meta">{{ rows.length }} недель в выборке · сопоставление по году и номеру ISO-недели</div>
+        <div class="tp-f-row">
+          <span class="fl">Годы</span>
+          <div class="chip-row">
+            <span class="chip" :class="{ active: year === 'all' }" @click="year = 'all'">Все</span>
+            <span v-for="y in years" :key="y" class="chip" :class="{ active: year === String(y) }"
+                  @click="year = String(y)">{{ y }}</span>
+          </div>
+        </div>
+        <div class="tp-f-bottom">
+          <div class="tp-f-meta">{{ rows.length }} недель в выборке · сопоставление по году и номеру ISO-недели</div>
+          <button class="btn btn-g" @click="resetFilters">Сбросить</button>
+        </div>
       </div>
     </div>
 
@@ -109,7 +109,22 @@ import Chart from 'chart.js/auto'
 const loading = ref(true)
 const all = ref([])
 const year = ref('all')
-const lastN = ref(0)
+const quick = ref('all')
+
+const QUICK = [
+  { v: '1',  label: 'Последняя неделя' },
+  { v: '2',  label: '2 недели' },
+  { v: '4',  label: 'Месяц' },
+  { v: '8',  label: '8 недель' },
+  { v: '13', label: '13 недель' },
+  { v: '26', label: 'Полгода' },
+  { v: 'all', label: 'Всё время' },
+]
+
+function resetFilters() {
+  year.value = 'all'
+  quick.value = 'all'
+}
 
 const cReceived = ref(null), cSolved = ref(null), cBacklog = ref(null),
       cRusg = ref(null), cAvg = ref(null), cOverdue = ref(null)
@@ -119,8 +134,8 @@ const weeksCount = computed(() => all.value.length)
 const years = computed(() => [...new Set(all.value.map(r => r.year))].sort())
 const rows = computed(() => {
   let rs = all.value
-  if (year.value !== 'all') rs = rs.filter(r => r.year === year.value)
-  if (lastN.value > 0) rs = rs.slice(-lastN.value)
+  if (year.value !== 'all') rs = rs.filter(r => String(r.year) === year.value)
+  if (quick.value !== 'all') rs = rs.slice(-parseInt(quick.value))
   return rs
 })
 const rowsReversed = computed(() => rows.value.slice().reverse())
@@ -211,7 +226,7 @@ function renderAll() {
   ])
 }
 
-watch([year, lastN], async () => { await nextTick(); renderAll() })
+watch([year, quick], async () => { await nextTick(); renderAll() })
 
 let themeObserver = null
 onMounted(async () => {
@@ -239,6 +254,11 @@ onUnmounted(() => { Object.values(charts).forEach(c => c.destroy()); themeObserv
 .tp-f-col{display:flex;flex-direction:column;gap:var(--sp1);min-width:130px;flex:1;}
 .tp-f-col .fsel{width:100%;}
 .tp-f-meta{font-size:.75rem;color:var(--c-faint);}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{padding:4px 10px;border-radius:99px;border:1px solid var(--c-div);background:var(--c-surf2);font-size:.75rem;cursor:pointer;transition:all .15s;user-select:none;color:var(--c-muted);font-weight:500;}
+.chip.active{background:var(--c-red);color:#fff;border-color:var(--c-red);}
+.chip:hover:not(.active){background:var(--c-off);color:var(--c-txt);}
+.tp-f-bottom{display:flex;justify-content:space-between;align-items:center;gap:var(--sp3);}
 .tp-section{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;margin:var(--sp8) 0 var(--sp4);display:flex;align-items:center;gap:var(--sp3);}
 .tp-section:first-of-type{margin-top:0;}
 .tp-tag{font-size:.6875rem;font-weight:600;color:var(--c-muted);background:var(--c-off);padding:3px 10px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;}

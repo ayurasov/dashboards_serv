@@ -15,6 +15,9 @@
       <button v-if="canEdit" class="btn btn-p" @click="openNew">+ Строка</button>
 
       <button class="btn btn-g" @click="doExport" title="Скачать CSV">↓ CSV</button>
+
+      <button v-if="canAdmin" class="btn btn-p" @click="pickImport" title="Загрузить xlsx/csv (заменит все строки)">↑ Импорт xlsx/csv</button>
+      <input ref="importInput" type="file" accept=".xlsx,.xlsm,.csv" style="display:none" @change="doImport">
     </div>
 
     <div class="tinfo">
@@ -102,6 +105,8 @@ import { useTableFilters, textMatch } from '../../composables/useTableFilters.js
 
 const auth = useAuthStore()
 const canEdit = computed(() => auth.canEdit)
+const canAdmin = computed(() => auth.isAdmin || auth.canAdminService('tech'))
+const importInput = ref(null)
 const loading = ref(true)
 const rows    = ref([])
 const traffic = ref({})
@@ -283,6 +288,24 @@ async function doExport() {
   a.click()
 }
 
+function pickImport() {
+  importInput.value?.click()
+}
+
+async function doImport(ev) {
+  const file = ev.target.files?.[0]
+  ev.target.value = ''
+  if (!file) return
+  if (!confirm(`Загрузить «${file.name}»? Все текущие строки (${rows.value.length}) будут заменены.`)) return
+  try {
+    const res = await tpApi.tpImport(file)
+    alert(`Импортировано строк: ${res.count}`)
+    await load()
+  } catch (e) {
+    alert(e?.message || 'Ошибка импорта')
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -320,4 +343,10 @@ onMounted(load)
   font-weight: 600;
 }
 .td-num { font-variant-numeric: tabular-nums; }
+/* Bounded scroll container with a sticky header: all rows reachable in any
+   viewport, header stays visible while scrolling. */
+.tscroll { max-height: calc(100dvh - 240px); overflow: auto; }
+.tscroll thead th { position: sticky; top: 0; z-index: 5; background: var(--c-off); box-shadow: inset 0 -1px 0 var(--c-div); }
+.tscroll thead tr.frow th { position: static; }
+@media (max-width: 900px) { .tscroll { max-height: calc(100dvh - 200px); } }
 </style>
