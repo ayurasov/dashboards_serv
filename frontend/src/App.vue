@@ -172,13 +172,13 @@ const roleLabel = computed(() => ({
 const initials = computed(() => (auth.fullName || auth.username || '?')
   .split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join(''))
 const pageTitle = computed(() => route.meta?.title || ({
-  dashboard: 'Дашборд', registry: 'Реестр сотрудников', summary: 'Сводка по периодам',
+  dashboard: 'Дашборд', registry: 'Реестр сотрудников',
   'custom-dashboards': 'Кастомные дашборды', audit: 'История изменений',
   users: 'Управление пользователями', 'traffic-light': 'Настройка светофора', login: 'Вход',
   'product-dashboard': 'Технологические партнёрства', 'product-registry': 'Реестр партнёрств',
   'product-timeline': 'Хронология партнёрств', 'product-summary': 'Сводка партнёрств',
   palette: 'Цветовая палитра', profile: 'Профиль',
-  'data-entry': 'Данные месяца', benchmarks: 'Бенчмарки и цели',
+  'data-entry': 'Данные', benchmarks: 'Бенчмарки и цели',
   // ---------- Technical Support ----------
   'tp-dashboard':     'Отчёт техническной поддержки (Заявки, трудозатраты по клиентам, АльтерОС / АльтерОфис / Project Server)',
   'tp-registry':      'Реестр данных ТП',
@@ -211,8 +211,7 @@ const MODULE_NAV = {
   hr: [
     { to: '/', label: 'Дашборд', icon: ic.grid },
     { to: '/registry', label: 'Реестр', icon: ic.list },
-    { to: '/hr/data-entry', label: 'Данные месяца', icon: ic.edit, need: 'metrics' },
-    { to: '/summary', label: 'Сводка', icon: ic.chart },
+    { to: '/hr/data-entry', label: 'Данные', icon: ic.edit, need: 'metrics' },
     { to: '/hr/benchmarks', label: 'Бенчмарки', icon: ic.target },
     { to: '/custom-dashboards', label: 'Кастомные дашборды', icon: ic.grid },
     { to: '/traffic-light', label: 'Светофор', icon: ic.light, need: 'admin' },
@@ -340,7 +339,6 @@ function logout() {
 // Which backend report the topbar button pulls, per route.
 const PDF_REPORTS = {
   registry: ['registry', 'hr_registry'],
-  summary: ['summary', 'hr_summary'],
   benchmarks: ['benchmarks', 'hr_benchmarks'],
   'product-dashboard': ['partnerships', 'partnerships_dashboard'],
   'product-registry': ['partnerships', 'partnerships_registry'],

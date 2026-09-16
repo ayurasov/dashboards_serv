@@ -3,9 +3,12 @@
   <template v-else>
     <div class="filters">
       <select class="fsel" v-model="activeMonth" style="min-width:180px">
-        <option v-for="m in months" :key="m.key" :value="m.key">{{ m.label }}</option>
+        <optgroup v-for="g in monthGroups" :key="g.year" :label="g.year">
+          <option v-for="m in g.months" :key="m.key" :value="m.key">{{ m.label }}</option>
+        </optgroup>
       </select>
       <button v-if="editable" class="btn btn-g" @click="showNewMonth = true">+ Создать месяц</button>
+      <button v-if="editable && activeMonth" class="btn btn-d" @click="askDeleteMonth">Удалить месяц</button>
       <span v-if="!editable" class="tag tag-viewer">Только просмотр</span>
       <span v-else-if="dirty" class="td-muted" style="font-size:.75rem">Есть несохранённые изменения</span>
     </div>
@@ -117,6 +120,22 @@
       </div>
     </div>
 
+    <!-- Delete month confirmation -->
+    <div v-if="deleteTarget" class="modal-overlay" @click.self="deleteTarget = null">
+      <div class="modal modal-sm">
+        <div class="mh"><span class="mt">Удалить месяц</span><button class="mc" @click="deleteTarget = null">✕</button></div>
+        <p style="font-size:.8125rem;line-height:1.6">
+          Удалить «{{ deleteTarget.label }}»? Будут удалены все метрики,
+          события приёма и увольнения, а также заметки этого месяца.
+          Действие нельзя отменить.
+        </p>
+        <div class="fac">
+          <button class="btn btn-g" @click="deleteTarget = null">Отмена</button>
+          <button class="btn btn-d" @click="confirmDeleteMonth">Удалить</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Employee event modal -->
     <div v-if="showEvent" class="modal-overlay" @click.self="showEvent = false">
       <div class="modal">
@@ -185,6 +204,39 @@ const eventError = ref('')
 const currentMonth = computed(() => months.value.find(m => m.key === activeMonth.value))
 const events = computed(() => [...(currentMonth.value?.employees || [])]
   .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))))
+
+// Month picker grouped by year — with several years of history the flat list
+// becomes hard to navigate.
+const monthGroups = computed(() => {
+  const groups = []
+  for (const m of months.value) {
+    const year = m.key.split('-')[0]
+    let g = groups.find(x => x.year === year)
+    if (!g) { g = { year, months: [] }; groups.push(g) }
+    g.months.push(m)
+  }
+  return groups
+})
+
+// ---------- Month deletion ----------
+
+const deleteTarget = ref(null)
+
+function askDeleteMonth() {
+  if (currentMonth.value) deleteTarget.value = currentMonth.value
+}
+
+async function confirmDeleteMonth() {
+  const key = deleteTarget.value?.key
+  if (!key) return
+  try {
+    await api.del(`/hr/months/${key}`)
+    deleteTarget.value = null
+    await loadMonths()
+    buildForm()
+    toastOk('Месяц удалён')
+  } catch { /* the API layer already surfaced the reason as a toast */ }
+}
 
 const metricGroups = computed(() => {
   const groups = []
