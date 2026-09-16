@@ -10,7 +10,7 @@ from .models import (
     User, Department, MonthRecord, EmployeeEvent, MetricDefinition, MetricValue,
     TrafficLightRule, Benchmark, RoleEnum, user_departments,
     DashboardModule, Partnership, ColorPalette, UserServiceAccess,
-    TpReportRow, TpSettings, TP_DATA_COLUMNS,
+    TpReportRow, TpSettings, TP_DATA_COLUMNS, NaumenTicket,
     SERVICES, SERVICE_KEYS
 )
 from .security import hash_password
@@ -301,6 +301,7 @@ def seed_all(db=None):
         _seed_palette(db)
         _seed_partnerships(db)
         _seed_tp_rows(db)
+        _seed_naumen(db)
 
         db.commit()
         print("Seed completed successfully.")
@@ -454,6 +455,40 @@ def _seed_tp_rows(db):
 
     db.flush()
     print(f"[seed] Loaded {len(records)} TP weekly rows from {path.name}.")
+
+
+def _seed_naumen(db):
+    """Seed Naumen SD tickets from app/data/naumen_seed.json.
+
+    Idempotent: skips import if any tickets already exist in naumen_tickets.
+    """
+    if db.query(NaumenTicket).first():
+        return
+    path = DATA_DIR / "naumen_seed.json"
+    if not path.exists():
+        print("[seed] naumen_seed.json not found — skipping Naumen tickets.")
+        return
+    with path.open(encoding="utf-8") as f:
+        records = json.load(f)
+    for r in records:
+        db.add(NaumenTicket(
+            number=r.get("number"),
+            name=r.get("name"),
+            registered_at=datetime.datetime.fromisoformat(r["registered_at"]) if r.get("registered_at") else None,
+            solved_at=datetime.datetime.fromisoformat(r["solved_at"]) if r.get("solved_at") else None,
+            deadline_at=datetime.datetime.fromisoformat(r["deadline_at"]) if r.get("deadline_at") else None,
+            status=r.get("status"),
+            org=r.get("org"),
+            responsible=r.get("responsible"),
+            team=r.get("team"),
+            first_line=r.get("first_line"),
+            channel=r.get("channel"),
+            overdue=bool(r.get("overdue")),
+            reopened=bool(r.get("reopened")),
+            processing_hours=r.get("processing_hours"),
+        ))
+    db.flush()
+    print(f"[seed] Loaded {len(records)} Naumen tickets from {path.name}.")
 
 
 if __name__ == "__main__":

@@ -449,3 +449,24 @@ class TpSettings(Base):
     __tablename__ = "tp_settings"
     key   = Column(String(80), primary_key=True)
     value = Column(Text, nullable=False, default="{}")
+
+
+class NaumenTicket(Base):
+    """One ticket from the Naumen SD export ( AlterOS support requests)."""
+    __tablename__ = "naumen_tickets"
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    number          = Column(Integer, nullable=True, index=True)
+    name            = Column(String(50), nullable=True)
+    registered_at   = Column(DateTime, nullable=True, index=True)
+    solved_at       = Column(DateTime, nullable=True, index=True)
+    deadline_at     = Column(DateTime, nullable=True)
+    status          = Column(String(100), nullable=True)
+    org             = Column(String(300), nullable=True, index=True)
+    responsible     = Column(String(300), nullable=True)
+    team            = Column(String(200), nullable=True)
+    first_line      = Column(String(300), nullable=True)
+    channel         = Column(String(100), nullable=True)
+    overdue         = Column(Boolean, nullable=False, default=False)
+    reopened        = Column(Boolean, nullable=False, default=False)
+    processing_hours = Column(Float, nullable=True)
+    created_at      = Column(DateTime, default=datetime.datetime.utcnow)
