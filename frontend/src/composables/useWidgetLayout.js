@@ -100,6 +100,11 @@ export function useWidgetLayout(serviceKey, catalog) {
     return true
   }
 
+  /** Persists the current layout without a toast — for silent actions like drag-and-drop. */
+  async function saveQuiet() {
+    return await persist()
+  }
+
   /** Sizes every widget by its declared kind, then persists the result. */
   async function autoLayout() {
     layout.value = ordered.value.map((w, i) => ({
@@ -128,7 +133,7 @@ export function useWidgetLayout(serviceKey, catalog) {
   }
 
   return { layout, ordered, visibleWidgets, title, sizeOf, settingsOf, setSettings,
-           load, save, resetLayout, autoLayout, move }
+           load, save, saveQuiet, resetLayout, autoLayout, move }
 }
 
 /** HTML5 drag-and-drop plumbing shared by the dashboard grid and the settings list. */

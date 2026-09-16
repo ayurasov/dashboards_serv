@@ -66,6 +66,10 @@ const switchable = computed(() => isSwitchable(props.option))
 const colorCount = computed(() => seriesColorCount(props.option))
 
 const draft = reactive({ type: '', colors: [], legend: true, legendPos: 'bottom', height: props.defaultHeight })
+// Colors only go into the payload when the user actually touched a swatch —
+// otherwise saving e.g. the legend would silently overwrite a chart's semantic
+// traffic-light colours with the decorative default palette.
+let colorsDirty = false
 
 function fillColors() {
   const saved = props.settings.colors || []
@@ -82,6 +86,7 @@ function syncFromProps() {
   draft.legendPos = props.settings.legendPos || 'bottom'
   draft.height = props.settings.height || props.defaultHeight
   fillColors()
+  colorsDirty = Array.isArray(props.settings.colors) && props.settings.colors.length > 0
 }
 
 syncFromProps()
@@ -91,7 +96,7 @@ watch(colorCount, fillColors)
 function payload() {
   const out = { legend: draft.legend, legendPos: draft.legendPos, height: draft.height }
   if (draft.type) out.type = draft.type
-  if (draft.colors.length) out.colors = [...draft.colors]
+  if (colorsDirty && draft.colors.length) out.colors = [...draft.colors]
   return out
 }
 
@@ -99,6 +104,7 @@ function emitChange() { emit('update', payload()) }
 
 function setColor(i, value) {
   draft.colors[i] = value
+  colorsDirty = true
   emitChange()
 }
 

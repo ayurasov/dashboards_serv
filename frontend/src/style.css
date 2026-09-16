@@ -65,7 +65,7 @@ input,select,textarea{font:inherit;color:inherit}
 .kpi{background:var(--c-surf2);border:1px solid var(--c-brd);border-radius:var(--r3);padding:var(--sp5);box-shadow:var(--sh1);display:flex;flex-direction:column;gap:var(--sp2);transition:box-shadow .16s,transform .16s}
 .kpi:hover{box-shadow:var(--sh2);transform:translateY(-1px)}
 .kpi-lbl{font-size:.6875rem;color:var(--c-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.kpi-val{font-size:clamp(1.5rem,1.2rem+1vw,2.1rem);font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.kpi-val{font-size:clamp(1.75rem, 1.4rem + 1vw, 2.15rem);font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
 .kpi-sub{font-size:.6875rem;color:var(--c-muted)}
 .kpi.light-green{border-left:3px solid var(--c-ok)}
 .kpi.light-yellow{border-left:3px solid var(--c-warn)}
