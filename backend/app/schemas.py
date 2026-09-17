@@ -121,7 +121,9 @@ class EmployeeEventBase(BaseModel):
     position: str = ""
     department: str = ""
     employment_type: str = ""
-    termination_reason: str = ""
+    # Nullable on the wire: rows created before the column existed read as NULL
+    # in SQLite until backfilled, and the frontend normalises falsy to "".
+    termination_reason: str | None = ""
 
 
 class EmployeeEventCreate(EmployeeEventBase):

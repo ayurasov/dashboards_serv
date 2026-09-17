@@ -17,6 +17,13 @@ Base = declarative_base()
 ADDED_COLUMNS = {
     "users": [("phone", "VARCHAR(50)"), ("avatar", "TEXT"), ("position", "VARCHAR(200)")],
     "benchmarks": [("target_value", "FLOAT"), ("description", "TEXT"), ("source", "VARCHAR(300)")],
+    "employee_events": [("termination_reason", "TEXT")],
+}
+
+# Columns whose pre-existing rows must read as an empty string, not NULL —
+# added right after the ALTER that creates them.
+BACKFILL_EMPTY = {
+    "employee_events": ["termination_reason"],
 }
 
 
@@ -31,6 +38,8 @@ def ensure_added_columns():
             for name, ddl_type in columns:
                 if name not in present:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
+                    if name in BACKFILL_EMPTY.get(table, []):
+                        conn.execute(text(f"UPDATE {table} SET {name} = '' WHERE {name} IS NULL"))
 
 
 def get_db():
