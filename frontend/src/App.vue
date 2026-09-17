@@ -66,7 +66,8 @@
             <span class="topbar-sub">{{ activeModuleTitle }}<template v-if="pageTitle"> · {{ pageTitle }}</template></span>
           </div>
           <div class="topbar-actions">
-            <button class="btn btn-g" @click="exportPdf" :disabled="pdfLoading">
+            <!-- Export lives only on the dashboard and registry pages of a service. -->
+            <button v-if="pdfAllowed" class="btn btn-g" @click="exportPdf" :disabled="pdfLoading">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
               {{ pdfLoading ? '...' : 'PDF' }}
             </button>
@@ -351,6 +352,15 @@ const PDF_REPORTS = {
   'tp-naumen':        ['tp-naumen', 'tp_naumen'],
   'tp-naumen-org':    ['tp-naumen', 'tp_naumen_org'],
 }
+
+// The button is only shown on a service's dashboard and registry pages —
+// everywhere else an export would either 404 or dump unrelated data.
+const pdfAllowed = computed(() => {
+  const n = route.name
+  return n === 'dashboard' || n === 'registry'
+    || n === 'tp-dashboard' || n === 'tp-registry'
+    || n === 'product-dashboard' || n === 'product-registry'
+})
 
 async function exportPdf() {
   const [report, prefix] = PDF_REPORTS[route.name] || ['dashboard', 'hr_dashboard']

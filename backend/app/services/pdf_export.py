@@ -325,6 +325,16 @@ def generate_summary_pdf(db: Session, period_type: str = "quarter",
     return _build(story, ss)
 
 
+INITIATIVE_LABELS = {"worker": "Работник", "company": "Компания"}
+
+
+def _initiative(e):
+    """Human-readable dismissal initiative for PDF tables."""
+    if e.event_type != "fired":
+        return "N/A"
+    return INITIATIVE_LABELS.get(e.termination_initiative or "", "не указана")
+
+
 def generate_registry_pdf(db: Session, month_key: str = "", event_type: str = "",
                           department: str = "", search: str = "") -> bytes:
     months = get_months_sorted(db)
@@ -355,19 +365,21 @@ def generate_registry_pdf(db: Session, month_key: str = "", event_type: str = ""
     story.append(Paragraph(f"Записей: {len(rows_data)}", ss["HRBody"]))
     story.append(Spacer(1, 6))
 
-    head = ["Тип", "Дата", "ФИО", "Должность", "Отдел", "Месяц"]
+    head = ["Тип", "Дата", "ФИО", "Должность", "Отдел", "Инициатива", "Комментарий", "Месяц"]
     table_rows = [head] + [[
         "Приём" if e.event_type == "hired" else "Увольнение",
         e.event_date.strftime("%d.%m.%Y"),
         (e.full_name or "")[:45],
         (e.position or "")[:40],
         (e.department or "")[:30],
+        _initiative(e),
+        (e.termination_comment or "")[:60] if e.event_type == "fired" else "N/A",
         m.label,
     ] for m, e in rows_data]
     if len(table_rows) == 1:
         story.append(Paragraph("Нет записей, удовлетворяющих фильтрам.", ss["HRBody"]))
     else:
-        story.append(_grid_table(table_rows, [22*mm, 22*mm, 70*mm, 60*mm, 40*mm, 30*mm], font_size=7))
+        story.append(_grid_table(table_rows, [17*mm, 17*mm, 58*mm, 48*mm, 34*mm, 18*mm, 44*mm, 22*mm], font_size=7))
     return _build(story, ss, landscape_mode=True)
 
 
@@ -588,12 +600,14 @@ def generate_dashboard_pdf(db: Session, period_label: str = "", months_filter: l
         emps = sorted(m.employees, key=lambda e: (e.event_date, e.event_type))
         if emps:
             story.append(Spacer(1, 8))
-            emp_rows = [["Тип", "Дата", "ФИО", "Должность", "Служба"]]
+            emp_rows = [["Тип", "Дата", "ФИО", "Должность", "Служба", "Инициатива", "Комментарий"]]
             for e in emps:
                 emp_rows.append(["Приём" if e.event_type == "hired" else "Увольнение",
                                  e.event_date.strftime("%d.%m.%Y"), e.full_name[:35],
-                                 e.position[:30], e.department[:25]])
-            et = Table(emp_rows, colWidths=[18*mm, 18*mm, 50*mm, 45*mm, 34*mm])
+                                 e.position[:30], e.department[:25],
+                                 _initiative(e),
+                                 (e.termination_comment or "")[:45] if e.event_type == "fired" else "N/A"])
+            et = Table(emp_rows, colWidths=[16*mm, 16*mm, 44*mm, 38*mm, 26*mm, 16*mm, 20*mm])
             et.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), C_LIGHT),
                 ("FONTSIZE", (0, 0), (-1, -1), 7),

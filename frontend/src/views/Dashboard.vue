@@ -183,11 +183,31 @@
 
           <!-- Employee events across the whole selected period -->
           <div v-else-if="w.key === 'employees'" class="twrap">
+            <div class="tinfo" style="padding:0 var(--sp2) 6px">
+              Показано {{ filteredEmployees.length }} из {{ periodEmployees.length }}
+              <button v-if="empActiveFilters" class="btn btn-g" style="font-size:.7rem;padding:2px 8px;margin-left:8px"
+                      @click="empReset">Сбросить</button>
+            </div>
             <div class="tscroll">
               <table>
-                <thead><tr><th>Тип</th><th>ФИО</th><th>Отдел</th><th>Должность</th><th>Инициатива</th><th>Комментарий</th><th>Дата</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th v-for="c in EMP_COLUMNS" :key="c.key" @click="empSetSort(c.key)">
+                      {{ c.label }}<span class="smark">{{ empSortMark(c.key) }}</span>
+                    </th>
+                  </tr>
+                  <tr class="frow">
+                    <th v-for="c in EMP_COLUMNS" :key="c.key">
+                      <select v-if="c.options" class="cfsel" v-model="empFilters[c.key]" @click.stop>
+                        <option value="">Все</option>
+                        <option v-for="o in c.options" :key="o.value" :value="o.value">{{ o.label }}</option>
+                      </select>
+                      <input v-else class="cfin" v-model="empFilters[c.key]" :placeholder="c.ph || '…'" @click.stop>
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
-                  <tr v-for="e in periodEmployees" :key="e.id">
+                  <tr v-for="e in filteredEmployees" :key="e.id">
                     <td><span class="sb" :class="e.event_type==='hired'?'s-hired':'s-fired'">{{ e.event_type==='hired'?'Приём':'Увольнение' }}</span></td>
                     <td class="td-p">{{ e.full_name }}</td>
                     <td class="td-muted">{{ e.department || '—' }}</td>
@@ -196,7 +216,7 @@
                     <td class="td-muted">{{ e.event_type==='fired' ? (e.termination_comment || '—') : 'N/A' }}</td>
                     <td class="td-muted">{{ formatDate(e.event_date) }}</td>
                   </tr>
-                  <tr v-if="!periodEmployees.length"><td colspan="7" class="tempty">Нет событий</td></tr>
+                  <tr v-if="!filteredEmployees.length"><td colspan="7" class="tempty">Нет событий</td></tr>
                 </tbody>
               </table>
             </div>
@@ -235,7 +255,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client.js'
 import { useAuthStore } from '../stores/auth.js'
@@ -245,6 +265,7 @@ import ChartSettings from '../components/ChartSettings.vue'
 import DashboardSettings from '../components/DashboardSettings.vue'
 import { useWidgetLayout, useDragReorder } from '../composables/useWidgetLayout.js'
 import { applyChartSettings, chartHeightOf, HEIGHT_MIN, HEIGHT_MAX } from '../composables/useChartSettings.js'
+import { setPdfParams } from '../composables/usePdfExport.js'
 import { useRowEqualize } from '../composables/useRowEqualize.js'
 
 const auth = useAuthStore()
@@ -345,6 +366,75 @@ const shownWidgets = computed(() =>
 const periodEmployees = computed(() =>
   rangeMonths.value.flatMap(m => m.employees || [])
     .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date))))
+
+// ---------- Employees widget: per-column filters + sort, like the registry ----------
+
+const EMP_TYPE_OPTIONS = [
+  { value: 'hired', label: 'Приём' },
+  { value: 'fired', label: 'Увольнение' },
+]
+const EMP_INITIATIVE_OPTIONS = [
+  { value: 'worker', label: 'Работник' },
+  { value: 'company', label: 'Компания' },
+]
+const EMP_COLUMNS = computed(() => [
+  { key: 'event_type', label: 'Тип', options: EMP_TYPE_OPTIONS },
+  { key: 'full_name', label: 'ФИО', ph: 'ФИО' },
+  { key: 'department', label: 'Отдел', options: empDepartments.value.map(d => ({ value: d, label: d })) },
+  { key: 'position', label: 'Должность', ph: 'должность' },
+  { key: 'termination_initiative', label: 'Инициатива', options: EMP_INITIATIVE_OPTIONS },
+  { key: 'termination_comment', label: 'Комментарий', ph: 'комментарий' },
+  { key: 'event_date', label: 'Дата', ph: 'дата' },
+])
+const EMP_FILTER_DEFAULTS = {
+  event_type: '', full_name: '', department: '', position: '',
+  termination_initiative: '', termination_comment: '', event_date: '',
+}
+const empFilters = reactive({ ...EMP_FILTER_DEFAULTS })
+const empSort = reactive({ key: 'event_date', dir: -1 })
+const empActiveFilters = computed(() =>
+  Object.keys(EMP_FILTER_DEFAULTS).some(k => empFilters[k] !== ''))
+const empDepartments = computed(() =>
+  [...new Set(periodEmployees.value.map(e => e.department).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'ru')))
+
+function empSetSort(key) {
+  if (empSort.key === key) empSort.dir *= -1
+  else { empSort.key = key; empSort.dir = 1 }
+}
+function empSortMark(key) {
+  if (empSort.key !== key) return ''
+  return empSort.dir === 1 ? '▲' : '▼'
+}
+function empReset() { Object.assign(empFilters, EMP_FILTER_DEFAULTS) }
+
+function empTextMatch(value, q) {
+  return !q || String(value || '').toLowerCase().includes(q.toLowerCase())
+}
+const filteredEmployees = computed(() => {
+  const list = periodEmployees.value.filter(e => {
+    if (empFilters.event_type && e.event_type !== empFilters.event_type) return false
+    if (empFilters.department && (e.department || '') !== empFilters.department) return false
+    if (empFilters.termination_initiative && (e.event_type !== 'fired' || (e.termination_initiative || '') !== empFilters.termination_initiative)) return false
+    if (!empTextMatch(e.full_name, empFilters.full_name)) return false
+    if (!empTextMatch(e.position, empFilters.position)) return false
+    if (!empTextMatch(e.termination_comment, empFilters.termination_comment)) return false
+    if (!empTextMatch(formatDate(e.event_date), empFilters.event_date) && !empTextMatch(e.event_date, empFilters.event_date)) return false
+    return true
+  })
+  if (!empSort.key) return list
+  const dir = empSort.dir
+  const val = (e, key) => key === 'termination_initiative' ? initiativeLabel(e) : (e[key] ?? '')
+  return [...list].sort((a, b) => {
+    const va = val(a, empSort.key), vb = val(b, empSort.key)
+    if (va === vb) return 0
+    return String(va).localeCompare(String(vb), 'ru', { numeric: true }) * dir
+  })
+})
+// The topbar PDF button reads these, so the dashboard export covers exactly
+// the month range currently selected on screen.
+setPdfParams(() => ({ from_month: fromMonth.value, to_month: toMonth.value }))
+
 const rangeLabel = computed(() => {
   const n = rangeMonths.value.length
   if (!n) return 'нет данных за период'
