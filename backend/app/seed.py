@@ -49,10 +49,10 @@ METRIC_DEFS = [
     ("probation_pass_rate_adaptation", "Процент прохождения ИС (по адаптации)", "%", "adaptation", "numeric", "avg", "higher_is_better", "Процент прошедших ИС среди сотрудников на адаптации", 120),
     ("adaptation_dismissals", "Увольнения на адаптации", "чел.", "adaptation", "numeric", "sum", "lower_is_better", "Увольнения в период испытательного срока", 130),
     ("turnover", "Текучесть кадров", "%", "turnover", "numeric", "avg", "lower_is_better", "Месячный коэффициент текучести", 140),
-    ("turnover_company", "Текучесть по инициативе компании", "%", "turnover", "numeric", "avg", "lower_is_better", "Доля увольнений по инициативе компании", 150),
-    ("turnover_own", "Текучесть по собственному желанию", "%", "turnover", "numeric", "avg", "lower_is_better", "Доля увольнений по собственному желанию", 155),
-    ("fired_by_company", "Уволены по инициативе компании", "чел.", "turnover", "numeric", "sum", "lower_is_better", "Количество увольнений по инициативе компании", 160),
-    ("fired_by_own", "Уволены по собственному желанию", "чел.", "turnover", "numeric", "sum", "lower_is_better", "Количество увольнений по собственному желанию", 165),
+    ("turnover_company", "Коэффициент уволившихся по инициативе компании", "%", "turnover", "numeric", "avg", "lower_is_better", "Доля увольнений по инициативе компании", 150),
+    ("turnover_own", "Коэффициент уволившихся по собственному желанию", "%", "turnover", "numeric", "avg", "lower_is_better", "Доля увольнений по собственному желанию", 155),
+    ("fired_by_company", "Количество уволившихся по инициативе компании", "чел.", "turnover", "numeric", "sum", "lower_is_better", "Количество увольнений по инициативе компании", 160),
+    ("fired_by_own", "Количество уволившихся по собственному желанию", "чел.", "turnover", "numeric", "sum", "lower_is_better", "Количество увольнений по собственному желанию", 165),
 ]
 
 # Softened defaults: wider green/yellow zones so routine fluctuations don't read as red.

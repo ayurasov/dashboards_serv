@@ -58,7 +58,7 @@
             </div>
             <div class="kpi">
               <div class="kpi-lbl">Увольнения</div>
-              <div class="kpi-val" style="color:var(--c-err)">−{{ currentAnalytics.fired }}</div>
+              <div class="kpi-val" style="color:var(--c-err)">{{ currentAnalytics.fired }}</div>
               <div class="kpi-sub">
                 <span style="color:var(--c-err)">по инициативе компании: {{ fireSplit.company }}</span>
                 <span class="td-muted">·</span>
@@ -185,14 +185,17 @@
           <div v-else-if="w.key === 'employees'" class="twrap">
             <div class="tscroll">
               <table>
-                <thead><tr><th>Тип</th><th>ФИО</th><th>Дата</th></tr></thead>
+                <thead><tr><th>Тип</th><th>ФИО</th><th>Отдел</th><th>Должность</th><th>Причина увольнения</th><th>Дата</th></tr></thead>
                 <tbody>
                   <tr v-for="e in periodEmployees" :key="e.id">
                     <td><span class="sb" :class="e.event_type==='hired'?'s-hired':'s-fired'">{{ e.event_type==='hired'?'Приём':'Увольнение' }}</span></td>
                     <td class="td-p">{{ e.full_name }}</td>
+                    <td class="td-muted">{{ e.department || '—' }}</td>
+                    <td class="td-muted">{{ e.position || '—' }}</td>
+                    <td class="td-muted">{{ e.event_type==='fired' ? (e.termination_reason || 'не указана') : 'N/A' }}</td>
                     <td class="td-muted">{{ formatDate(e.event_date) }}</td>
                   </tr>
-                  <tr v-if="!periodEmployees.length"><td colspan="3" class="tempty">Нет событий</td></tr>
+                  <tr v-if="!periodEmployees.length"><td colspan="6" class="tempty">Нет событий</td></tr>
                 </tbody>
               </table>
             </div>
@@ -272,7 +275,7 @@ const WIDGET_CATALOG = [
   { key: 'notes', title: 'Заметки месяца', size: 'small', kind: 'chart' },
   { key: 'light_stack', title: 'Распределение метрик по светофору', size: 'large', kind: 'wide_chart' },
   { key: 'metrics', title: 'Метрики периода', size: 'large', kind: 'table' },
-  { key: 'employees', title: 'Сотрудники периода', size: 'wide', kind: 'table' },
+  { key: 'employees', title: 'Сотрудники периода', size: 'large', kind: 'table' },
 ]
 
 const { layout, ordered, visibleWidgets, title, setSettings,
@@ -493,10 +496,6 @@ function shortMonth(label) {
   return `${name.slice(0, 3)} ${year.slice(2)}`
 }
 
-function funnelValue(monthKey, metricKey, fallback) {
-  return monthValue(monthKey, metricKey) ?? fallback
-}
-
 // ---------- Charts ----------
 
 /** Generates `count` shades of `hex`, lightest to darkest, for the funnel chart —
@@ -544,6 +543,26 @@ function startResize(w, mode, ev) {
   window.addEventListener('mouseup', onResizeEnd)
 }
 
+/** Cap the saved heights of the chart widgets sharing `key`'s grid row at `max`.
+ *  Cells are grouped by their rounded offsetTop, mirroring the row equalizer. */
+function clampRowHeights(key, max) {
+  const grid = gridEl.value
+  const cell = grid?.querySelector(`[data-cell="${key}"]`)
+  if (!grid || !cell) return
+  const top = Math.round(cell.offsetTop)
+  const keys = new Set()
+  for (const el of grid.querySelectorAll('.wcell')) {
+    if (Math.round(el.offsetTop) === top && el.dataset.cell) keys.add(el.dataset.cell)
+  }
+  keys.delete(key)
+  if (!keys.size) return
+  for (const r of layout.value) {
+    if (!keys.has(r.key) || !CHART_OPTIONS[r.key]) continue
+    const h = chartHeightOf(r.settings, baseHeight(r.size))
+    if (h > max) r.settings = { ...(r.settings || {}), height: max }
+  }
+}
+
 function onResizeMove(ev) {
   const ctx = resizeCtx
   if (!ctx) return
@@ -556,6 +575,10 @@ function onResizeMove(ev) {
     const next = Math.min(Math.max(cur + delta, HEIGHT_MIN), HEIGHT_MAX)
     ctx.startY = ev.clientY
     row.settings = { ...(row.settings || {}), height: next }
+    // Shrinking must actually shrink the row: a previously enlarged neighbour
+    // would otherwise keep the row (and this chart) pinned tall. Cap the
+    // neighbours' saved heights to the dragged target, in the same grid row.
+    if (next < cur) clampRowHeights(ctx.key, next)
   } else {
     const grid = gridEl.value
     if (!grid) return
@@ -720,18 +743,22 @@ const FUNNEL_STAGES = [
 ]
 
 const funnelRows = computed(() => {
-  const mk = singleMonth.value?.key || ''
+  const ms = rangeMonths.value
+  // A range sums the stages across its months; a single month is the trivial
+  // case of the same sum. The acceptance rate is averaged and applied to the
+  // summed hiring-manager interviews.
+  const sum = (key) => ms.reduce((a, m) => a + (monthValue(m.key, key) ?? 0), 0)
+  const hiredSum = () => ms.reduce((a, m) => a + (monthValue(m.key, 'hired_count') ?? m.hired_count ?? 0), 0)
   return FUNNEL_STAGES.map(s => {
     let value = 0
     if (s.keys[0] === 'offers_accepted_pct') {
-      // Only the acceptance rate is tracked; apply it to the interviews with the hiring manager.
-      const pct = monthValue(mk, 'offers_accepted_pct')
-      const base = monthValue(mk, 'interviews_hm') || 0
-      value = pct === null ? 0 : Math.round(base * pct / 100)
+      const pcts = ms.map(m => monthValue(m.key, 'offers_accepted_pct')).filter(v => v !== null)
+      const pct = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null
+      value = pct === null ? 0 : Math.round(sum('interviews_hm') * pct / 100)
     } else if (s.keys[0] === 'hired_count') {
-      value = funnelValue(mk, 'hired_count', singleMonth.value?.hired_count ?? 0)
+      value = hiredSum()
     } else {
-      value = monthValue(mk, s.keys[0]) ?? 0
+      value = sum(s.keys[0])
     }
     return { ...s, value: Math.round(value) }
   })

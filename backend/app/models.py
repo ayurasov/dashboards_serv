@@ -126,6 +126,7 @@ class EmployeeEvent(Base):
     position = Column(String(300), default="")
     department = Column(String(200), default="")
     employment_type = Column(String(100), default="")  # only for hired
+    termination_reason = Column(Text, default="")  # only for fired
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     month_record = relationship("MonthRecord", back_populates="employees")

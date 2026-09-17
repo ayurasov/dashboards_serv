@@ -121,6 +121,7 @@ class EmployeeEventBase(BaseModel):
     position: str = ""
     department: str = ""
     employment_type: str = ""
+    termination_reason: str = ""
 
 
 class EmployeeEventCreate(EmployeeEventBase):
