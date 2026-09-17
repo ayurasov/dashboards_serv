@@ -24,6 +24,20 @@ from ..audit import log_action
 
 router = APIRouter(prefix="/api/hr", tags=["hr"])
 
+# Structured dismissal initiative values stored on employee events.
+INITIATIVES = ("", "worker", "company")
+
+
+def _clean_termination(body):
+    """Normalise initiative/comment: only fired events carry them."""
+    initiative = (body.termination_initiative or "").strip()
+    comment = (body.termination_comment or "").strip()
+    if body.event_type != "fired":
+        return "", ""
+    if initiative not in INITIATIVES:
+        raise HTTPException(400, "Инициатива увольнения должна быть 'company' или 'worker'")
+    return initiative, comment
+
 
 def _serialize_month(mr: MonthRecord, user: User) -> dict:
     emps = mr.employees
@@ -135,6 +149,7 @@ def add_employee(month_key: str, body: EmployeeEventCreate, request: Request, db
     emp = EmployeeEvent(month_record_id=mr.id, event_type=body.event_type, event_date=body.event_date,
                         full_name=body.full_name, position=body.position, department=body.department,
                         employment_type=body.employment_type)
+    emp.termination_initiative, emp.termination_comment = _clean_termination(body)
     db.add(emp)
     db.flush()
     log_action(db, user, "employee", str(emp.id), "create", after={"name": emp.full_name, "type": emp.event_type}, ip=request.client.host if request.client else "")
@@ -155,6 +170,7 @@ def update_employee(emp_id: int, body: EmployeeEventCreate, request: Request, db
     emp.position = body.position
     emp.department = body.department
     emp.employment_type = body.employment_type
+    emp.termination_initiative, emp.termination_comment = _clean_termination(body)
     log_action(db, user, "employee", str(emp.id), "update", before=before, after={"name": emp.full_name}, ip=request.client.host if request.client else "")
     db.commit()
     db.refresh(emp)

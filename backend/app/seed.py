@@ -11,7 +11,7 @@ from .models import (
     TrafficLightRule, Benchmark, RoleEnum, user_departments,
     DashboardModule, Partnership, ColorPalette, UserServiceAccess,
     TpReportRow, TpSettings, TP_DATA_COLUMNS, NaumenTicket,
-    SERVICES, SERVICE_KEYS
+    UserDashboardPreference, SERVICES, SERVICE_KEYS
 )
 from .security import hash_password
 
@@ -166,13 +166,21 @@ JUNE_HIRES = [
     ("2026-06-08", "Райманов Савелий Александрович", "Разработчик 1С", "ИТ-служба", "Самозанятый"),
     ("2026-06-23", "Лапин Максим Витальевич", "Инженер-программист 1 категории", "Техническая служба", "ТД"),
 ]
+# Fires carry the dismissal initiative ('worker' | 'company' | '') plus a
+# free-form comment with the details, matching the HR turnover report.
 JUNE_FIRES = [
-    ("2026-06-05", "Тарасов Иван Михайлович", "Разработчик 1С", "ИТ-служба"),
-    ("2026-06-19", "Пономарева Злата Михайловна", "PR-менеджер", "Служба маркетинга"),
-    ("2026-06-23", "Андреев Александр Александрович", "Менеджер по работе с ключевыми клиентами", "Коммерческая служба"),
-    ("2026-06-29", "Черкашина Дарья Владимировна", "Бекенд разработчик", "Техническая служба"),
-    ("2026-06-30", "Щуцкая Евгения Константиновна", "Директор по маркетингу", "Служба маркетинга"),
-    ("2026-06-30", "Иванова Наталья Владиславовна", "Директор по развитию программных продуктов", "Служба маркетинга"),
+    ("2026-06-05", "Тарасов Иван Михайлович", "Разработчик 1С", "ИТ-служба", "company",
+     "Решение компании."),
+    ("2026-06-19", "Пономарева Злата Михайловна", "PR-менеджер", "Служба маркетинга", "company",
+     "Решение компании."),
+    ("2026-06-23", "Андреев Александр Александрович", "Менеджер по работе с ключевыми клиентами", "Коммерческая служба", "worker",
+     "Собственное решение. С Дмитриевой не могу работать. Премии нет. Мотивации нет. Карьерной лестницы нет. Индексации ЗП нет."),
+    ("2026-06-29", "Черкашина Дарья Владимировна", "Бекенд разработчик", "Техническая служба", "worker",
+     "Собственное решение. Не хочет работать через ИП, ушла за Евтушенко Максимом."),
+    ("2026-06-30", "Щуцкая Евгения Константиновна", "Директор по маркетингу", "Служба маркетинга", "company",
+     "Решение компании."),
+    ("2026-06-30", "Иванова Наталья Владиславовна", "Директор по развитию программных продуктов", "Служба маркетинга", "company",
+     "Решение компании."),
 ]
 JULY_HIRES = [
     ("2026-07-06", "Безносова Мария Андреевна", "Заместитель руководителя аппарата генерального директора по технической части", "Аппарат генерального директора", ""),
@@ -181,9 +189,10 @@ JULY_HIRES = [
     ("2026-07-15", "Гукова Белла Аликовна", "Руководитель проектов", "Проектная служба", ""),
 ]
 JULY_FIRES = [
-    ("2026-07-01", "Сабиров Руслан Альфирович", "девопс", "ИТ-служба"),
-    ("2026-07-16", "Гурулев Владислав Владимирович", "Руководитель отдела разработки системного программирования", "Техническая служба"),
-    ("2026-07-20", "Маммедов Хатаи Илтимас Оглы ИН", "аналитик 3 категории", "ИТ-служба"),
+    ("2026-07-01", "Сабиров Руслан Альфирович", "девопс", "ИТ-служба", "worker", ""),
+    ("2026-07-16", "Гурулев Владислав Владимирович", "Руководитель отдела разработки системного программирования", "Техническая служба", "worker",
+     "Собственное решение."),
+    ("2026-07-20", "Маммедов Хатаи Илтимас Оглы ИН", "аналитик 3 категории", "ИТ-служба", "worker", ""),
 ]
 
 # Year the target values below belong to.
@@ -305,6 +314,8 @@ def seed_all(db=None):
         _seed_partnerships(db)
         _seed_tp_rows(db)
         _seed_naumen(db)
+        _sync_tekuchest(db)
+        _migrate_saved_layouts(db)
 
         db.commit()
         print("Seed completed successfully.")
@@ -315,6 +326,75 @@ def seed_all(db=None):
     finally:
         if _own_session:
             db.close()
+
+
+def _norm_name(s):
+    """Comparable full name: collapse whitespace/nbmsp, lowercase."""
+    return " ".join(str(s or "").replace("\xa0", " ").lower().split())
+
+
+def _sync_tekuchest(db):
+    """Apply the HR turnover report (Tekuchest_2026) to existing rows.
+
+    Runs on every start but only fills blanks: month metrics are upserted only
+    when missing, and employee initiatives/comments are only written onto
+    events that do not have them yet, so manual edits survive reboots."""
+    path = DATA_DIR / "tekuchest_2026.json"
+    if not path.exists():
+        return
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    for key, vals in data.get("months", {}).items():
+        y, m = key.split("-")
+        mr = db.query(MonthRecord).filter(MonthRecord.year == int(y), MonthRecord.month == int(m)).first()
+        if not mr:
+            continue
+        have = {mv.metric_key for mv in mr.metric_values}
+        for k, v in vals.items():
+            if k not in have:
+                db.add(MetricValue(month_record_id=mr.id, metric_key=k, numeric_value=float(v)))
+    db.flush()
+
+    terms = [(_norm_name(t["name"]), t) for t in data.get("terminations", [])]
+    for ev in db.query(EmployeeEvent).filter(EmployeeEvent.event_type == "fired").all():
+        if (ev.termination_initiative or "") and (ev.termination_comment or ""):
+            continue
+        nm = _norm_name(ev.full_name)
+        match = None
+        for cand_nm, t in terms:
+            if nm == cand_nm or nm.startswith(cand_nm) or cand_nm.startswith(nm):
+                match = t
+                break
+        if not match:
+            continue
+        if not ev.termination_initiative:
+            ev.termination_initiative = match["initiative"]
+        if not ev.termination_comment:
+            ev.termination_comment = match["comment"]
+    db.flush()
+
+
+def _migrate_saved_layouts(db):
+    """One-time layout migrations for saved per-user dashboard preferences.
+
+    Marked done inside the stored JSON so a user who deliberately resizes the
+    widget afterwards is not reverted on the next restart."""
+    for row in (db.query(UserDashboardPreference)
+                .filter(UserDashboardPreference.service_key == "hr").all()):
+        prefs = row.preferences_json or {}
+        if prefs.get("migrations", {}).get("employees_full_width"):
+            continue
+        changed = False
+        for w in prefs.get("widgets", []):
+            if w.get("key") == "employees" and w.get("size") != "large":
+                w["size"] = "large"
+                changed = True
+        prefs.setdefault("migrations", {})["employees_full_width"] = True
+        if changed:
+            row.preferences_json = prefs
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(row, "preferences_json")
+    db.flush()
 
 
 def _seed_month(db, year, month, metrics, hires, fires, notes):
@@ -329,9 +409,10 @@ def _seed_month(db, year, month, metrics, hires, fires, notes):
     for d, name, pos, dept, etype in hires:
         db.add(EmployeeEvent(month_record_id=mr.id, event_type="hired", event_date=_date(d),
                              full_name=name, position=pos, department=dept, employment_type=etype))
-    for d, name, pos, dept in fires:
+    for d, name, pos, dept, initiative, comment in fires:
         db.add(EmployeeEvent(month_record_id=mr.id, event_type="fired", event_date=_date(d),
-                             full_name=name, position=pos, department=dept, employment_type=""))
+                             full_name=name, position=pos, department=dept, employment_type="",
+                             termination_initiative=initiative, termination_comment=comment))
     db.flush()
 
 

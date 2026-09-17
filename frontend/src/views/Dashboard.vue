@@ -185,17 +185,18 @@
           <div v-else-if="w.key === 'employees'" class="twrap">
             <div class="tscroll">
               <table>
-                <thead><tr><th>Тип</th><th>ФИО</th><th>Отдел</th><th>Должность</th><th>Причина увольнения</th><th>Дата</th></tr></thead>
+                <thead><tr><th>Тип</th><th>ФИО</th><th>Отдел</th><th>Должность</th><th>Инициатива</th><th>Комментарий</th><th>Дата</th></tr></thead>
                 <tbody>
                   <tr v-for="e in periodEmployees" :key="e.id">
                     <td><span class="sb" :class="e.event_type==='hired'?'s-hired':'s-fired'">{{ e.event_type==='hired'?'Приём':'Увольнение' }}</span></td>
                     <td class="td-p">{{ e.full_name }}</td>
                     <td class="td-muted">{{ e.department || '—' }}</td>
                     <td class="td-muted">{{ e.position || '—' }}</td>
-                    <td class="td-muted">{{ e.event_type==='fired' ? (e.termination_reason || 'не указана') : 'N/A' }}</td>
+                    <td class="td-muted">{{ initiativeLabel(e) }}</td>
+                    <td class="td-muted">{{ e.event_type==='fired' ? (e.termination_comment || '—') : 'N/A' }}</td>
                     <td class="td-muted">{{ formatDate(e.event_date) }}</td>
                   </tr>
-                  <tr v-if="!periodEmployees.length"><td colspan="6" class="tempty">Нет событий</td></tr>
+                  <tr v-if="!periodEmployees.length"><td colspan="7" class="tempty">Нет событий</td></tr>
                 </tbody>
               </table>
             </div>
@@ -458,6 +459,12 @@ const fireSplit = computed(() => {
 })
 
 function formatDate(d) { return new Date(d).toLocaleDateString('ru-RU') }
+
+const INITIATIVE_LABELS = { worker: 'Работник', company: 'Компания' }
+function initiativeLabel(e) {
+  if (e.event_type !== 'fired') return 'N/A'
+  return INITIATIVE_LABELS[e.termination_initiative] || 'не указана'
+}
 
 function deltaText(diff) {
   if (!diff) return '0'

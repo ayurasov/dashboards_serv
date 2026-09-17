@@ -162,10 +162,16 @@
           <input class="fi" v-model="eventForm.employment_type"
                  :disabled="eventForm.event_type === 'fired'" placeholder="—">
         </div>
-        <div class="fgi full" style="margin-top:8px" v-if="eventForm.event_type === 'fired'">
-          <label class="fl">Причина увольнения</label>
-          <input class="fi" v-model="eventForm.termination_reason"
-                 placeholder="Например: по инициативе компании, по собственному желанию">
+        <div class="fg" style="margin-top:8px" v-if="eventForm.event_type === 'fired'">
+          <div class="fgi"><label class="fl">Инициатива увольнения</label>
+            <select class="fs" v-model="eventForm.termination_initiative">
+              <option value="">— не указана —</option>
+              <option value="company">По инициативе компании</option>
+              <option value="worker">По инициативе работника</option>
+            </select></div>
+          <div class="fgi"><label class="fl">Комментарий</label>
+            <input class="fi" v-model="eventForm.termination_comment"
+                   placeholder="Детали: причина, обстоятельства"></div>
         </div>
         <p v-if="eventError" class="err-msg">{{ eventError }}</p>
         <div class="fac">
@@ -345,8 +351,8 @@ async function createMonth() {
 function openEvent(e) {
   eventError.value = ''
   eventForm.value = e
-    ? { ...e, termination_reason: e.termination_reason || '' }
-    : { event_type: 'hired', event_date: '', full_name: '', position: '', department: '', employment_type: '', termination_reason: '' }
+    ? { ...e, termination_initiative: e.termination_initiative || '', termination_comment: e.termination_comment || '' }
+    : { event_type: 'hired', event_date: '', full_name: '', position: '', department: '', employment_type: '', termination_initiative: '', termination_comment: '' }
   showEvent.value = true
 }
 
@@ -357,7 +363,8 @@ async function saveEvent() {
   const body = {
     event_type: f.event_type, event_date: f.event_date, full_name: f.full_name.trim(),
     position: f.position || '', department: f.department || '', employment_type: f.employment_type || '',
-    termination_reason: f.event_type === 'fired' ? (f.termination_reason || '') : '',
+    termination_initiative: f.event_type === 'fired' ? (f.termination_initiative || '') : '',
+    termination_comment: f.event_type === 'fired' ? (f.termination_comment || '') : '',
   }
   try {
     if (f.id) await api.put(`/hr/employees/${f.id}`, body)

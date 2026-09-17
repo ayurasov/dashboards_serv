@@ -1,0 +1,227 @@
+{
+ "months": {
+  "2026-01": {
+   "total_employees": 145,
+   "fired_by_own": 0,
+   "fired_by_company": 1,
+   "turnover": 0.69,
+   "turnover_own": 0.0,
+   "turnover_company": 0.69
+  },
+  "2026-02": {
+   "total_employees": 144,
+   "fired_by_own": 1,
+   "fired_by_company": 4,
+   "turnover": 3.47,
+   "turnover_own": 0.69,
+   "turnover_company": 2.78
+  },
+  "2026-03": {
+   "total_employees": 145,
+   "fired_by_own": 2,
+   "fired_by_company": 3,
+   "turnover": 3.45,
+   "turnover_own": 1.38,
+   "turnover_company": 2.07
+  },
+  "2026-04": {
+   "total_employees": 154,
+   "fired_by_own": 4,
+   "fired_by_company": 4,
+   "turnover": 5.19,
+   "turnover_own": 2.6,
+   "turnover_company": 2.6
+  },
+  "2026-05": {
+   "total_employees": 151,
+   "fired_by_own": 1,
+   "fired_by_company": 4,
+   "turnover": 3.31,
+   "turnover_own": 0.66,
+   "turnover_company": 2.65
+  },
+  "2026-06": {
+   "total_employees": 155,
+   "fired_by_own": 2,
+   "fired_by_company": 4,
+   "turnover": 3.87,
+   "turnover_own": 1.29,
+   "turnover_company": 2.58
+  },
+  "2026-07": {
+   "total_employees": 150,
+   "fired_by_own": 3,
+   "fired_by_company": 0,
+   "turnover": 2.0,
+   "turnover_own": 2.0,
+   "turnover_company": 0.0
+  }
+ },
+ "terminations": [
+  {
+   "name": "Харитонов Александр Анатольевич",
+   "initiative": "company",
+   "comment": ""
+  },
+  {
+   "name": "Лимошин Евгений Сергеевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Батанина Людмила Игоревна",
+   "initiative": "company",
+   "comment": "Решение компании. По соглашению сторон."
+  },
+  {
+   "name": "Спирина Светлана Викторовна",
+   "initiative": "company",
+   "comment": "Решение компании. Сокращение."
+  },
+  {
+   "name": "Попова Екатерина Андреевна",
+   "initiative": "worker",
+   "comment": "По собственному желанию. Семейные причины"
+  },
+  {
+   "name": "Радайкин Александр Леонидович",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Радецкая Наталья Николаевна",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Меликсетян Артур Эдуардович",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Кравченко Мария Валентиновна",
+   "initiative": "worker",
+   "comment": "По собственному желанию, не готова работать 4 дня в офисе."
+  },
+  {
+   "name": "Бурмистров Владимир Валерьевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Бурлов Антон Павлович",
+   "initiative": "worker",
+   "comment": "Собственное решение."
+  },
+  {
+   "name": "Зубова Полина",
+   "initiative": "company",
+   "comment": "Решение компании, нет подходящих задач."
+  },
+  {
+   "name": "Халилов Ильдар Рузилевич",
+   "initiative": "worker",
+   "comment": "Собственное решение. Внутренний сотрудник."
+  },
+  {
+   "name": "Афанасьев Владимир Владимирович",
+   "initiative": "company",
+   "comment": "Соглашение сторон."
+  },
+  {
+   "name": "Мельников Евгений Александрович",
+   "initiative": "company",
+   "comment": "Соглашение сторон."
+  },
+  {
+   "name": "Кириченко-Корчагин Никита Кириллович",
+   "initiative": "worker",
+   "comment": "Собственное решение , ушел в другую компанию из-за ЗП."
+  },
+  {
+   "name": "Мочалова Ксения Дмитриевна",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Добролежа Виктория Александровна",
+   "initiative": "worker",
+   "comment": "Собственное решение, ушла в другую компанию."
+  },
+  {
+   "name": "Евтушенко Максим Евгеньевич",
+   "initiative": "worker",
+   "comment": "Собственное решение, из-за НЕ перевода на работу по ТК."
+  },
+  {
+   "name": "Болваненко Геннадий Геннадьевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Овчинников Андрей Дмитриевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Потапов Максим Сергеевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Розанов Сергей Анатольевич",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Аксенов Сергей Евгеньевич",
+   "initiative": "worker",
+   "comment": "Собственное решение. Получил оффер от яндекс, в АЛМИ не видит для себя перспектив."
+  },
+  {
+   "name": "Тарасов Иван Михайлович",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Пономарева Злата Михайловна",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Андреев Александр Александрович",
+   "initiative": "worker",
+   "comment": "Собственное решение. С Дмитриевой не могу работать Премии нет Мотивации нет Карьерной лестницы нет Индексации ЗП нет."
+  },
+  {
+   "name": "Черкашина Дарья Владимировна",
+   "initiative": "worker",
+   "comment": "Собственное решение. Не хочет работать через ИП, ушла за Евтушенко М."
+  },
+  {
+   "name": "Щуцкая Евгения Константиновна",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Иванова Наталья Владиславовна",
+   "initiative": "company",
+   "comment": "Решение компании."
+  },
+  {
+   "name": "Сабиров Руслан Альфирович – девопс",
+   "initiative": "worker",
+   "comment": ""
+  },
+  {
+   "name": "Гурулев Владислав",
+   "initiative": "worker",
+   "comment": "Собственное решение."
+  },
+  {
+   "name": "Маммедов Хатаи Илтимас Оглы",
+   "initiative": "worker",
+   "comment": ""
+  }
+ ]
+}

@@ -40,11 +40,15 @@ def set_preferences(service_key: str, body: DashboardPreferenceIn,
         if w.key in keys:
             raise HTTPException(400, f"Виджет повторяется: {w.key}")
         keys.add(w.key)
-    payload = {"widgets": [w.model_dump() for w in body.widgets]}
+    # Layout migrations (seed.py) are marked done inside the stored JSON; a save
+    # replaces only the widgets, so carry the markers over.
     row = (db.query(UserDashboardPreference)
            .filter(UserDashboardPreference.user_id == user.id,
                    UserDashboardPreference.service_key == service_key)
            .first())
+    payload = {"widgets": [w.model_dump() for w in body.widgets]}
+    if row and row.preferences_json:
+        payload["migrations"] = (row.preferences_json or {}).get("migrations", {})
     if row:
         row.preferences_json = payload
     else:

@@ -17,13 +17,15 @@ Base = declarative_base()
 ADDED_COLUMNS = {
     "users": [("phone", "VARCHAR(50)"), ("avatar", "TEXT"), ("position", "VARCHAR(200)")],
     "benchmarks": [("target_value", "FLOAT"), ("description", "TEXT"), ("source", "VARCHAR(300)")],
-    "employee_events": [("termination_reason", "TEXT")],
+    "employee_events": [("termination_reason", "TEXT"),
+                         ("termination_initiative", "VARCHAR(20)"),
+                         ("termination_comment", "TEXT")],
 }
 
 # Columns whose pre-existing rows must read as an empty string, not NULL —
 # added right after the ALTER that creates them.
 BACKFILL_EMPTY = {
-    "employee_events": ["termination_reason"],
+    "employee_events": ["termination_reason", "termination_initiative", "termination_comment"],
 }
 
 
