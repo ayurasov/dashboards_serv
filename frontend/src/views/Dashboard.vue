@@ -724,7 +724,7 @@ const hireFireOpt = computed(() => {
   const ms = rangeMonths.value
   const tl = palette.trafficLight
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', ...TIP },
     legend: { data: ['Принято','Уволено'], bottom: 0, textStyle: { fontSize: 11 } },
     grid: { left: 35, right: 12, top: 12, bottom: 40 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
@@ -741,7 +741,7 @@ const moveOpt = computed(() => {
   const ms = rangeMonths.value
   const tl = palette.trafficLight
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP },
     legend: { data: ['По инициативе компании', 'По собственному желанию'], bottom: 0, textStyle: { fontSize: 10 } },
     grid: { left: 35, right: 12, top: 12, bottom: 46 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
@@ -762,7 +762,7 @@ const turnoverOpt = computed(() => {
   const ms = turnoverMonths.value
   const color = palette.chartColors[0]
   return {
-    tooltip: { trigger: 'axis', valueFormatter: v => v?.toFixed(2) + '%' },
+    tooltip: { trigger: 'axis', valueFormatter: v => v?.toFixed(2) + '%', ...TIP },
     grid: { left: 40, right: 12, top: 12, bottom: 30 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
     yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: '{value}%' } },
@@ -775,7 +775,7 @@ const dynamicsOpt = computed(() => {
   const ms = rangeMonths.value
   const c = palette.chartColors
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', ...TIP },
     legend: { data: ['Численность','Принято','Уволено','Текучесть'], bottom: 0, textStyle: { fontSize: 10 } },
     grid: { left: 40, right: 45, top: 14, bottom: 46 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
@@ -817,7 +817,7 @@ const departmentsOpt = computed(() => {
   if (!rows.length) return { title: { text: 'Нет данных по подразделениям', left: 'center', top: 'middle', textStyle: { fontSize: 12, color: '#8a8880' } } }
   const color = palette.chartColors[0]
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP },
     grid: { left: 130, right: 30, top: 10, bottom: 20 },
     xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
     yAxis: { type: 'category', inverse: true, data: rows.map(r => r.name), axisLabel: { fontSize: 10, width: 120, overflow: 'truncate' } },
@@ -866,7 +866,7 @@ const funnelRows = computed(() => {
 const funnelOpt = computed(() => {
   const shades = funnelGreenShades(palette.trafficLight.green, funnelRows.value.length)
   return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c}' },
+    tooltip: { trigger: 'item', formatter: '{b}: {c}', ...TIP },
     series: [{
       type: 'funnel', left: '5%', right: '5%', top: 10, bottom: 10,
       minSize: '18%', sort: 'none', gap: 2,
@@ -885,7 +885,7 @@ const lightStackOpt = computed(() => {
   const count = (key, light) => (analytics.value[key]?.metrics || []).filter(m => m.light === light).length
   const tl = palette.trafficLight
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP },
     legend: { data: ['Норма','Внимание','Критично'], bottom: 0, textStyle: { fontSize: 10 } },
     grid: { left: 35, right: 12, top: 12, bottom: 40 },
     xAxis: { type: 'category', data: ms.map(m => m.label), axisLabel: { fontSize: 10 } },
@@ -951,6 +951,9 @@ function onLightStackClick(params) {
 
 // Widget key → its option/click handler, so the template renders every chart
 // through one <e-chart> and the gear popover can reach the raw option.
+// Compact chart tooltips — same look as the technical support block.
+const TIP = { textStyle: { fontSize: 11 }, padding: [4, 8], confine: true }
+
 const CHART_OPTIONS = {
   move: moveOpt,
   hire_fire: hireFireOpt,

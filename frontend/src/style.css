@@ -266,7 +266,7 @@ tr.row-unfilled:hover td{background:var(--c-err-l)}
 .echart{flex:none}
 /* echarts pins its inner div with inline width/height; that inline size would
    drive the wrapper and block shrinking — the wrapper must own its size. */
-.echart>div{width:100%!important;height:100%!important}
+.echart>div:first-child{width:100%!important;height:100%!important}
 .echart-fill{flex:1 1 auto}
 .twrap{flex:1 1 auto;overflow:auto}
 .rz{position:absolute;z-index:6;touch-action:none;user-select:none}
