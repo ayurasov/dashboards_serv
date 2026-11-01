@@ -27,6 +27,8 @@ from ...services.users import (
     replace_access,
     resolve_departments,
     serialize_user,
+    set_departments,
+    user_departments,
 )
 from ..deps import require_admin
 from .auth import validate_password
@@ -90,7 +92,7 @@ def create_user(body: UserCreateIn, request: Request, db: Session = Depends(get_
     user = User(username=body.username, full_name=body.full_name, email=email, position=body.position or None,
                 phone=body.phone or None, role=body.role, password_hash=hash_password(password),
                 must_change_password=True, password_changed_at=utcnow())
-    user.departments = resolve_departments(db, body.department_ids)
+    set_departments(user, resolve_departments(db, body.department_ids))
     db.add(user)
     db.flush()
     replace_access(db, user, body.access, admin)
@@ -113,7 +115,7 @@ def update_user(user_id: int, body: UserUpdateIn, request: Request, db: Session 
     user = _get_user(db, user_id)
     fields = body.model_dump(exclude_unset=True)
     before = {"full_name": user.full_name, "email": user.email, "position": user.position, "phone": user.phone,
-              "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user.departments]}
+              "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user_departments(user)]}
     demoting = fields.get("role") == "user" and user.is_admin
     disabling = fields.get("is_active") is False and user.is_active
     if user.id == admin.id and (demoting or disabling):
@@ -130,11 +132,11 @@ def update_user(user_id: int, body: UserUpdateIn, request: Request, db: Session 
     if user.full_name is None:
         user.full_name = before["full_name"]
     if body.department_ids is not None:
-        user.departments = resolve_departments(db, body.department_ids)
+        set_departments(user, resolve_departments(db, body.department_ids))
     if disabling:
         sessions.revoke_all(db, user.id)
     after = {"full_name": user.full_name, "email": user.email, "position": user.position, "phone": user.phone,
-             "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user.departments]}
+             "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user_departments(user)]}
     b, a = audit.diff(before, after)
     if a:
         audit.record(db, admin, entity_type="user", entity_id=user.id, action="update",

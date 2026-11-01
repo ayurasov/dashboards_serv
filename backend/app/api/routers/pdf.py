@@ -49,7 +49,7 @@ def _pdf_slot(db: Session):
 def hr_dashboard(months: str = "", db: Session = Depends(get_db), user: User = Depends(require_service("hr"))):
     keys = [k for k in months.split(",") if k]
     with _pdf_slot(db):
-        content = reports.hr_dashboard(db, keys, access.department_scope(user))
+        content = reports.hr_dashboard(db, keys, access.department_scope(db, user))
     return file_response(content, "Персонал — дашборд.pdf")
 
 
@@ -57,7 +57,7 @@ def hr_dashboard(months: str = "", db: Session = Depends(get_db), user: User = D
 def hr_summary(period_type: str = Query("quarter", pattern="^(month|quarter|half|year)$"),
                db: Session = Depends(get_db), user: User = Depends(require_service("hr"))):
     with _pdf_slot(db):
-        content = reports.hr_summary(db, period_type, access.department_scope(user))
+        content = reports.hr_summary(db, period_type, access.department_scope(db, user))
     return file_response(content, "Персонал — сводка.pdf")
 
 

@@ -82,7 +82,7 @@ def _services(db: Session, user: User, all: bool) -> list[ServiceOut]:
 
 
 def _hr_overview(db: Session, user: User) -> dict:
-    data = hr_service.dashboard(db, [], access.department_scope(user))
+    data = hr_service.dashboard(db, [], access.department_scope(db, user))
     latest = data["latest"]
     if not latest:
         return {"empty": True}
@@ -139,7 +139,7 @@ def _pp_overview(db: Session) -> dict:
 
 @router.get("/overview", summary="Стартовая страница: главное по каждой доступной службе")
 def overview(db: Session = Depends(get_db), user: User = Depends(active_user)):
-    scope = access.department_scope(user)
+    scope = access.department_scope(db, user)
     key = ("overview", tuple(sorted(access.accessible_services(user))), None if scope is None else tuple(sorted(scope)))
     return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user))
 

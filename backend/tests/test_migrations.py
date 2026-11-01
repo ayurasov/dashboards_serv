@@ -21,7 +21,7 @@ from app.core.migrate import LEGACY_HEAD, alembic_config, upgrade
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
-HEAD = "0013_data_revisions"
+HEAD = "0014_org_access"
 
 
 def _diff(url: str) -> list:
@@ -80,6 +80,59 @@ def test_0013_downgrade_and_upgrade(tmp_path):
     engine.dispose()
 
 
+def _org_fixture(conn):
+    """Структура из двух уровней, руководитель, пользователь с основным и дополнительным подразделением."""
+    conn.execute(text("INSERT INTO departments (id, name, name_key, code, kind, sort_order, org_source, "
+                      "created_at, updated_at) VALUES "
+                      "(101, 'Компания', 'компания', NULL, 'company', 0, 'manual', "
+                      "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    conn.execute(text("INSERT INTO departments (id, name, name_key, code, parent_id, kind, sort_order, org_source, "
+                      "created_at, updated_at) VALUES "
+                      "(102, 'Отдел', 'отдел', 'D102', 101, 'department', 0, 'manual', CURRENT_TIMESTAMP, "
+                      "CURRENT_TIMESTAMP), (103, 'Отдел', 'отдел', NULL, 102, 'group', 0, 'manual', "
+                      "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    conn.execute(text("INSERT INTO users (id, username, full_name, role, is_active, must_change_password, "
+                      "reports_to_none, auth_source, access_overrides, department_id, created_at, updated_at) VALUES "
+                      "(101, 'u101', 'Без пароля', 'user', true, false, false, 'ldap', '{}', 102, "
+                      "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    conn.execute(text("INSERT INTO user_access_units (user_id, department_id) VALUES (101, 103)"))
+    conn.execute(text("INSERT INTO department_heads (department_id, user_id, is_primary) VALUES (102, 101, true)"))
+    conn.execute(text("INSERT INTO service_access (user_id, service_key, level, org_scope, granted_at) "
+                      "VALUES (101, 'hr', 'viewer', 'branch', CURRENT_TIMESTAMP), "
+                      "(101, 'tech', 'none', NULL, CURRENT_TIMESTAMP)"))
+
+
+def test_0014_downgrade_and_upgrade(tmp_path):
+    """Откат 0014 сохраняет доступ и подразделения пользователей (в виде 0.1.0) и повторно применяется."""
+    url = f"sqlite:///{tmp_path / 'org.db'}"
+    upgrade(url)
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        _org_fixture(conn)
+    engine.dispose()
+
+    command.downgrade(alembic_config(url), "0013_data_revisions")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        tables = set(inspect(conn).get_table_names())
+        assert {"access_profiles", "department_heads", "user_access_units", "app_settings"}.isdisjoint(tables)
+        links = conn.execute(text("SELECT department_id FROM user_departments WHERE user_id = 101")).scalars()
+        assert set(links) == {102, 103}
+        assert conn.execute(text("SELECT service_key, level, department_scope FROM service_access "
+                                 "WHERE user_id = 101")).all() == [("hr", "viewer", 1)]
+        names = set(conn.execute(text("SELECT name FROM departments WHERE id IN (102, 103)")).scalars())
+        assert len(names) == 2, "одинаковые имена в разных ветках разведены — в 0.1.0 имя уникально"
+    engine.dispose()
+
+    assert upgrade(url) == HEAD
+    assert _diff(url) == []
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT department_id FROM users WHERE id = 101")).scalar() == 102
+        assert conn.execute(text("SELECT org_scope FROM service_access WHERE user_id = 101")).scalar() == "branch"
+    engine.dispose()
+
+
 def test_downgrade_of_0012_is_refused(tmp_path):
     url = f"sqlite:///{tmp_path / 'down.db'}"
     upgrade(url)
@@ -109,11 +162,13 @@ def test_legacy_create_all_database_is_upgraded(tmp_path):
         roles = dict(rows("SELECT username, role FROM users"))
         assert roles == {"admin": "admin", "hr_head": "user", "viewer": "user", "it_viewer": "user"}
         access = {(u, s): (lvl, scope) for u, s, lvl, scope in rows(
-            "SELECT u.username, a.service_key, a.level, a.department_scope FROM service_access a "
+            "SELECT u.username, a.service_key, a.level, a.org_scope FROM service_access a "
             "JOIN users u ON u.id = a.user_id")}
-        assert access[("hr_head", "hr")] == ("manager", 0)
-        assert access[("it_viewer", "hr")] == ("viewer", 1)
-        assert access[("viewer", "tech")] == ("viewer", 0)
+        assert access[("hr_head", "hr")] == ("manager", None)
+        assert access[("it_viewer", "hr")] == ("viewer", "branch"), "«свои подразделения» → своя ветка"
+        assert access[("viewer", "tech")] == ("viewer", None)
+        homes = dict(rows("SELECT u.username, d.code FROM users u JOIN departments d ON d.id = u.department_id"))
+        assert homes.get("it_viewer") == "IT", "подразделение пользователя стало основным"
 
         assert rows("SELECT COUNT(*) FROM hr_months")[0][0] == 2
         assert rows("SELECT comment FROM hr_months ORDER BY month")[0][0].startswith("Подписано соглашение")
@@ -163,7 +218,8 @@ def test_legacy_alembic_database_is_upgraded_on_postgres(pg_url):
         leftovers = conn.execute(text("SELECT relname FROM pg_class WHERE relname LIKE '\\_lg%'")).all()
         assert leftovers == []
         # последовательности продолжают нумерацию после перенесённых строк
-        conn.execute(text("INSERT INTO departments (name, code, created_at) VALUES ('Новый', 'NEW', now())"))
+        conn.execute(text("INSERT INTO departments (name, name_key, code, kind, sort_order, org_source, created_at, "
+                          "updated_at) VALUES ('Новый', 'новый', 'NEW', 'department', 0, 'manual', now(), now())"))
         new_id = conn.execute(text("SELECT id FROM departments WHERE code = 'NEW'")).scalar()
         assert new_id > 1
     engine.dispose()

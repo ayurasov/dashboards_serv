@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from fastapi import Depends, Request
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..core.config import settings
 from ..core.db import get_db
@@ -40,7 +40,8 @@ def auth_context(request: Request, db: Session = Depends(get_db)) -> AuthContext
         header = request.headers.get("x-csrf-token", "")
         if not header or not constant_time_equals(header, session.csrf_token):
             raise Forbidden("Сессия устарела: обновите страницу", code="csrf_failed")
-    user = db.scalars(select(User).options(joinedload(User.access), joinedload(User.departments))
+    user = db.scalars(select(User).options(joinedload(User.access), selectinload(User.access_units),
+                               selectinload(User.head_links))
                       .where(User.id == session.user_id)).unique().first()
     db.commit()
     if user is None or not user.is_active:

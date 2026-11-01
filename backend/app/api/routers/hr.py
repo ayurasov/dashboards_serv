@@ -55,19 +55,19 @@ def metric_definitions(db: Session = Depends(get_db), _: User = Depends(read)):
                        lambda: [MetricDefinitionOut.model_validate(d) for d in hr_service.definitions(db)])
 
 
-def _scope_key(user: User) -> tuple | None:
-    scope = access.department_scope(user)
+def _scope_key(db: Session, user: User) -> tuple | None:
+    scope = access.department_scope(db, user)
     return None if scope is None else tuple(sorted(scope))
 
 
 @router.get("/departments", summary="Подразделения, встречающиеся в реестре")
 def departments(db: Session = Depends(get_db), user: User = Depends(read)):
     def compute():
-        scope = access.department_scope(user)
+        scope = access.department_scope(db, user)
         names = sorted({d for d in db.scalars(select(HrEmployeeEvent.department).distinct()) if d})
         return [n for n in names if n in scope] if scope is not None else names
 
-    return cached_json(db, [SERVICE], ("hr.departments", _scope_key(user)), compute)
+    return cached_json(db, [SERVICE], ("hr.departments", _scope_key(db, user)), compute)
 
 
 # ---------- месяцы ----------
@@ -75,7 +75,7 @@ def departments(db: Session = Depends(get_db), user: User = Depends(read)):
 @router.get("/months", response_model=list[MonthListItem], summary="Месяцы с данными")
 def list_months(db: Session = Depends(get_db), user: User = Depends(read)):
     def compute():
-        scope = access.department_scope(user)
+        scope = access.department_scope(db, user)
         total = len(hr_service.definitions(db))
         out = []
         for m in hr_service.months_sorted(db):
@@ -85,7 +85,7 @@ def list_months(db: Session = Depends(get_db), user: User = Depends(read)):
                                      filled_metrics=sum(1 for v in m.values if v.value is not None)))
         return out
 
-    return cached_json(db, [SERVICE], ("hr.months", _scope_key(user)), compute)
+    return cached_json(db, [SERVICE], ("hr.months", _scope_key(db, user)), compute)
 
 
 @router.post("/months", response_model=MonthListItem, status_code=201, summary="Добавить месяц")
@@ -109,7 +109,7 @@ def get_month(key: str, db: Session = Depends(get_db), user: User = Depends(read
     previous = db.scalar(select(HrMonth).where(
         or_(HrMonth.year < month.year, (HrMonth.year == month.year) & (HrMonth.month < month.month)))
         .order_by(HrMonth.year.desc(), HrMonth.month.desc()).limit(1))
-    scope = access.department_scope(user)
+    scope = access.department_scope(db, user)
     events = hr_service.visible_events(month.events, scope)
     return {
         "key": month.key, "label": month.label, "year": month.year, "month": month.month,
@@ -196,14 +196,14 @@ def query_events(month: str = "", year: int | None = None, event_type: str = Que
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(or_(func.lower(HrEmployeeEvent.full_name).like(like),
                               func.lower(HrEmployeeEvent.position).like(like)))
-    return [_event_out(e) for e in hr_service.visible_events(list(db.scalars(stmt)), access.department_scope(user))]
+    return [_event_out(e) for e in hr_service.visible_events(list(db.scalars(stmt)), access.department_scope(db, user))]
 
 
 
 @router.get("/events", response_model=list[EventOut], summary="Реестр приёмов и увольнений")
 def list_events(month: str = "", year: int | None = None, event_type: str = Query("", pattern="^(|hired|fired)$"),
                 department: str = "", search: str = "", db: Session = Depends(get_db), user: User = Depends(read)):
-    key = ("hr.events", month, year, event_type, department, search.strip().lower(), _scope_key(user))
+    key = ("hr.events", month, year, event_type, department, search.strip().lower(), _scope_key(db, user))
     return cached_json(db, [SERVICE], key,
                        lambda: query_events(month, year, event_type, department, search, db, user))
 
@@ -312,16 +312,16 @@ def analytics_dashboard(months: str = "", db: Session = Depends(get_db), user: U
     keys = [k for k in months.split(",") if k]
     for k in keys:
         hr_service.parse_month_key(k)
-    return cached_json(db, [SERVICE], ("hr.dashboard", tuple(keys), _scope_key(user)),
-                       lambda: hr_service.dashboard(db, keys, access.department_scope(user)))
+    return cached_json(db, [SERVICE], ("hr.dashboard", tuple(keys), _scope_key(db, user)),
+                       lambda: hr_service.dashboard(db, keys, access.department_scope(db, user)))
 
 
 @router.get("/analytics/summary", summary="Сводка по периодам")
 def analytics_summary(period_type: str = "quarter", db: Session = Depends(get_db), user: User = Depends(read)):
     if period_type not in hr_service.PERIOD_TYPES:
         hr_service.period_summary(db, period_type, None)  # единое сообщение об ошибке
-    return cached_json(db, [SERVICE], ("hr.summary", period_type, _scope_key(user)),
-                       lambda: hr_service.period_summary(db, period_type, access.department_scope(user)))
+    return cached_json(db, [SERVICE], ("hr.summary", period_type, _scope_key(db, user)),
+                       lambda: hr_service.period_summary(db, period_type, access.department_scope(db, user)))
 
 
 # ---------- цели ----------

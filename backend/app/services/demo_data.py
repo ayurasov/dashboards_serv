@@ -17,8 +17,10 @@ from ..core.db import utcnow
 from ..core.security import hash_password
 from ..models import (
     TP_METRIC_COLUMNS,
+    AccessProfile,
     DataImport,
     Department,
+    DepartmentHead,
     HrEmployeeEvent,
     HrMetricValue,
     HrMonth,
@@ -46,6 +48,29 @@ DEMO_USERS = (
      [("hr", "viewer", False), ("project_product", "viewer", False), ("tech", "viewer", False)], []),
     ("it_viewer", "Руководитель ИТ-службы", "Руководитель службы", "user", "it123456",
      [("hr", "viewer", True), ("it", "viewer", False)], ["IT"]),
+    # Уровни сотрудников модели доступа 2.0 (профили — в DEMO_PROFILES)
+    ("ceo", "Громов Андрей Викторович", "Генеральный директор", "user", "ceo12345", [], ["ALMI"]),
+    ("tech_dir", "Соколова Мария Игоревна", "Технический директор", "user", "td123456", [], ["TECHDIR"]),
+    ("engineer", "Петров Илья Сергеевич", "Инженер технической поддержки", "user", "en123456", [], ["SUP-OS"]),
+)
+DEMO_PROFILES = {"ceo": "executive", "tech_dir": "director", "tp_lead": "head", "it_viewer": "head",
+                 "engineer": "employee"}
+
+# Демо-структура: код, название, тип, код родителя, руководитель (логин)
+DEMO_ORG = (
+    ("ALMI", "АЛМИ Партнер", "company", None, "ceo"),
+    ("ADMIN", "Аппарат генерального директора", "division", "ALMI", "ceo"),
+    ("AHO", "АХО", "department", "ADMIN", None),
+    ("HR", "Служба персонала", "service", "ADMIN", "hr_head"),
+    ("COMMDIR", "Коммерческая дирекция", "division", "ALMI", None),
+    ("COMM", "Коммерческая служба", "service", "COMMDIR", None),
+    ("MKT", "Служба маркетинга", "service", "COMMDIR", None),
+    ("TECHDIR", "Техническая дирекция", "division", "ALMI", "tech_dir"),
+    ("TECH", "Техническая служба", "service", "TECHDIR", "tp_lead"),
+    ("SUP-OS", "Группа поддержки AlterOS", "group", "TECH", None),
+    ("SUP-OFFICE", "Группа поддержки AlterOffice", "group", "TECH", None),
+    ("IT", "ИТ-служба", "service", "TECHDIR", "it_viewer"),
+    ("PROJ", "Проектная служба", "service", "ALMI", "product"),
 )
 
 
@@ -62,6 +87,44 @@ def _log_import(db: Session, service_key: str, dataset: str, filename: str, rows
                       rows_total=rows, rows_created=rows, username="system"))
 
 
+def load_org(db: Session) -> None:
+    """Дерево структуры поверх начального плоского списка (только если структура ещё плоская)."""
+    existing = {d.code: d for d in db.scalars(select(Department)) if d.code}
+    if any(d.parent_id for d in existing.values()):
+        return
+    for order, (code, name, kind, parent, _head) in enumerate(DEMO_ORG):
+        unit = existing.get(code)
+        if unit is None:
+            unit = Department(name=name, code=code)
+            db.add(unit)
+            existing[code] = unit
+        unit.kind = kind
+        unit.sort_order = order
+        unit.org_source = "demo"
+        unit.parent_id = None
+        db.flush()
+        if parent:
+            unit.parent_id = existing[parent].id
+    db.flush()
+
+
+def load_org_heads(db: Session) -> None:
+    if db.scalar(select(func.count()).select_from(DepartmentHead)):
+        return
+    units = {d.code: d for d in db.scalars(select(Department)) if d.code}
+    users = {u.username: u for u in db.scalars(select(User))}
+    for code, _name, _kind, _parent, head in DEMO_ORG:
+        if head and code in units and head in users:
+            db.add(DepartmentHead(department_id=units[code].id, user_id=users[head].id, is_primary=True))
+    if "ceo" in users:
+        users["ceo"].reports_to_none = True
+    profiles = {p.key: p for p in db.scalars(select(AccessProfile))}
+    for username, key in DEMO_PROFILES.items():
+        if username in users and key in profiles and users[username].access_profile_id is None:
+            users[username].access_profile_id = profiles[key].id
+    db.flush()
+
+
 def load_users(db: Session) -> None:
     departments = {d.code: d for d in db.scalars(select(Department))}
     existing = set(db.scalars(select(User.username)))
@@ -70,11 +133,13 @@ def load_users(db: Session) -> None:
             continue
         user = User(username=username, full_name=full_name, position=position, role=role,
                     password_hash=hash_password(password), password_changed_at=utcnow())
-        user.departments = [departments[c] for c in dept_codes if c in departments]
+        home = [departments[c] for c in dept_codes if c in departments]
+        user.department_id = home[0].id if home else None
         db.add(user)
         db.flush()
         for service_key, level, scoped in grants:
-            db.add(ServiceAccess(user_id=user.id, service_key=service_key, level=level, department_scope=scoped))
+            db.add(ServiceAccess(user_id=user.id, service_key=service_key, level=level,
+                                 org_scope="branch" if scoped else None))
     db.flush()
 
 
@@ -154,7 +219,9 @@ def load_partnerships(db: Session) -> None:
 
 
 def load_demo_data(db: Session) -> None:
+    load_org(db)
     load_users(db)
+    load_org_heads(db)
     load_hr(db)
     load_tp(db)
     load_naumen(db)

@@ -4,34 +4,43 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import EmailStr, Field, computed_field, field_validator
 
 from .common import Input, Schema
 
 Role = Literal["admin", "user"]
 Level = Literal["viewer", "editor", "manager"]
+ServiceLevel = Literal["none", "viewer", "editor", "manager"]
+OrgScope = Literal["company", "branch", "unit"]
 
 
 class DepartmentOut(Schema):
     id: int
     name: str
-    code: str
+    code: str | None = None
 
 
 class DepartmentIn(Input):
     name: str = Field(min_length=1, max_length=200)
-    code: str = Field(min_length=1, max_length=50)
+    code: str | None = Field(default=None, max_length=50)
 
 
 class AccessOut(Schema):
     service_key: str
-    level: Level
-    department_scope: bool = False
+    level: ServiceLevel
+    org_scope: OrgScope | None = None
+
+    @computed_field  # совместимость с 0.1.0
+    @property
+    def department_scope(self) -> bool:
+        return self.org_scope is not None and self.org_scope != "company"
 
 
 class AccessIn(Input):
     service_key: str
-    level: Level
+    level: ServiceLevel
+    org_scope: OrgScope | None = None
+    # Совместимость с 0.1.0: «только свои подразделения» = своя ветка структуры
     department_scope: bool = False
 
 

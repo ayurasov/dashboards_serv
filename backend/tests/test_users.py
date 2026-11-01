@@ -44,7 +44,8 @@ def test_access_replace_and_audit(admin):
     viewer = _user(admin, "viewer")
     response = admin.put(f"/api/users/{viewer['id']}/access", json=[{"service_key": "tech", "level": "manager"}])
     assert response.status_code == 200
-    assert response.json()["access"] == [{"service_key": "tech", "level": "manager", "department_scope": False}]
+    assert response.json()["access"] == [{"service_key": "tech", "level": "manager", "org_scope": None,
+                                          "department_scope": False}]
     log = admin.get("/api/audit", params={"entity_type": "user_access"}).json()
     assert log["total"] == 1 and "viewer" in log["items"][0]["summary"]
 
@@ -60,11 +61,16 @@ def test_access_validation(admin):
     assert level.status_code == 422
 
 
-def test_department_scope_only_for_viewers(admin):
+def test_service_scope_applies_to_any_level(admin):
+    """С 0.2.0 область структуры службы действует на любом уровне доступа (ADR-0009)."""
     viewer = _user(admin, "viewer")
     response = admin.put(f"/api/users/{viewer['id']}/access",
                          json=[{"service_key": "hr", "level": "editor", "department_scope": True}])
-    assert response.json()["access"][0]["department_scope"] is False
+    row = response.json()["access"][0]
+    assert row["org_scope"] == "branch" and row["department_scope"] is True
+    response = admin.put(f"/api/users/{viewer['id']}/access",
+                         json=[{"service_key": "hr", "level": "viewer", "org_scope": "unit"}])
+    assert response.json()["access"][0]["org_scope"] == "unit"
 
 
 def test_reset_password_gives_temporary_one(admin, login, client):
