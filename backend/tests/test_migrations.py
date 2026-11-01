@@ -291,4 +291,4 @@ def test_demo_and_reference_data_fit_postgres_constraints(pg_url):
         counts = {t: conn.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
                   for t in ("users", "hr_months", "tp_weekly_reports", "naumen_tickets", "partnerships")}
     engine.dispose()
-    assert counts == {"users": 6, "hr_months": 7, "tp_weekly_reports": 109, "naumen_tickets": 1868, "partnerships": 142}
+    assert counts == {"users": 9, "hr_months": 7, "tp_weekly_reports": 109, "naumen_tickets": 1868, "partnerships": 142}
