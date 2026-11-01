@@ -167,6 +167,9 @@ def test_openapi_is_generated(client):
     schema = client.get("/api/openapi.json").json()
     assert schema["info"]["version"] == "0.1.0"
     assert "/api/hr/analytics/dashboard" in schema["paths"] and "/api/tp/naumen/import" in schema["paths"]
+    for path in ("/api/access/meta", "/api/access/profiles/{profile_id}", "/api/users/{user_id}/grant-access",
+                 "/api/auth/config", "/api/system/ldap", "/api/system/ldap/test"):
+        assert path in schema["paths"], path
 
 
 def test_response_cache_is_invalidated_by_writes(admin, login):

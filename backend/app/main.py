@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import APP_NAME, __version__
 from .api.routers import (
+    access,
     auth,
     common,
     custom_dashboards,
@@ -94,7 +95,7 @@ def create_app() -> FastAPI:
                                 "status": response.status_code, "duration_ms": duration})
         return response
 
-    for module in (auth, users, org, common, hr, custom_dashboards, tp, naumen, partnerships, pdf, system):
+    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, pdf, system):
         app.include_router(module.router)
     app.include_router(org.departments_router)
 

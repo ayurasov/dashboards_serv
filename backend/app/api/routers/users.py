@@ -1,188 +1,111 @@
-"""Администрирование: пользователи, доступ к службам, подразделения."""
+"""Администрирование пользователей и их доступа (ADR-0008, ADR-0009).
+
+Полномочие users.manage (или роль администратора): все пользователи, кроме администраторов —
+их, роль администратора и полномочия меняет только администратор."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from ...core.db import get_db, utcnow
-from ...core.errors import Conflict, NotFound, ValidationFailed
-from ...core.security import generate_password, hash_password
+from ...core.db import get_db
 from ...models import User
+from ...schemas.access import AccessPolicyIn, AccessPolicyOut
 from ...schemas.common import Ok
 from ...schemas.users import (
     AccessIn,
+    GrantAccessIn,
     PasswordResetOut,
     UserCreatedOut,
     UserCreateIn,
+    UserListOut,
     UserOut,
     UserUpdateIn,
 )
-from ...services import audit, sessions
-from ...services.users import (
-    access_snapshot,
-    active_admins_count,
-    replace_access,
-    resolve_departments,
-    serialize_user,
-    set_departments,
-    user_departments,
-)
-from ..deps import require_admin
-from .auth import validate_password
+from ...services import users as users_service
+from ...services.users import UserFilters, get_user, serialize_user
+from ..deps import require_capability
 
 router = APIRouter(prefix="/api/users", tags=["Пользователи"])
+manage = require_capability("users.manage")
 
 
-def _get_user(db: Session, user_id: int) -> User:
-    user = db.get(User, user_id)
-    if user is None:
-        raise NotFound("Пользователь не найден")
-    return user
-
-
-def _email(value) -> str | None:
-    return (value or "").strip().lower() or None
-
-
-def _check_email(db: Session, email: str | None, user_id: int | None = None) -> None:
-    if not email:
-        return
-    stmt = select(User.id).where(func.lower(User.email) == email)
-    if user_id:
-        stmt = stmt.where(User.id != user_id)
-    if db.scalar(stmt):
-        raise ValidationFailed("Этот e-mail уже используется", fields={"email": "Уже используется"})
-
-
-@router.get("", response_model=list[UserOut], summary="Список пользователей")
-def list_users(search: str = "", status: str = Query("all", pattern="^(all|active|disabled)$"),
-               service: str = "", db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    stmt = select(User).order_by(User.full_name)
-    if search:
-        like = f"%{search.strip().lower()}%"
-        stmt = stmt.where(or_(func.lower(User.username).like(like), func.lower(User.full_name).like(like),
-                              func.lower(func.coalesce(User.email, "")).like(like)))
-    if status == "active":
-        stmt = stmt.where(User.is_active.is_(True))
-    elif status == "disabled":
-        stmt = stmt.where(User.is_active.is_(False))
-    users = list(db.scalars(stmt))
-    if service:
-        users = [u for u in users if u.is_admin or any(a.service_key == service for a in u.access)]
-    return [serialize_user(u) for u in users]
+@router.get("", response_model=UserListOut, summary="Пользователи: поиск, фильтры и сводка")
+def list_users(search: str = "", role: str = Query("", pattern="^(|admin|user)$"),
+               status: str = Query("", pattern="^(|all|active|disabled|no_access)$"),
+               department_id: str = "", profile_id: str = "",
+               auth_source: str = Query("", pattern="^(|local|ldap)$"), service: str = "",
+               db: Session = Depends(get_db), _: User = Depends(manage)):
+    """status: active · disabled · no_access (активная локальная учётная запись без пароля);
+    department_id и profile_id: номер или none (без подразделения · индивидуальная настройка).
+    Сводка — по всем пользователям, без фильтров."""
+    filters = UserFilters(search=search, role=role, status="" if status == "all" else status,
+                          department=department_id.strip(), profile=profile_id.strip(), auth_source=auth_source,
+                          service=service)
+    items, summary = users_service.list_users(db, filters)
+    return UserListOut(items=items, total=len(items), summary=summary)
 
 
 @router.post("", response_model=UserCreatedOut, status_code=201, summary="Создать пользователя")
-def create_user(body: UserCreateIn, request: Request, db: Session = Depends(get_db),
-                admin: User = Depends(require_admin)):
-    if db.scalar(select(User.id).where(func.lower(User.username) == body.username.lower())):
-        raise Conflict("Пользователь с таким логином уже существует", fields={"username": "Логин занят"})
-    email = _email(body.email)
-    _check_email(db, email)
-    temporary = None
-    if body.password:
-        validate_password(body.password, field="password")
-        password = body.password
-    else:
-        password = temporary = generate_password()
-    user = User(username=body.username, full_name=body.full_name, email=email, position=body.position or None,
-                phone=body.phone or None, role=body.role, password_hash=hash_password(password),
-                must_change_password=True, password_changed_at=utcnow())
-    set_departments(user, resolve_departments(db, body.department_ids))
-    db.add(user)
-    db.flush()
-    replace_access(db, user, body.access, admin)
-    audit.record(db, admin, entity_type="user", entity_id=user.id, action="create",
-                 summary=f"Создан пользователь {user.username}",
-                 after={"username": user.username, "full_name": user.full_name, "role": user.role,
-                        "access": access_snapshot(user)}, request=request)
+def create_user(body: UserCreateIn, request: Request, db: Session = Depends(get_db), actor: User = Depends(manage)):
+    """access_method: password — пароль системы (без пароля — временный, возвращается один раз);
+    ldap — вход по учётной записи домена (нужны включённый вход по домену и e-mail); none — без доступа."""
+    user, temporary = users_service.create_user(db, actor, body, request)
     db.commit()
     return UserCreatedOut(user=serialize_user(user), temporary_password=temporary)
 
 
 @router.get("/{user_id}", response_model=UserOut, summary="Карточка пользователя")
-def get_user(user_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return serialize_user(_get_user(db, user_id))
+def get_one(user_id: int, db: Session = Depends(get_db), _: User = Depends(manage)):
+    return serialize_user(get_user(db, user_id))
 
 
 @router.patch("/{user_id}", response_model=UserOut, summary="Изменить пользователя")
 def update_user(user_id: int, body: UserUpdateIn, request: Request, db: Session = Depends(get_db),
-                admin: User = Depends(require_admin)):
-    user = _get_user(db, user_id)
-    fields = body.model_dump(exclude_unset=True)
-    before = {"full_name": user.full_name, "email": user.email, "position": user.position, "phone": user.phone,
-              "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user_departments(user)]}
-    demoting = fields.get("role") == "user" and user.is_admin
-    disabling = fields.get("is_active") is False and user.is_active
-    if user.id == admin.id and (demoting or disabling):
-        raise ValidationFailed("Нельзя снять с себя роль администратора или отключить свою учётную запись")
-    if (demoting or disabling) and user.is_admin and active_admins_count(db) <= 1:
-        raise ValidationFailed("В системе должен остаться хотя бы один активный администратор")
-    if "email" in fields:
-        email = _email(fields["email"])
-        _check_email(db, email, user.id)
-        user.email = email
-    for key in ("full_name", "position", "phone", "role", "is_active"):
-        if key in fields and fields[key] is not None:
-            setattr(user, key, fields[key] if key in ("role", "is_active") else (fields[key] or "").strip() or None)
-    if user.full_name is None:
-        user.full_name = before["full_name"]
-    if body.department_ids is not None:
-        set_departments(user, resolve_departments(db, body.department_ids))
-    if disabling:
-        sessions.revoke_all(db, user.id)
-    after = {"full_name": user.full_name, "email": user.email, "position": user.position, "phone": user.phone,
-             "role": user.role, "is_active": user.is_active, "departments": [d.name for d in user_departments(user)]}
-    b, a = audit.diff(before, after)
-    if a:
-        audit.record(db, admin, entity_type="user", entity_id=user.id, action="update",
-                     summary=f"Изменён пользователь {user.username}", before=b, after=a, request=request)
+                actor: User = Depends(manage)):
+    user = users_service.update_user(db, actor, get_user(db, user_id), body.model_dump(exclude_unset=True), request)
     db.commit()
     return serialize_user(user)
 
 
-@router.put("/{user_id}/access", response_model=UserOut, summary="Задать доступ к службам")
-def set_access(user_id: int, body: list[AccessIn], request: Request, db: Session = Depends(get_db),
-               admin: User = Depends(require_admin)):
-    user = _get_user(db, user_id)
-    before = access_snapshot(user)
-    replace_access(db, user, body, admin)
-    after = access_snapshot(user)
-    if before != after:
-        audit.record(db, admin, entity_type="user_access", entity_id=user.id, action="update",
-                     summary=f"Изменён доступ пользователя {user.username}", before=before, after=after,
-                     request=request)
+@router.get("/{user_id}/access", response_model=AccessPolicyOut, summary="Доступ пользователя")
+def get_access(user_id: int, db: Session = Depends(get_db), _: User = Depends(manage)):
+    return users_service.access_policy(db, get_user(db, user_id))
+
+
+@router.put("/{user_id}/access", response_model=AccessPolicyOut, summary="Задать доступ пользователя")
+def set_access(user_id: int, request: Request, body: AccessPolicyIn | list[AccessIn] = Body(...),
+               db: Session = Depends(get_db), actor: User = Depends(manage)):
+    """Меняются только переданные части: profile_id, overrides, services, extra_unit_ids.
+    Совместимость с 0.1.0: список строк доступа к службам заменяет только строки служб."""
+    fields = {"services": body} if isinstance(body, list) else body.model_dump(exclude_unset=True)
+    user = get_user(db, user_id)
+    users_service.set_access_policy(db, actor, user, fields, request)
     db.commit()
-    return serialize_user(user)
+    return users_service.access_policy(db, user)
+
+
+@router.post("/{user_id}/grant-access", response_model=UserCreatedOut, summary="Выдать доступ")
+def grant_access(user_id: int, request: Request, body: GrantAccessIn | None = None, db: Session = Depends(get_db),
+                 actor: User = Depends(manage)):
+    """Включает учётную запись. method: password — пароль системы (временный, если пароля не было
+    или сотрудник входил по домену); ldap — вход по учётной записи домена."""
+    user = get_user(db, user_id)
+    temporary = users_service.grant_access(db, actor, user, (body or GrantAccessIn()).method, request)
+    db.commit()
+    return UserCreatedOut(user=serialize_user(user), temporary_password=temporary)
 
 
 @router.post("/{user_id}/reset-password", response_model=PasswordResetOut, summary="Выдать временный пароль")
-def reset_password(user_id: int, request: Request, db: Session = Depends(get_db),
-                   admin: User = Depends(require_admin)):
-    user = _get_user(db, user_id)
-    password = generate_password()
-    user.password_hash = hash_password(password)
-    user.must_change_password = True
-    user.password_changed_at = utcnow()
-    sessions.revoke_all(db, user.id)
-    audit.record(db, admin, entity_type="user", entity_id=user.id, action="password",
-                 summary=f"Выдан временный пароль пользователю {user.username}", request=request)
+def reset_password(user_id: int, request: Request, db: Session = Depends(get_db), actor: User = Depends(manage)):
+    """Сотрудник, входивший по домену, переводится на пароль системы. Сессии пользователя завершаются."""
+    user = get_user(db, user_id)
+    password = users_service.reset_password(db, actor, user, request)
     db.commit()
-    return PasswordResetOut(temporary_password=password)
+    return PasswordResetOut(temporary_password=password, user=serialize_user(user))
 
 
 @router.delete("/{user_id}", response_model=Ok, summary="Удалить пользователя")
-def delete_user(user_id: int, request: Request, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    user = _get_user(db, user_id)
-    if user.id == admin.id:
-        raise ValidationFailed("Нельзя удалить свою учётную запись")
-    if user.is_admin and user.is_active and active_admins_count(db) <= 1:
-        raise ValidationFailed("Нельзя удалить последнего администратора")
-    audit.record(db, admin, entity_type="user", entity_id=user.id, action="delete",
-                 summary=f"Удалён пользователь {user.username}",
-                 before={"username": user.username, "full_name": user.full_name, "role": user.role},
-                 request=request)
-    db.delete(user)
+def delete_user(user_id: int, request: Request, db: Session = Depends(get_db), actor: User = Depends(manage)):
+    users_service.delete_user(db, actor, get_user(db, user_id), request)
     db.commit()
     return Ok(message="Пользователь удалён")

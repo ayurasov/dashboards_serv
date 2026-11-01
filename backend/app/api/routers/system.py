@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import platform
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -13,6 +13,8 @@ from ...core.config import settings
 from ...core.db import engine, get_db
 from ...core.migrate import check_schema_is_current
 from ...models import AuditEntry, DataImport, HrMonth, NaumenTicket, Partnership, TpWeeklyReport, User, UserSession
+from ...schemas.users import LdapTestIn
+from ...services import ldap_auth
 from ..deps import require_admin
 
 router = APIRouter(prefix="/api", tags=["Система"])
@@ -80,3 +82,19 @@ def system_info(db: Session = Depends(get_db), _: User = Depends(require_admin))
             "max_upload_mb": settings.max_upload_mb,
         },
     }
+
+
+# ---------- вход по домену (ADR-0008) ----------
+
+@router.get("/system/ldap", summary="Вход по домену: состояние и настройки (администратор)")
+def ldap_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Включён ли вход по домену, настройки AUTH_LDAP_* без секретов, версия ldap3 и замечания к настройке."""
+    return ldap_auth.status(db)
+
+
+@router.post("/system/ldap/test", summary="Вход по домену: проверить подключение и поиск логина (администратор)")
+def ldap_test(body: LdapTestIn | None = Body(default=None), db: Session = Depends(get_db),
+              _: User = Depends(require_admin)):
+    """Подключение и служебная привязка; с login — поиск записи каталога и с кем она будет сопоставлена.
+    Пароль сотрудника не проверяется. Каталог недоступен — ok: false и причина."""
+    return ldap_auth.check_connection(db, body.login if body else None)

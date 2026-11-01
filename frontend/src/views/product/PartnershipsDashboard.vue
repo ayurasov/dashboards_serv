@@ -22,7 +22,7 @@ import { chartColors, cssVar, lightColor } from '@/components/charts/echarts'
 import { formatNumber } from '@/utils/format'
 import { LIGHT_LABELS } from '@/utils/lights'
 import {
-  PARTNERSHIP_STATUSES, PARTNERSHIP_TYPES, countByLight, countWord, fitSpans, groupLightRows, lightSegments, mergeOptions, orderStatuses,
+  PARTNERSHIP_STATUSES, PARTNERSHIP_TYPES, countWord, fitSpans, groupLightRows, lightSegments, mergeOptions, orderStatuses,
   share, shortRuleLabel, sortedEntries,
 } from '@/domain/partnerships'
 
@@ -36,12 +36,10 @@ const params = computed(() => ({ year: f.year, status: f.status, almi_product: f
 
 const options = useAsync(() => partnershipsApi.options())
 const { data, loading, reload } = useAsync(() => partnershipsApi.analytics(params.value), { immediate: false })
-const records = useAsync(() => partnershipsApi.list(params.value), { immediate: false })
-watch(params, () => { reload(); records.reload() }, { immediate: true, deep: true })
+watch(params, () => reload(), { immediate: true, deep: true })
 
 function refresh() {
   reload()
-  records.reload()
   options.reload()
   app.loadServices()
 }
@@ -69,7 +67,8 @@ const kpis = computed(() => {
 
 // ---------- светофор ----------
 const lightGroups = computed(() => groupLightRows(data.value?.lights || []))
-const recordLights = computed(() => countByLight(records.data.value || []))
+// Светофор записей считает сервер (analytics.record_lights): дашборду не нужен доступ к реестру
+const recordLights = computed(() => ({ green: 0, yellow: 0, red: 0, gray: 0, ...(data.value?.record_lights || {}) }))
 const recordSegments = computed(() => lightSegments(recordLights.value))
 const recordTotal = computed(() => recordSegments.value.reduce((s, x) => s + x.count, 0))
 

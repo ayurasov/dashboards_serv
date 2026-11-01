@@ -16,7 +16,7 @@ from ...schemas.tp import TpColumnOut, TpReportIn, TpReportOut, TpReportPatch
 from ...services import audit
 from ...services import tp as tp_service
 from ...services.cache import cached_json
-from ..deps import require_service
+from ..deps import require_export, require_service
 from ..uploads import file_response, read_upload
 
 router = APIRouter(prefix="/api/tp", tags=["Техподдержка: недельный отчёт"])
@@ -24,6 +24,9 @@ SERVICE = "tech"
 read = require_service(SERVICE, "viewer")
 edit = require_service(SERVICE, "editor")
 manage = require_service(SERVICE, "manager")
+# Список недель нужен дашборду и остаётся доступным с просмотром; выгрузка недельного отчёта —
+# выгрузка исходных записей (ADR-0009)
+report_export = require_export(SERVICE, records=True)
 
 SETTING_KEYS = {"block_settings", "dashboard"}
 
@@ -151,12 +154,12 @@ async def import_reports(request: Request, file: UploadFile = File(...),
 
 
 @router.get("/reports/export.csv", summary="Выгрузить отчёт в CSV")
-def export_csv(db: Session = Depends(get_db), _: User = Depends(read)):
+def export_csv(db: Session = Depends(get_db), _: User = Depends(report_export)):
     return file_response(tp_service.export_csv(_ordered(db)), "Отчёт ТП по неделям.csv")
 
 
 @router.get("/reports/export.xlsx", summary="Выгрузить отчёт в Excel (формат исходного отчёта)")
-def export_xlsx(db: Session = Depends(get_db), _: User = Depends(read)):
+def export_xlsx(db: Session = Depends(get_db), _: User = Depends(report_export)):
     return file_response(tp_service.export_xlsx(_ordered(db)), "Итоговый отчёт ТП по неделям.xlsx")
 
 

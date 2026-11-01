@@ -139,8 +139,8 @@ def _pp_overview(db: Session) -> dict:
 
 @router.get("/overview", summary="Стартовая страница: главное по каждой доступной службе")
 def overview(db: Session = Depends(get_db), user: User = Depends(active_user)):
-    scope = access.department_scope(db, user)
-    key = ("overview", tuple(sorted(access.accessible_services(user))), None if scope is None else tuple(sorted(scope)))
+    # Ключ — службы и уровни, область, классы данных и записи пользователя (ADR-0009)
+    key = ("overview", tuple(sorted(access.accessible_services(user))), access.cache_scope(db, user, "hr"))
     return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user))
 
 
