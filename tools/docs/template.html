@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>$title$</title>
+<style>
+$for(css)$
+$css$
+$endfor$
+</style>
+</head>
+<body>
+<section class="cover">
+  <div class="cover-bar"></div>
+  <div class="cover-inner">
+    <div class="cover-brand"><svg viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6" fill="#c8302c"/><path d="M6 17V12M10 17V8M14 17v-6M18 17V6" stroke="#fff" stroke-width="2.1" stroke-linecap="round" fill="none"/></svg>Дашборды компании</div>
+    <div class="cover-tag">Показатели служб АЛМИ Партнер</div>
+    <h1 class="cover-title">$cover-title$</h1>
+    <div class="cover-sub">$subtitle$</div>
+  </div>
+  <div class="cover-meta"><span>$date$</span><span>© Alexander Yurasov</span></div>
+</section>
+<nav class="toc" id="TOC">
+<h1>Содержание</h1>
+$table-of-contents$
+</nav>
+<main>
+$body$
+</main>
+</body>
+</html>
