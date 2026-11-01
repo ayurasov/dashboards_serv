@@ -186,7 +186,7 @@ watch(() => form.month, (m, old) => {
 .scope { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); margin-top: -8px; }
 .search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--muted); min-width: 220px; background: var(--surface); }
 .search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--text); font-size: var(--fs-sm); }
-.search:focus-within { border-color: var(--chart-2); box-shadow: 0 0 0 3px var(--focus); }
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .sort-icon { display: inline-block; margin-left: 4px; vertical-align: -1px; }
 .strong { font-weight: 560; }
 .error { color: var(--light-red); font-size: var(--fs-sm); margin-top: 10px; }

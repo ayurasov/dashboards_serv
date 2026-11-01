@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  WIDGET_SPAN, WIDGET_TYPES, changeType, isMulti, latestFilled, moveItem, newWidget, sortWidgets, splitDashboards, toEditor,
+  WIDGET_TYPES, changeType, isMulti, latestFilled, layoutBlocks, moveItem, newWidget, sortWidgets, splitDashboards, toEditor,
   toPayload, unitAxes, validateWidget, valuesOf, widgetKeys, widgetTitle,
 } from './hrWidgets'
 
@@ -15,8 +15,8 @@ const month = (key, values) => ({ key, label: key, metrics: Object.entries(value
 const SERIES = [month('2026-01', { turnover: 1, time: 30 }), month('2026-02', { turnover: 1.5, time: null }), month('2026-03', { turnover: null })]
 
 describe('виджеты', () => {
-  it('у каждого типа есть подпись и ширина', () => {
-    for (const t of WIDGET_TYPES) expect(WIDGET_SPAN[t.value]).toBeGreaterThan(0)
+  it('у каждого типа есть подпись и иконка; несколько метрик — у графиков и таблицы', () => {
+    for (const t of WIDGET_TYPES) expect(t.label && t.icon).toBeTruthy()
     expect(WIDGET_TYPES.filter((t) => isMulti(t.value)).map((t) => t.value)).toEqual(['line_chart', 'bar_chart', 'table'])
   })
   it('widgetKeys: метрики по типу виджета', () => {
@@ -36,6 +36,24 @@ describe('виджеты', () => {
     const list = [{ id: 1, sort_order: 2 }, { id: 2, sort_order: 0 }, { id: 3, sort_order: 1 }]
     expect(sortWidgets(list).map((w) => w.id)).toEqual([2, 3, 1])
     expect(list[0].id).toBe(1)
+  })
+})
+
+describe('раскладка', () => {
+  const w = (id, widget_type, sort_order = id) => ({ id, widget_type, sort_order })
+  const shape = (blocks) => blocks.map((b) => `${b.kind === 'cards' ? `cards:${b.items.map((x) => x.id).join('+')}` : b.widget.id}${b.wide ? '*' : ''}`)
+  it('карточки подряд — одна полоса, таблица — во всю ширину', () => {
+    expect(shape(layoutBlocks([w(1, 'metric_card'), w(2, 'metric_card'), w(3, 'line_chart'), w(4, 'bar_chart'), w(5, 'table')])))
+      .toEqual(['cards:1+2*', '3', '4', '5*'])
+  })
+  it('виджет без пары в ряду растягивается', () => {
+    expect(shape(layoutBlocks([w(1, 'line_chart'), w(2, 'table'), w(3, 'note'), w(4, 'bar_chart'), w(5, 'note')])))
+      .toEqual(['1*', '2*', '3', '4', '5*'])
+    expect(shape(layoutBlocks([w(1, 'note'), w(2, 'metric_card'), w(3, 'line_chart')]))).toEqual(['1*', 'cards:2*', '3*'])
+  })
+  it('порядок — по sort_order; карточки, разделённые другим виджетом, — разные полосы', () => {
+    expect(shape(layoutBlocks([w(1, 'metric_card', 2), w(2, 'note', 1), w(3, 'metric_card', 0)]))).toEqual(['cards:3*', '2*', 'cards:1*'])
+    expect(layoutBlocks([])).toEqual([])
   })
 })
 

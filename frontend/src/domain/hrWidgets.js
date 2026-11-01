@@ -10,8 +10,6 @@ export const WIDGET_TYPES = [
 export const WIDGET_LABELS = Object.fromEntries(WIDGET_TYPES.map((t) => [t.value, t.label]))
 export const MAX_WIDGETS = 40
 
-/** Сколько колонок сетки (из четырёх) занимает виджет. */
-export const WIDGET_SPAN = { metric_card: 1, note: 1, line_chart: 2, bar_chart: 2, table: 4 }
 
 export function isMulti(type) {
   return type === 'line_chart' || type === 'bar_chart' || type === 'table'
@@ -80,6 +78,35 @@ export function validateWidget(row) {
   if (row.widget_type === 'note') return row.text.trim() ? '' : 'Введите текст заметки'
   if (row.widget_type === 'metric_card') return row.metric_key ? '' : 'Выберите метрику'
   return row.metric_keys.length ? '' : 'Выберите хотя бы одну метрику'
+}
+
+/**
+ * Раскладка дашборда в порядке виджетов: подряд идущие карточки метрик — одна полоса во всю ширину,
+ * таблица — во всю ширину, графики и заметки — по два в ряд. Виджет, которому не нашлось пары
+ * в ряду, растягивается на всю ширину, чтобы не оставлять пустоту.
+ */
+export function layoutBlocks(widgets) {
+  const blocks = []
+  for (const [i, w] of sortWidgets(widgets).entries()) {
+    const last = blocks[blocks.length - 1]
+    if (w.widget_type === 'metric_card') {
+      if (last?.kind === 'cards') last.items.push(w)
+      else blocks.push({ key: `cards-${w.id ?? i}`, kind: 'cards', items: [w], wide: true })
+    } else {
+      blocks.push({ key: `w-${w.id ?? i}`, kind: 'widget', widget: w, wide: w.widget_type === 'table' })
+    }
+  }
+  let open = null
+  for (const b of blocks) {
+    if (b.wide) {
+      if (open) open.wide = true
+      open = null
+    } else {
+      open = open ? null : b
+    }
+  }
+  if (open) open.wide = true
+  return blocks
 }
 
 export function moveItem(list, index, step) {
