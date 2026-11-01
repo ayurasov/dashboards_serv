@@ -2,9 +2,12 @@
 // Использование: node html_to_pdf.mjs <in.html> <out.pdf> "<колонтитул>" [<номера-страниц.json>]
 // Второй проход получает номера страниц пунктов содержания (их вычисляет build_manuals.py
 // по ссылкам первого прохода) и вписывает их в содержание.
-import { chromium } from '@playwright/test' // из frontend/node_modules (запуск с cwd=frontend)
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+
+// Playwright — из frontend/node_modules: модули ESM ищутся рядом со скриптом, а не в рабочем каталоге
+const { chromium } = createRequire(new URL('../../frontend/package.json', import.meta.url))('@playwright/test')
 
 const [input, output, footerText, numbersFile] = process.argv.slice(2)
 // COVER_ONLY=1 — только обложка без колонтитула (подставляется в итоговый PDF вместо первой страницы)

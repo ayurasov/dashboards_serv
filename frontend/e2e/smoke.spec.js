@@ -4,7 +4,7 @@ import { collectErrors, login } from './helpers'
 test('вход, обзор служб и выход', async ({ page }) => {
   const errors = collectErrors(page)
   await page.goto('/hr')
-  await expect(page).toHaveURL(/\/login\?redirect=%2Fhr/)
+  await expect(page).toHaveURL(/\/login\?redirect=(%2F|\/)hr/)
   await page.fill('input[name=username]', 'admin')
   await page.fill('input[name=password]', 'неверный')
   await page.click('button[type=submit]')

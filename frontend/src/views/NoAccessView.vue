@@ -11,7 +11,7 @@ const service = computed(() => app.service(route.query.service)?.title)
 
 <template>
   <div class="page">
-    <EmptyState icon="lock" title="Нет доступа"
+    <EmptyState :heading="1" icon="lock" title="Нет доступа"
                 :text="service ? `У вас нет нужного уровня доступа к службе «${service}». Его выдаёт администратор.` : 'Эта страница доступна только администратору.'">
       <router-link to="/" class="btn btn-primary">На главную</router-link>
     </EmptyState>

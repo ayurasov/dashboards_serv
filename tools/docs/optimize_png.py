@@ -1,6 +1,6 @@
 """Сжать PNG-иллюстрации документов до 256 цветов (схемы и снимки экрана сжимаются в 2–3 раза).
 
-    python3 tools/docs/optimize_png.py docs/registry/images [ещё каталоги …]
+    python3 tools/docs/optimize_png.py docs/manuals/images [ещё каталоги …]  (с вложенными каталогами)
 """
 import sys
 from pathlib import Path
@@ -10,7 +10,7 @@ from PIL import Image
 
 def main(dirs):
     for folder in dirs:
-        for path in sorted(Path(folder).glob("*.png")):
+        for path in sorted(Path(folder).rglob("*.png")):
             before = path.stat().st_size
             image = Image.open(path).convert("RGB")
             image.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).save(path, optimize=True)

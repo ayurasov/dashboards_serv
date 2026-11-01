@@ -123,9 +123,10 @@ function lightTotal(counts) {
 .legend { display: flex; gap: 14px; margin-top: 8px; font-size: var(--fs-xs); color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend b { color: var(--text); }
-.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin: 0; }
-.kpi dt { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kpi dd { margin: 3px 0 0; display: flex; align-items: center; gap: 6px; font-size: 19px; font-weight: 660; letter-spacing: -0.01em; }
+.kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0; }
+.kpi { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
+.kpi dt { font-size: var(--fs-xs); color: var(--muted); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kpi dd { margin: 3px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; font-size: 19px; font-weight: 660; letter-spacing: -0.01em; }
 .kpi dd small { font-size: var(--fs-xs); font-weight: 600; }
 .s-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
 .imports { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

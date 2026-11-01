@@ -2,10 +2,13 @@
 // Нужен сервер с демо-данными (DEMO_DATA=true) и собранным интерфейсом:
 //   cd frontend && SHOTS_BASE_URL=http://127.0.0.1:8000 node ../tools/docs/screenshots.mjs
 // Затем: python3 tools/docs/optimize_png.py docs/manuals/images
-import { chromium } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+
+// Playwright — из frontend/node_modules: модули ESM ищутся рядом со скриптом, а не в рабочем каталоге
+const { chromium } = createRequire(new URL('../../frontend/package.json', import.meta.url))('@playwright/test')
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const BASE = process.env.SHOTS_BASE_URL || 'http://127.0.0.1:8000'
