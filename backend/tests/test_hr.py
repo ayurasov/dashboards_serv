@@ -40,7 +40,9 @@ def test_save_metrics_upserts_and_audits(admin):
     assert response.status_code == 200 and "Сохранено значений: 2" in response.json()["message"]
     metrics = {m["key"]: m for m in admin.get("/api/hr/months/2026-07").json()["metrics"]}
     assert metrics["turnover"]["value"] == 4.2 and metrics["turnover"]["source_note"] == "по данным 1С"
-    assert metrics["avg_time_to_fill"]["value"] is None and metrics["avg_time_to_fill"]["light"] == "red"
+    # Незаполненная метрика со светофором — «Нет данных» (серая) и отдельная отметка о нарушении
+    assert metrics["avg_time_to_fill"]["value"] is None and metrics["avg_time_to_fill"]["light"] == "gray"
+    assert metrics["avg_time_to_fill"]["missing"] is True
     assert admin.put("/api/hr/months/2026-07/metrics", json=payload).json()["message"] == "Изменений нет"
     unknown = admin.put("/api/hr/months/2026-07/metrics", json=[{"metric_key": "nope", "value": 1}])
     assert unknown.status_code == 422
@@ -175,3 +177,17 @@ def test_custom_dashboards(admin, login):
     assert viewer.delete(f"/api/dashboards/{created.json()['id']}").status_code == 403
     bad = admin.post("/api/dashboards", json={"name": "x", "widgets": [{"widget_type": "line_chart", "config": {}}]})
     assert bad.status_code == 422
+
+
+def test_missing_metrics_are_no_data_but_flagged(admin):
+    """Решение владельца продукта: незаполненный показатель со светофором — «Нет данных»,
+    а сам факт незаполненного поля — критичное нарушение (список missing на дашборде и в «Обзоре»)."""
+    admin.put("/api/hr/months/2026-07/metrics", json=[{"metric_key": "turnover", "value": None}])
+    dashboard = admin.get("/api/hr/analytics/dashboard", params={"months": "2026-07"}).json()
+    july = dashboard["series"][-1]
+    turnover = next(m for m in july["metrics"] if m["key"] == "turnover")
+    assert turnover["light"] == "gray" and turnover["missing"] is True
+    assert "Текучесть кадров" in july["missing"]
+    hr_card = next(s for s in admin.get("/api/overview").json()["services"] if s["key"] == "hr")
+    assert "Текучесть кадров" in hr_card["missing"]
+    assert admin.get("/api/pdf/hr/dashboard", params={"months": "2026-07"}).content.startswith(b"%PDF")

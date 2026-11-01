@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { LIGHT_LABELS } from '@/utils/lights'
+import { LIGHT_LABELS, MISSING_HINT, MISSING_LABEL } from '@/utils/lights'
 import { deltaTone, formatDelta, formatNumber } from '@/utils/format'
 import AppIcon from './AppIcon.vue'
 
@@ -22,6 +22,8 @@ const props = defineProps({
   caption: { type: String, default: '' },
   target: { type: Number, default: null },
   loading: { type: Boolean, default: false },
+  // Показатель со светофором не заполнен: «Нет данных» и отметка критичного нарушения
+  missing: { type: Boolean, default: false },
 })
 
 const display = computed(() => (typeof props.value === 'string' ? props.value : formatNumber(props.value, { digits: props.digits })))
@@ -38,10 +40,10 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
 </script>
 
 <template>
-  <div class="kpi card" :class="light ? `l-${light}` : ''">
+  <div class="kpi card" :class="[light ? `l-${light}` : '', { missing }]">
     <div class="top">
       <span class="label" :title="hint || label">{{ label }}</span>
-      <span v-if="light" class="light" :title="LIGHT_LABELS[light]" />
+      <span v-if="light" class="light" :title="missing ? MISSING_LABEL : LIGHT_LABELS[light]" />
     </div>
     <div v-if="loading" class="skeleton value-skel" />
     <div v-else class="value num">{{ display }}<span v-if="unitText" class="unit" :class="{ pct: unit === '%' }">{{ unit }}</span></div>
@@ -53,6 +55,7 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
       <span v-if="deltaLabel && showDelta" class="muted">{{ deltaLabel }}</span>
       <span v-if="target !== null" class="muted target">цель {{ formatNumber(target, { unit }) }}</span>
       <span v-if="caption || $slots.caption" class="muted caption"><slot name="caption">{{ caption }}</slot></span>
+      <span v-else-if="missing" class="missing-flag" :title="MISSING_HINT">Не заполнено</span>
       <span v-else-if="light && !showDelta && target === null" class="state">{{ LIGHT_LABELS[light] }}</span>
     </div>
   </div>
@@ -64,6 +67,9 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
 .kpi.l-green::before { background: var(--light-green); }
 .kpi.l-yellow::before { background: var(--light-yellow); }
 .kpi.l-red::before { background: var(--light-red); }
+.kpi.missing::before { background: repeating-linear-gradient(180deg, var(--light-red) 0 6px, transparent 6px 10px); }
+.missing-flag { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 620; color: var(--light-red); }
+.missing-flag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--light-red); }
 .top { display: flex; align-items: flex-start; gap: 8px; }
 .label { flex: 1; font-size: var(--fs-sm); color: var(--text-2); font-weight: 520; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .light { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--light-gray); box-shadow: 0 0 0 3px color-mix(in srgb, var(--light-gray) 20%, transparent); }

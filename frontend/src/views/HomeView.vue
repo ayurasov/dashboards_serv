@@ -67,6 +67,9 @@ function lightTotal(counts) {
               <span v-for="l in ['green', 'yellow', 'red']" :key="l"><LightBadge :light="l" dot /> {{ LIGHT_LABELS[l] }} <b class="num">{{ s.light_counts[l] }}</b></span>
             </div>
           </div>
+          <p v-if="s.missing?.length" class="missing" :title="s.missing.join(', ')">
+            <AppIcon name="alert" :size="13" />Не заполнено со светофором: <b class="num">{{ s.missing.length }}</b> — критичное нарушение
+          </p>
           <dl class="kpis">
             <div v-for="k in s.kpis" :key="k.label" class="kpi">
               <dt :title="k.label">{{ k.label }}</dt>
@@ -139,4 +142,5 @@ function lightTotal(counts) {
 .imports li:last-child { border-bottom: 0; }
 .waiting h3 { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 4px; }
 .waiting p { font-size: var(--fs-sm); }
+.missing { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; font-size: var(--fs-xs); font-weight: 560; color: var(--light-red); }
 </style>

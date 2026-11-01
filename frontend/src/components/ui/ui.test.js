@@ -143,3 +143,13 @@ describe('ChartCard', () => {
     expect(ready.find('.chart').exists()).toBe(true)
   })
 })
+
+describe('KpiCard: незаполненный показатель со светофором', () => {
+  it('показывает «Не заполнено» как нарушение, светофор — «Нет данных»', async () => {
+    const { default: KpiCard } = await import('./KpiCard.vue')
+    const w = mount(KpiCard, { props: { label: 'Текучесть', value: null, unit: '%', light: 'gray', missing: true } })
+    expect(w.classes()).toContain('missing')
+    expect(w.find('.missing-flag').text()).toBe('Не заполнено')
+    expect(w.find('.light').attributes('title')).toBe('Нет данных')
+  })
+})

@@ -91,6 +91,7 @@ def _hr_overview(db: Session, user: User) -> dict:
     pick = [k for k in ("turnover", "avg_time_to_fill", "offers_accepted_pct", "probation_pass_rate") if k in metric]
     return {
         "empty": False, "period": latest["label"], "light_counts": latest["light_counts"],
+        "missing": latest.get("missing", []),
         "kpis": [{"label": "Принято", "value": latest["hired"], "unit": "чел."},
                  {"label": "Уволено", "value": latest["fired"], "unit": "чел."}]
         + [{"label": metric[k]["label"], "value": metric[k]["value"], "unit": metric[k]["unit"],
@@ -117,9 +118,11 @@ def _tp_overview(db: Session) -> dict:
                      "delta": None if value is None or prev_value is None else round(value - prev_value, 4),
                      "direction": rule.direction if rule else "higher_is_better"})
     lights = [traffic_light.evaluate(getattr(last, k), r) for k, r in rules.items() if hasattr(last, k)]
+    missing = [tp_service.META_BY_KEY[k]["label"] for k, r in rules.items()
+               if hasattr(last, k) and k in tp_service.META_BY_KEY and traffic_light.is_missing(getattr(last, k), r)]
     open_tickets = db.scalar(select(func.count()).select_from(NaumenTicket)
                              .where(NaumenTicket.status.not_in(("Закрыта", "Выполнена")))) or 0
-    return {"empty": False, "period": f"{last.week}-я неделя {last.year}",
+    return {"empty": False, "period": f"{last.week}-я неделя {last.year}", "missing": missing,
             "light_counts": traffic_light.counts(lights),
             "kpis": kpis + [{"label": "Заявок Naumen в работе", "value": open_tickets, "unit": "шт."}]}
 

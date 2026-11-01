@@ -50,6 +50,9 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
         if m["light"] != "gray" and m["value"] is not None:
             kpis.append((m["label"], fmt(m["value"], m["unit"]), m["light"]))
     rep.kpis(kpis[:12])
+    if latest.get("missing"):
+        rep.text(f"<font color='{rep.light_hex('red')}'><b>Не заполнены показатели со светофором</b></font> "
+                 f"за {latest['label'].lower()}: {', '.join(latest['missing'])}.")
 
     colors = rep.series_colors()
     fig, ax = rep.figure()

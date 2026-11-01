@@ -170,12 +170,20 @@ const periodText = computed(() => {
     <div v-else class="blocks">
       <section v-if="layout.visible('kpi')" class="stack" :style="blockStyle('kpi')">
         <div class="section-title"><h2>Ключевые показатели</h2><span class="muted">{{ latest ? `за ${latest.label}, изменение к предыдущему месяцу` : '' }}</span></div>
+        <div v-if="latest?.missing?.length" class="missing-alert" role="alert" data-testid="hr-missing">
+          <AppIcon name="alert" :size="16" />
+          <div>
+            <strong>Не заполнены показатели со светофором за {{ latest.label.toLowerCase() }}</strong> — критичное нарушение полноты данных:
+            {{ latest.missing.join(', ') }}. До заполнения они показываются как «Нет данных».
+          </div>
+          <router-link v-if="auth.can('hr', 'editor')" :to="{ path: '/hr/data', query: { month: latest.key } }" class="btn btn-sm">Заполнить</router-link>
+        </div>
         <div class="grid grid-kpi">
           <KpiCard label="Принято за период" :value="data?.totals.hired" unit="чел." :loading="loading && !data" />
           <KpiCard label="Уволено за период" :value="data?.totals.fired" unit="чел." :loading="loading && !data" />
           <KpiCard label="Чистый прирост" :value="data?.totals.net" unit="чел." :loading="loading && !data" />
           <KpiCard v-for="m in keyMetrics" :key="m.key" :label="kpiLabel(m)" :value="m.value" :unit="m.unit" :light="m.light"
-                   :delta="m.delta" :direction="m.direction" :target="m.target" :hint="kpiHint(m)" />
+                   :missing="m.missing" :delta="m.delta" :direction="m.direction" :target="m.target" :hint="kpiHint(m)" />
         </div>
       </section>
 
@@ -217,7 +225,7 @@ const periodText = computed(() => {
                 <td class="num muted">{{ formatNumber(m.previous, { unit: m.unit }) }}</td>
                 <td class="num" :class="`delta-${deltaTone(m.delta, m.direction)}`">{{ formatDelta(m.delta, m.unit) }}</td>
                 <td class="num muted">{{ formatNumber(m.target, { unit: m.unit }) }}</td>
-                <td><LightBadge :light="m.light" /></td>
+                <td><LightBadge :light="m.light" :label="m.missing ? 'Нет данных' : ''" /><span v-if="m.missing" class="missing-mark" title="Показатель со светофором не заполнен — критичное нарушение">не заполнено</span></td>
               </tr>
             </tbody>
           </table>
@@ -237,4 +245,9 @@ const periodText = computed(() => {
 .group-row td { background: var(--surface-2); font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding-top: 8px; padding-bottom: 8px; }
 .strong { font-weight: 620; }
 .note { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+.missing-alert { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--light-red) 40%, var(--border)); background: color-mix(in srgb, var(--light-red) 8%, var(--surface)); color: var(--text); font-size: var(--fs-sm); line-height: 1.45; }
+.missing-alert > svg { color: var(--light-red); flex: 0 0 auto; margin-top: 2px; }
+.missing-alert > div { flex: 1; }
+.missing-alert strong { color: var(--light-red); }
+.missing-mark { margin-left: 8px; font-size: var(--fs-xs); font-weight: 620; color: var(--light-red); }
 </style>

@@ -72,10 +72,8 @@ def aggregate(values: list[float], method: str) -> float | None:
 
 
 def light_for(value: float | None, rule: TrafficLightRule | None) -> str:
-    """Незаполненная метрика под включённым правилом — красная (пробел в данных);
-    метрика без правила — серая и на итоговый статус не влияет."""
-    if value is None:
-        return "red" if rule is not None and rule.enabled else "gray"
+    """Цвет светофора по значению. Незаполненная метрика — серая «Нет данных»; то, что она не
+    заполнена при включённом правиле, отмечается отдельно (missing) как критичное нарушение."""
     return traffic_light.evaluate(value, rule)
 
 
@@ -102,6 +100,7 @@ def month_metrics(db: Session, month: HrMonth, previous: HrMonth | None,
             "source_note": item.source_note if item else "",
             "filled": value is not None,
             "light": light_for(value, rules.get(d.key)),
+            "missing": traffic_light.is_missing(value, rules.get(d.key)),
             "target": targets.get(d.key),
         })
     return out
@@ -194,7 +193,8 @@ def dashboard(db: Session, keys: list[str], scope: set[str] | None) -> dict:
         series.append({"key": m.key, "label": m.label, "year": m.year, "month": m.month,
                        "hired": hired, "fired": fired, "net": hired - fired,
                        "metrics": metrics,
-                       "light_counts": traffic_light.counts(x["light"] for x in metrics)})
+                       "light_counts": traffic_light.counts(x["light"] for x in metrics),
+                       "missing": [x["label"] for x in metrics if x["missing"]]})
     # «Последний» — последний месяц с данными: только что добавленный пустой месяц не обнуляет карточки
     latest = next((s for s in reversed(series)
                    if s["hired"] or s["fired"] or any(m["filled"] for m in s["metrics"])),

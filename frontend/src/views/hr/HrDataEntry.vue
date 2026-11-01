@@ -88,11 +88,14 @@ const rows = computed(() => {
       light: changed && !parsed.error && rules.data.value ? lightFor(value, ruleMap.value[m.key]) : m.light,
       delta: parsed.error ? null : liveDelta(value, m.previous),
       filled: value !== null,
+      // Включено правило светофора, а значения нет — критичное нарушение полноты данных
+      missing: value === null && !parsed.error && !!ruleMap.value[m.key]?.enabled,
     }
   }
   return out
 })
 const filledCount = computed(() => Object.values(rows.value).filter((r) => r.filled).length)
+const missingLabels = computed(() => metrics.value.filter((m) => rows.value[m.key]?.missing).map((m) => m.label))
 const groupFilled = (g) => g.items.filter((m) => rows.value[m.key]?.filled).length
 const targetText = (m) => (m.target === null || m.target === undefined ? ''
   : `цель ${m.direction === 'lower_is_better' ? '≤' : m.direction === 'higher_is_better' ? '≥' : ''} ${formatNumber(m.target, { unit: m.unit })}`)
@@ -281,7 +284,7 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
                     <tr><th>Метрика</th><th class="num">Значение</th><th class="num" title="Значение за прошлый месяц и изменение">Пред. месяц</th><th>Источник, комментарий</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-for="m in g.items" :key="m.key" :class="{ changed: rows[m.key]?.changed }">
+                    <tr v-for="m in g.items" :key="m.key" :class="{ changed: rows[m.key]?.changed, missing: rows[m.key]?.missing }">
                       <td class="metric">
                         <div class="metric-name">
                           <LightBadge dot :light="rows[m.key]?.light" />
@@ -297,6 +300,7 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
                           <span class="unit">{{ m.unit }}</span>
                         </div>
                         <div v-if="rows[m.key]?.error" class="error">{{ rows[m.key].error }}</div>
+                        <div v-else-if="rows[m.key]?.missing" class="error">Обязательно: показатель на светофоре</div>
                         <div v-else-if="targetText(m)" class="help">{{ targetText(m) }}</div>
                       </td>
                       <td class="num prev">
@@ -343,6 +347,10 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
                 <div class="bar" role="progressbar" :aria-valuenow="filledCount" :aria-valuemax="metrics.length">
                   <span :style="{ width: metrics.length ? `${(filledCount / metrics.length) * 100}%` : '0' }" :class="{ full: filledCount === metrics.length }" />
                 </div>
+                <p v-if="missingLabels.length" class="missing-note" data-testid="hr-missing-entry">
+                  <AppIcon name="alert" :size="14" />
+                  <span><b>Не заполнено со светофором: {{ missingLabels.length }}</b> — критичное нарушение. На дашборде такие показатели — «Нет данных».</span>
+                </p>
               </div>
               <dl class="facts">
                 <div><dt>Принято</dt><dd class="num">{{ info?.hired ?? 0 }}</dd></div>
@@ -477,6 +485,11 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
 .savebar.active { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: var(--shadow-lg); }
 .state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-sm); font-weight: 540; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .error-text { color: var(--light-red); }
+tr.missing td.metric { box-shadow: inset 3px 0 0 var(--light-red); }
+tr.missing .input { border-color: color-mix(in srgb, var(--light-red) 55%, var(--border-strong)); }
+.missing-note { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.4; }
+.missing-note svg { color: var(--light-red); flex: 0 0 auto; margin-top: 2px; }
+.missing-note b { color: var(--light-red); }
 .pulse { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .kbd-hint { font-size: var(--fs-xs); margin-right: 4px; }
 @media (max-width: 640px) {
