@@ -8,6 +8,7 @@ import {
   DatasetComponent, GridComponent, LegendComponent, MarkLineComponent, TitleComponent, TooltipComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { FALLBACK, usePaletteStore } from '@/stores/palette'
 
 echarts.use([BarChart, LineChart, PieChart, ScatterChart, DatasetComponent, GridComponent, LegendComponent,
   MarkLineComponent, TitleComponent, TooltipComponent, CanvasRenderer])
@@ -19,12 +20,26 @@ export function cssVar(name, fallback = '') {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 }
 
+/**
+ * Палитра читается из хранилища (Pinia), а не из CSS: вычисляемые опции графиков, которые
+ * вызывают эти функции, зависят от палитры и пересчитываются сразу при её смене.
+ */
+function activePalette() {
+  try {
+    return usePaletteStore().colors || FALLBACK
+  } catch {
+    return FALLBACK // вне приложения (тесты) хранилище не подключено
+  }
+}
+
 export function chartColors() {
-  return [1, 2, 3, 4, 5, 6, 7].map((i) => cssVar(`--chart-${i}`))
+  const charts = activePalette().charts
+  return (charts?.length ? charts : FALLBACK.charts).slice(0, 7)
 }
 
 export function lightColor(light) {
-  return cssVar(`--light-${light || 'gray'}`)
+  const lights = { ...FALLBACK.traffic_light, ...(activePalette().traffic_light || {}) }
+  return lights[!light || light === 'gray' ? 'neutral' : light] || lights.neutral
 }
 
 /** Базовые настройки, общие для всех графиков. */

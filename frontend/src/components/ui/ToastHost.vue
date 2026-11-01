@@ -22,7 +22,7 @@ const ICON = { ok: 'check', error: 'alert', info: 'info' }
 .toast svg { margin-top: 1px; }
 .ok svg { color: var(--light-green); }
 .error svg { color: var(--light-red); }
-.info svg { color: var(--chart-2); }
+.info svg { color: var(--accent); }
 .toast-enter-active, .toast-leave-active { transition: all .22s var(--ease); }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

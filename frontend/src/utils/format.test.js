@@ -60,3 +60,10 @@ describe('dates and words', () => {
     expect(formatPercent(12.345)).toBe('12,3%')
   })
 })
+
+describe('negative numbers', () => {
+  it('use the typographic minus like deltas do', () => {
+    expect(formatNumber(-1)).toBe('−1')
+    expect(formatNumber(-2.5, { unit: '%' })).toBe('−2,5%')
+  })
+})

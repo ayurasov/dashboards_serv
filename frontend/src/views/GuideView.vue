@@ -127,7 +127,7 @@ const activeTocId = computed(() => {
 .toc { position: sticky; top: calc(var(--topbar-h) + 16px); max-height: calc(100vh - var(--topbar-h) - 40px); overflow-y: auto; padding: 12px; }
 .search { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 34px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--muted); margin-bottom: 10px; }
 .search input { border: 0; outline: 0; background: transparent; width: 100%; font-size: var(--fs-sm); color: var(--text); }
-.search:focus-within { border-color: var(--chart-2); }
+.search:focus-within { border-color: var(--accent); }
 .none { padding: 6px 8px; font-size: var(--fs-sm); }
 .toc ul { list-style: none; margin: 0; padding: 0; }
 .toc a { display: block; padding: 5px 9px; border-radius: 7px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.35; }
@@ -147,7 +147,7 @@ const activeTocId = computed(() => {
 .content :deep(li) { margin: 4px 0; }
 .content :deep(strong) { color: var(--text); }
 .content :deep(code) { background: var(--surface-3); border-radius: 5px; padding: 1px 6px; font-size: 13px; font-family: var(--font-mono); }
-.content :deep(a) { color: var(--chart-2); }
+.content :deep(a) { color: var(--accent); }
 .content :deep(blockquote) { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--brand); background: var(--surface-2); border-radius: 0 10px 10px 0; }
 .content :deep(blockquote p:last-child) { margin-bottom: 0; }
 .content :deep(.md-table) { overflow-x: auto; margin: 0 0 16px; }

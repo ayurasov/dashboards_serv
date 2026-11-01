@@ -19,6 +19,7 @@ const props = defineProps({
   deltaLabel: { type: String, default: '' },
   direction: { type: String, default: 'neutral' },
   hint: { type: String, default: '' },
+  caption: { type: String, default: '' },
   target: { type: Number, default: null },
   loading: { type: Boolean, default: false },
 })
@@ -51,7 +52,8 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
       </span>
       <span v-if="deltaLabel && showDelta" class="muted">{{ deltaLabel }}</span>
       <span v-if="target !== null" class="muted target">цель {{ formatNumber(target, { unit }) }}</span>
-      <span v-if="light && !showDelta && target === null" class="state">{{ LIGHT_LABELS[light] }}</span>
+      <span v-if="caption || $slots.caption" class="muted caption"><slot name="caption">{{ caption }}</slot></span>
+      <span v-else-if="light && !showDelta && target === null" class="state">{{ LIGHT_LABELS[light] }}</span>
     </div>
   </div>
 </template>

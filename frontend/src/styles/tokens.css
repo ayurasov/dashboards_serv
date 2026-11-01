@@ -39,8 +39,10 @@
   --light-yellow: #d29a2f;
   --light-red: #d1495b;
   --light-gray: #a3acb9;
-  --chart-1: #c8302c; --chart-2: #3f6fb5; --chart-3: #3f9f6b; --chart-4: #d29a2f;
-  --chart-5: #7a5ba6; --chart-6: #2c9aa6; --chart-7: #8a8f98;
+  --accent: #3f6fb5; /* фокус, ссылки, информационные значки */
+  /* Серии графиков намеренно не совпадают с цветами светофора */
+  --chart-1: #3f6fb5; --chart-2: #2c9aa6; --chart-3: #7a5ba6; --chart-4: #5b5fc7;
+  --chart-5: #b07aa1; --chart-6: #8c6d46; --chart-7: #64748b;
 }
 
 :root, [data-theme='light'] {

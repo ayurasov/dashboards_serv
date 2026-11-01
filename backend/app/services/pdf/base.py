@@ -48,7 +48,7 @@ BRAND = colors.HexColor("#c8302c")
 
 DEFAULT_COLORS = {
     "traffic_light": {"green": "#3f9f6b", "yellow": "#d29a2f", "red": "#d1495b", "neutral": "#a3acb9"},
-    "charts": ["#c8302c", "#3f6fb5", "#3f9f6b", "#d29a2f", "#7a5ba6", "#2c9aa6", "#8a8f98"],
+    "charts": ["#3f6fb5", "#2c9aa6", "#7a5ba6", "#5b5fc7", "#b07aa1", "#8c6d46", "#64748b"],
 }
 
 STYLES = {

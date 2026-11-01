@@ -93,8 +93,9 @@ p { margin: 0; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a8293' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 10px center; }
 .input:hover, .select:hover, .textarea:hover { border-color: var(--faint); }
-.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--chart-2); box-shadow: 0 0 0 3px var(--focus); }
-.input.invalid { border-color: var(--light-red); }
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+.input.invalid, .select.invalid, .textarea.invalid { border-color: var(--light-red); }
+.input:disabled, .select:disabled, .textarea:disabled, .input[readonly] { background: var(--surface-2); color: var(--muted); cursor: not-allowed; border-color: var(--border); }
 .input-sm, .select-sm { height: 30px; font-size: var(--fs-sm); }
 .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-base); }
 .check input { width: 16px; height: 16px; accent-color: var(--brand); }
@@ -145,7 +146,7 @@ p { margin: 0; }
 /* ---------- прочее ---------- */
 .divider { height: 1px; background: var(--border); margin: var(--sp-4) 0; }
 .kbd { font-family: var(--font-mono); font-size: 11px; padding: 1px 5px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface-2); }
-.link { color: var(--chart-2); cursor: pointer; }
+.link { color: var(--accent); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 .delta-good { color: var(--light-green); }
 .delta-bad { color: var(--light-red); }

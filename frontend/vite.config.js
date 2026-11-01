@@ -24,7 +24,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rolldownOptions: {
       output: {
-        advancedChunks: {
+        codeSplitting: {
           groups: [
             { name: 'echarts', test: /node_modules[\\/](echarts|zrender)/ },
             { name: 'vendor', test: /node_modules[\\/](vue|@vue|vue-router|pinia)/ },

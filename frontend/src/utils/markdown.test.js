@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { escapeHtml, renderInline, renderMarkdown, slugify } from './markdown'
 
@@ -37,7 +38,7 @@ describe('markdown for the in-app user guide', () => {
   })
 
   it('renders the whole user guide with every screenshot resolved', () => {
-    const source = readFileSync(new URL('../../../docs/manuals/user-guide.md', import.meta.url), 'utf8')
+    const source = readFileSync(resolve(process.cwd(), '../docs/manuals/user-guide.md'), 'utf8')
     const missing = []
     const { html, headings, meta } = renderMarkdown(source, {
       resolveImage: (src) => { if (!src.startsWith('images/user/')) missing.push(src); return src },

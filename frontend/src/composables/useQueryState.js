@@ -31,7 +31,19 @@ export function useQueryState(defaults) {
     return query
   }
 
-  watch(state, () => router.replace({ query: serialize(), hash: route.hash }), { deep: true })
+  const path = route.path
+  watch(state, () => {
+    if (route.path === path) router.replace({ query: serialize(), hash: route.hash })
+  }, { deep: true })
+
+  // «Назад» / «Вперёд» и переход по ссылке на ту же страницу с другими параметрами
+  watch(() => route.query, (query) => {
+    if (route.path !== path) return // уход со страницы — не трогаем
+    for (const key of Object.keys(defaults)) {
+      const next = parse(key, query[key])
+      if (JSON.stringify(next) !== JSON.stringify(state[key])) state[key] = next
+    }
+  })
 
   function reset() {
     for (const [key, base] of Object.entries(defaults)) state[key] = Array.isArray(base) ? [...base] : base

@@ -5,7 +5,8 @@ const NBSP = ' '
 export function formatNumber(value, { digits = 2, unit = '' } = {}) {
   if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '—'
   const n = Number(value)
-  const text = n.toLocaleString('ru-RU', { maximumFractionDigits: Number.isInteger(n) ? 0 : digits })
+  // Типографский минус, как в изменениях (formatDelta)
+  const text = n.toLocaleString('ru-RU', { maximumFractionDigits: Number.isInteger(n) ? 0 : digits }).replace('-', '−')
   if (!unit) return text
   if (unit === '%') return `${text}%`
   return `${text}${NBSP}${unit}`

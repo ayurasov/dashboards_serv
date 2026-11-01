@@ -246,12 +246,12 @@ const example = computed(() => {
 .rule { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, auto) auto; align-items: center; gap: 10px 24px; padding: 11px 12px; margin: 0 -12px; border-top: 1px solid var(--border); transition: background var(--t-fast); }
 .rule:hover { background: var(--row-hover); }
 .rule:first-child { border-top: 0; }
-.rule.changed { background: color-mix(in srgb, var(--chart-2) 6%, transparent); border-radius: var(--radius-sm); }
+.rule.changed { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 .rule-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .rule-threshold { justify-self: end; }
 @media (max-width: 900px) { .rule { grid-template-columns: minmax(0, 1fr); } .rule-threshold { justify-self: start; } }
 .rule-label { display: flex; align-items: center; gap: 8px; font-weight: 560; }
-.changed-mark { font-size: 10.5px; font-weight: 620; text-transform: uppercase; letter-spacing: .05em; color: var(--chart-2); }
+.changed-mark { font-size: 10.5px; font-weight: 620; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
 .rule-sub { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: var(--fs-xs); color: var(--muted); }
 .threshold { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
 .threshold .input { width: 76px; text-align: right; }

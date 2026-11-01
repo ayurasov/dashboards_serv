@@ -19,7 +19,16 @@ let observer = null
 
 function render() {
   if (!chart.value) return
-  chart.value.setOption(mergeOption(baseOption(), props.option), { notMerge: true })
+  const base = baseOption()
+  const series = [].concat(props.option.series || [])
+  if (series.length && series.every((s) => s.type === 'pie')) {
+    // У круговых диаграмм нет осей и сетки
+    delete base.xAxis
+    delete base.yAxis
+    delete base.grid
+    base.tooltip = { ...base.tooltip, trigger: 'item' }
+  }
+  chart.value.setOption(mergeOption(base, props.option), { notMerge: true })
 }
 
 onMounted(() => {

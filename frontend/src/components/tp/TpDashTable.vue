@@ -99,7 +99,7 @@ const hint = computed(() => {
 .wrap { max-height: 560px; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--muted); min-width: 230px; background: var(--surface); }
 .search input { border: 0; outline: 0; background: transparent; width: 100%; color: var(--text); font-size: var(--fs-sm); }
-.search:focus-within { border-color: var(--chart-2); box-shadow: 0 0 0 3px var(--focus); }
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .th { display: inline-flex; align-items: center; gap: 2px; }
 .th-unit { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .sort-icon { margin-left: 2px; }
@@ -111,10 +111,10 @@ const hint = computed(() => {
 .note { display: inline-flex; vertical-align: -1px; margin-left: 6px; color: var(--muted); cursor: help; }
 .val { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
 td.empty { color: var(--faint); }
-td.picked { background: color-mix(in srgb, var(--chart-2) 6%, transparent); }
-.table th.picked { color: var(--text); background: color-mix(in srgb, var(--chart-2) 8%, var(--surface-2)); }
+td.picked { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.table th.picked { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
 .table tfoot td { position: sticky; bottom: 0; z-index: 1; border-bottom: 0; }
-.table tfoot td.picked { background: color-mix(in srgb, var(--chart-2) 8%, var(--surface-2)); }
+.table tfoot td.picked { background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
 .table tfoot td.first { z-index: 2; background: var(--surface-2); }
 @media (max-width: 640px) { .search { min-width: 0; flex: 1 1 100%; } }
 </style>

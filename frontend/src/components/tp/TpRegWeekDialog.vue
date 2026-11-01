@@ -135,7 +135,7 @@ async function save() {
 .metric-label { font-size: var(--fs-sm); font-weight: 520; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .affix { display: flex; align-items: center; height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); transition: border-color var(--t-fast), box-shadow var(--t-fast); }
 .affix:hover { border-color: var(--faint); }
-.affix:focus-within { border-color: var(--chart-2); box-shadow: 0 0 0 3px var(--focus); }
+.affix:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .affix.invalid { border-color: var(--light-red); }
 .affix input { flex: 1; min-width: 0; height: 100%; padding: 0 11px; border: 0; outline: 0; background: transparent; color: var(--text); text-align: right; }
 .affix .unit { padding-right: 11px; font-size: var(--fs-sm); color: var(--muted); }

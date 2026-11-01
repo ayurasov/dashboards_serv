@@ -59,7 +59,7 @@ const divider = computed(() => {
 .spark { display: block; overflow: visible; }
 path { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .prev { stroke: color-mix(in srgb, var(--chart-7) 70%, transparent); }
-.now { stroke: var(--chart-2); }
-.dot { fill: var(--chart-2); stroke: var(--surface); stroke-width: 1.5; }
+.now { stroke: var(--accent); }
+.dot { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; }
 .divider { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 2; }
 </style>
