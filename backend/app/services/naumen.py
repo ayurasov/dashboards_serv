@@ -43,6 +43,16 @@ def last_months_filter(tickets: Sequence[NaumenTicket], months: int) -> list[Nau
     return [t for t in tickets if t.registered_at and t.registered_at.strftime("%Y-%m") >= first]
 
 
+def month_span(first: str, last: str) -> list[str]:
+    """Все месяцы от first до last включительно ('2023-06' … '2023-12') — без пропусков."""
+    year, month = int(first[:4]), int(first[5:7])
+    out = []
+    while (key := f"{year:04d}-{month:02d}") <= last:
+        out.append(key)
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return out
+
+
 def summary(tickets: Sequence[NaumenTicket]) -> dict:
     if not tickets:
         return {"empty": True}
@@ -88,6 +98,11 @@ def summary(tickets: Sequence[NaumenTicket]) -> dict:
         by_status[t.status or "—"] += 1
 
     registered = [t.registered_at for t in tickets if t.registered_at]
+    # Ось месяцев — период регистрации выбранных заявок, без пропусков: заявки 2023 года, решённые
+    # в 2025-м, не растягивают графики года на два года вперёд, а месяц без заявок не выпадает из оси.
+    reg_months = sorted(k for k, m in by_month.items() if m["registered"])
+    month_keys = month_span(reg_months[0], reg_months[-1]) if reg_months else sorted(by_month)
+    empty_month = {"registered": 0, "solved": 0, "overdue": 0, "reopened": 0, "proc": [], "resolve": []}
     return {
         "empty": False,
         "total": total,
@@ -107,7 +122,7 @@ def summary(tickets: Sequence[NaumenTicket]) -> dict:
              "overdue_pct": _pct(m["overdue"], m["registered"]), "reopened": m["reopened"],
              "reopened_pct": _pct(m["reopened"], m["registered"]),
              "avg_proc_hours": _avg(m["proc"]), "avg_resolve_hours": _avg(m["resolve"])}
-            for key, m in sorted(by_month.items())
+            for key, m in ((k, by_month.get(k, empty_month)) for k in month_keys)
         ],
         "orgs": sorted(
             ({"org": org, "total": o["total"], "closed": o["closed"], "overdue": o["overdue"],

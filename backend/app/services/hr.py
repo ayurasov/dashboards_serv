@@ -237,11 +237,16 @@ def target_status(current: float | None, target: float | None, lower_better: boo
 def target_rows(db: Session) -> list[dict]:
     defs = {d.key: d for d in definitions(db, active_only=False)}
     rules = traffic_light.rules_for(db, "hr")
+    # Последний факт метрики — всего и внутри каждого года. Цель года оценивается по данным этого года:
+    # прошлогодняя цель не «выполняется» данными текущего года, цель будущего года — «нет данных».
+    # Справочное значение без цели (например, факт прошлого года) сравнивается с последним фактом.
     latest: dict[str, tuple[float, str]] = {}
+    latest_in_year: dict[tuple[str, int], tuple[float, str]] = {}
     for m in months_sorted(db):
         for v in m.values:
             if v.value is not None:
                 latest[v.metric_key] = (v.value, m.label)
+                latest_in_year[(v.metric_key, m.year)] = (v.value, m.label)
     rows = []
     for t in db.scalars(select(HrTarget)):
         d = defs.get(t.metric_key)
@@ -249,8 +254,11 @@ def target_rows(db: Session) -> list[dict]:
         direction = rule.direction if rule else (d.direction if d else "higher_is_better")
         if direction not in ("lower_is_better", "higher_is_better"):
             direction = "higher_is_better"
-        current, month = latest.get(t.metric_key, (None, ""))
         target = t.target_value
+        if target is not None:
+            current, month = latest_in_year.get((t.metric_key, t.year), (None, ""))
+        else:
+            current, month = latest.get(t.metric_key, (None, ""))
         rows.append({
             "id": t.id, "metric_key": t.metric_key, "metric_label": d.label if d else t.metric_key,
             "unit": d.unit if d else "", "year": t.year, "label": t.label,

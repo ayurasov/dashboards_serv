@@ -207,6 +207,15 @@ def row_to_dict(row: TpWeeklyReport) -> dict:
     return data
 
 
+def _csv_number(value) -> str:
+    """Число для CSV в русском Excel: запятая, целые — без «,0» («274», а не «274,0»)."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value).replace(".", ",")
+
+
 def export_csv(rows: Iterable[TpWeeklyReport]) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
@@ -214,8 +223,7 @@ def export_csv(rows: Iterable[TpWeeklyReport]) -> bytes:
     writer.writerow(["Год", "Неделя", *[META_BY_KEY[k]["label"] for k in keys], "Примечание"])
     for row in rows:
         values = [getattr(row, k) for k in keys]
-        writer.writerow([row.year, row.week, *["" if v is None else str(v).replace(".", ",") for v in values],
-                         row.note or ""])
+        writer.writerow([row.year, row.week, *[_csv_number(v) for v in values], row.note or ""])
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 

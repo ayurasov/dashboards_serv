@@ -41,7 +41,8 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
     rep = Report("Служба персонала — дашборд", f"Период: {period}", palette=_palette(db))
     if not series:
         return rep.build()
-    latest = series[-1]
+    # Как на экране: «последний» — последний месяц выборки с данными (пустой новый месяц не обнуляет отчёт)
+    latest = data["latest"] or series[-1]
     totals = data["totals"]
     kpis = [("Принято за период", fmt(totals["hired"]), None), ("Уволено за период", fmt(totals["fired"]), None),
             ("Чистый прирост", fmt(totals["net"]), None)]
@@ -54,21 +55,22 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
     fig, ax = rep.figure()
     labels = [s["label"] for s in series]
     x = range(len(labels))
-    ax.bar([i - 0.2 for i in x], [s["hired"] for s in series], 0.4, label="Принято", color=colors[2])
-    ax.bar([i + 0.2 for i in x], [s["fired"] for s in series], 0.4, label="Уволено", color=colors[0])
+    ax.bar([i - 0.2 for i in x], [s["hired"] for s in series], 0.4, label="Принято", color=rep.light_hex("green"))
+    ax.bar([i + 0.2 for i in x], [s["fired"] for s in series], 0.4, label="Уволено", color=rep.light_hex("red"))
     ax.set_xticks(list(x), labels, rotation=0 if len(labels) < 8 else 45, ha="center" if len(labels) < 8 else "right")
-    ax.legend(frameon=False, fontsize=8)
+    rep.legend(ax)
     ax.set_title("Приём и увольнение", fontsize=10, loc="left")
     rep.chart(fig, 62)
 
     turnover = [next((m["value"] for m in s["metrics"] if m["key"] == "turnover"), None) for s in series]
     if any(v is not None for v in turnover):
         fig, ax = rep.figure(height=3)
-        ax.plot(labels, turnover, marker="o", color=colors[1], linewidth=2)
+        ax.plot(labels, turnover, marker="o", color=colors[0], linewidth=2)
         target = next((m["target"] for m in latest["metrics"] if m["key"] == "turnover"), None)
         if target is not None:
-            ax.axhline(target, color=colors[0], linestyle="--", linewidth=1, label=f"Цель {fmt(target, '%')}")
-            ax.legend(frameon=False, fontsize=8)
+            ax.axhline(target, color=rep.light_hex("red"), linestyle="--", linewidth=1,
+                       label=f"Цель {fmt(target, '%')}")
+            rep.legend(ax)
         ax.set_title("Текучесть кадров, %", fontsize=10, loc="left")
         rep.chart(fig, 55)
 
@@ -97,16 +99,16 @@ def hr_summary(db: Session, period_type: str, scope: set[str] | None) -> bytes:
     for d in defs:
         rows.append([d.label, *[fmt(p["metrics"].get(d.key), d.unit) for p in periods]])
     rep.table(header, rows, [30] + [12] * len(periods), align_right_from=1)
-    colors = rep.series_colors()
     fig, ax = rep.figure(width=12)
     labels = [p["label"] for p in periods]
-    ax.bar(labels, [p["light_counts"]["green"] for p in periods], color=colors[2], label="Норма")
+    # Светофор — цветами светофора палитры, как на экране (а не цветами рядов графиков)
+    ax.bar(labels, [p["light_counts"]["green"] for p in periods], color=rep.light_hex("green"), label="Норма")
     ax.bar(labels, [p["light_counts"]["yellow"] for p in periods],
-           bottom=[p["light_counts"]["green"] for p in periods], color=colors[3], label="Внимание")
+           bottom=[p["light_counts"]["green"] for p in periods], color=rep.light_hex("yellow"), label="Внимание")
     ax.bar(labels, [p["light_counts"]["red"] for p in periods],
-           bottom=[p["light_counts"]["green"] + p["light_counts"]["yellow"] for p in periods], color=colors[0],
-           label="Критично")
-    ax.legend(frameon=False, fontsize=8)
+           bottom=[p["light_counts"]["green"] + p["light_counts"]["yellow"] for p in periods],
+           color=rep.light_hex("red"), label="Критично")
+    rep.legend(ax)
     ax.set_title("Светофор метрик по периодам", fontsize=10, loc="left")
     rep.spacer()
     rep.chart(fig, 60)
@@ -183,7 +185,7 @@ def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: in
     ax.plot(labels, [r.total_in_work for r in rows], color=colors[0], linewidth=1.4, linestyle="--",
             label="В работе")
     ax.set_xticks(range(0, len(labels), step), labels[::step], rotation=45, ha="right")
-    ax.legend(frameon=False, fontsize=8, ncol=3)
+    rep.legend(ax, ncol=3)
     ax.set_title("Поток заявок по неделям", fontsize=10, loc="left")
     rep.chart(fig, 62)
 
@@ -233,7 +235,7 @@ def naumen_report(db: Session, year: int | None, org: str | None, months: int | 
     ax.bar([i - 0.2 for i in x], [m["registered"] for m in months_data], 0.4, color=colors[1], label="Принято")
     ax.bar([i + 0.2 for i in x], [m["solved"] for m in months_data], 0.4, color=colors[2], label="Решено")
     ax.set_xticks(list(x)[::step], labels[::step], rotation=45, ha="right")
-    ax.legend(frameon=False, fontsize=8)
+    rep.legend(ax)
     ax.set_title("Принято и решено по месяцам", fontsize=10, loc="left")
     rep.chart(fig, 62)
     rep.h2("Организации")
