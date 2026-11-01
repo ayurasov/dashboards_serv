@@ -6,10 +6,12 @@ import { isTopModal, popModal, pushModal, restoreFocus, trapFocus } from '@/comp
 /**
  * Боковая панель карточки: Esc и щелчок по фону закрывают (если поверх не открыт другой диалог),
  * фокус переходит в панель. Ниже модальных окон по z-index — подтверждения открываются поверх.
+ * sheet — на телефоне панель становится листом снизу.
  */
 defineProps({
   title: { type: String, default: '' },
   width: { type: [Number, String], default: 640 },
+  sheet: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 const panel = ref(null)
@@ -39,9 +41,10 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="drawer-overlay" @mousedown.self="emit('close')">
+    <div class="drawer-overlay" :class="{ sheet }" @mousedown.self="emit('close')">
       <aside ref="panel" class="drawer" role="dialog" aria-modal="true" :aria-label="title || undefined" tabindex="-1"
              :style="{ width: typeof width === 'number' ? `${width}px` : width }">
+        <span v-if="sheet" class="grabber" aria-hidden="true" />
         <header class="head">
           <div class="head-main"><slot name="header"><h2>{{ title }}</h2></slot></div>
           <button class="close" type="button" aria-label="Закрыть" @click="emit('close')"><AppIcon name="x" :size="18" /></button>
@@ -66,4 +69,13 @@ h2 { font-size: 17px; }
 .foot { display: flex; align-items: center; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--surface-2); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes slide { from { transform: translateX(24px); opacity: .4; } }
+.grabber { display: none; }
+@media (max-width: 720px) {
+  .sheet { align-items: flex-end; }
+  .sheet .drawer { width: 100% !important; height: auto; max-height: 92dvh; border-left: 0; border-top: 1px solid var(--border); border-radius: 18px 18px 0 0; animation: sheet-in .24s var(--ease); }
+  .sheet .grabber { display: block; flex: 0 0 auto; width: 44px; height: 4px; margin: 8px auto 0; border-radius: 4px; background: var(--border-strong); }
+  .sheet .head { padding: 10px 16px 10px; }
+  .sheet .body { padding: 12px 16px calc(20px + env(safe-area-inset-bottom)); }
+  @keyframes sheet-in { from { transform: translateY(40px); opacity: .3; } }
+}
 </style>

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import random
 from datetime import date, datetime
 from pathlib import Path
 
@@ -15,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import utcnow
 from ..core.security import hash_password
+from ..core.timeutil import local_today
 from ..models import (
     TP_METRIC_COLUMNS,
     AccessProfile,
@@ -25,12 +28,16 @@ from ..models import (
     HrMetricValue,
     HrMonth,
     HrMonthNote,
+    Indicator,
+    IndicatorValue,
     NaumenTicket,
     Partnership,
     ServiceAccess,
     TpWeeklyReport,
+    UnitStatusNote,
     User,
 )
+from .registry import DEMO_INDICATORS
 
 log = logging.getLogger("app.demo")
 DEMO_DIR = Path(__file__).resolve().parents[1] / "data" / "demo"
@@ -50,7 +57,9 @@ DEMO_USERS = (
      [("hr", "viewer", True), ("it", "viewer", False)], ["IT"]),
     # Уровни сотрудников модели доступа 2.0 (профили — в DEMO_PROFILES)
     ("ceo", "Громов Андрей Викторович", "Генеральный директор", "user", "ceo12345", [], ["ALMI"]),
-    ("tech_dir", "Соколова Мария Игоревна", "Технический директор", "user", "td123456", [], ["TECHDIR"]),
+    # tech_dir вводит операционные показатели сквозного отчёта (служба-владелец — Аппарат ГД) по своей ветке
+    ("tech_dir", "Соколова Мария Игоревна", "Технический директор", "user", "td123456",
+     [("apparat_gd", "editor", False)], ["TECHDIR"]),
     ("engineer", "Петров Илья Сергеевич", "Инженер технической поддержки", "user", "en123456", [], ["SUP-OS"]),
 )
 DEMO_PROFILES = {"ceo": "executive", "tech_dir": "director", "tp_lead": "head", "it_viewer": "head",
@@ -218,6 +227,139 @@ def load_partnerships(db: Session) -> None:
     db.flush()
 
 
+# ---------------------------------------------------------------- сквозные отчёты (ADR-0010)
+
+# Вводимые показатели за 12 месяцев: показатель → [(код подразделения, значение, цель)] —
+# базовые значения месяца; последний месяц задан точно (DEMO_REPORT_LATEST), остальные — с сезонностью
+# и разбросом. Цель None — по умолчанию из каталога.
+DEMO_REPORT_BASE: dict[str, tuple[tuple[str, float, float | None], ...]] = {
+    "fin.revenue": (("COMM", 62.0, 64.0), ("TECH", 18.0, 18.0), ("PROJ", 24.0, 25.0)),
+    "fin.costs": (("AHO", 3.1, 3.2), ("HR", 2.4, 2.5), ("COMM", 11.6, 12.0), ("MKT", 6.8, 7.0), ("TECH", 11.8, 12.0),
+                  ("IT", 5.0, 5.0), ("PROJ", 9.1, 9.5), ("SUP-OS", 5.9, 6.0), ("SUP-OFFICE", 4.8, 5.0)),
+    "fin.payroll": (("AHO", 1.9, 1.9), ("HR", 1.6, 1.6), ("COMM", 5.7, 5.7), ("MKT", 3.0, 3.0), ("TECH", 8.4, 8.5),
+                    ("IT", 3.4, 3.4), ("PROJ", 4.9, 5.0)),
+    "fin.budget": (("ADMIN", 98.0, None), ("COMMDIR", 97.0, None), ("TECHDIR", 97.0, None), ("PROJ", 99.0, None)),
+    "ops.plan": (("AHO", 97.0, None), ("HR", 98.0, None), ("COMM", 96.0, None), ("MKT", 95.0, None),
+                 ("TECH", 96.0, None), ("IT", 99.0, None), ("PROJ", 97.0, None), ("SUP-OS", 97.0, None),
+                 ("SUP-OFFICE", 95.0, None)),
+    "ops.csat": (("COMM", 4.6, None), ("SUP-OS", 4.6, None), ("SUP-OFFICE", 4.7, None), ("PROJ", 4.8, None)),
+}
+# Последний месяц — без разброса (базовые значения в норме), кроме жёлтых и красных случаев ниже:
+# (показатель, код) → (значение, комментарий); у денежных показателей значение — доля от цели месяца.
+# «Выполнение плана работ» Службы маркетинга не заполнено: значение ожидается у служб — «Нет данных»
+# и нарушение полноты.
+DEMO_REPORT_LATEST: dict[tuple[str, str], tuple[float | None, str]] = {
+    ("fin.revenue", "COMM"): (0.89, "Перенос оплаты по контракту с РусГидро на следующий месяц"),
+    ("fin.costs", "TECH"): (1.10, "Внеплановая закупка оборудования тестового стенда"),
+    ("fin.costs", "SUP-OS"): (1.15, "Привлечение подрядчика на третью линию"),
+    ("fin.payroll", "MKT"): (1.033, ""),
+    ("fin.budget", "COMMDIR"): (92.0, ""),
+    ("ops.plan", "COMM"): (93.0, ""),
+    ("ops.plan", "MKT"): (None, ""),
+    ("ops.plan", "SUP-OFFICE"): (78.0, "Внедрение у заказчика перенесено на следующий месяц"),
+    ("ops.csat", "SUP-OS"): (4.3, "Рост времени решения заявок третьей линии"),
+}
+MONEY_INDICATORS = ("fin.revenue", "fin.costs", "fin.payroll")
+DEMO_REPORT_NOTE = ("TECH", "tp_lead", "Очередь заявок разбираем: подключены инженеры группы AlterOffice, "
+                                       "срок — до конца следующего месяца")
+
+
+def _add_months(period: date, months: int) -> date:
+    index = period.year * 12 + period.month - 1 + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _report_anchor(db: Session) -> date:
+    """Последний месяц демо-значений — последний месяц данных службы персонала (как в остальных
+    демо-данных), а без них — прошлый месяц."""
+    last = db.execute(select(HrMonth.year, HrMonth.month).order_by(HrMonth.year.desc(), HrMonth.month.desc())
+                      .limit(1)).first()
+    if last is not None:
+        return date(last.year, last.month, 1)
+    today = local_today()
+    return _add_months(date(today.year, today.month, 1), -1)
+
+
+def _season(key: str, month: int) -> float:
+    """Сезонность выручки и затрат: пик — в декабре, спад — летом."""
+    return 1 + 0.07 * math.cos(2 * math.pi * (month - 12) / 12) if key in ("fin.revenue", "fin.costs") else 1.0
+
+
+def _demo_value(key: str, base: float, month: int, rng: random.Random) -> float:
+    """Значение месяца: сезонность и разброс (±3 % у денежных показателей)."""
+    if key == "ops.csat":
+        return round(min(5.0, base + rng.uniform(-0.15, 0.1)), 1)
+    if key in ("fin.budget", "ops.plan"):
+        return float(round(min(104.0, base + rng.uniform(-3, 3))))
+    return round(base * _season(key, month) * (1 + rng.uniform(-0.03, 0.03)), 1)
+
+
+def load_reports(db: Session) -> None:
+    """Вводимые показатели и 12 месяцев значений — если вводимых показателей ещё нет. Вычисляемые
+    из данных служб создаются при первом запуске справочниками (reference_data)."""
+    if db.scalar(select(func.count()).select_from(Indicator).where(Indicator.source_type == "manual")):
+        return
+    indicators: dict[str, Indicator] = {i.key: i for i in db.scalars(select(Indicator))}
+    for order, item in enumerate(DEMO_INDICATORS, start=1):
+        if item.key in indicators:
+            continue
+        threshold = item.rule_type == "threshold"
+        row = Indicator(key=item.key, name=item.name, description=item.description, unit=item.unit,
+                        data_class=item.data_class, direction=item.direction, rollup=item.rollup,
+                        rule_type=item.rule_type, green_threshold=item.green if threshold else None,
+                        yellow_threshold=item.yellow if threshold else None,
+                        green_deviation=None if threshold else item.green,
+                        yellow_deviation=None if threshold else item.yellow, default_target=item.default_target,
+                        source_type="computed" if item.source_key else "manual", source_key=item.source_key,
+                        owner_service=item.owner_service, expected_kinds=list(item.expected_kinds),
+                        sort_order=order * 10, is_active=True)
+        db.add(row)
+        indicators[item.key] = row
+    db.flush()
+    users = {u.username: u for u in db.scalars(select(User))}
+    director = users.get("tech_dir")
+    if director is not None and not any(a.service_key == "apparat_gd" for a in director.access):
+        db.add(ServiceAccess(user_id=director.id, service_key="apparat_gd", level="editor"))
+    if not _empty(db, IndicatorValue):
+        return
+    units = {d.code: d.id for d in db.scalars(select(Department)) if d.code}
+    anchor = _report_anchor(db)
+    author = users.get("admin")
+    rng = random.Random(2026)
+    count = 0
+    for key, rows in DEMO_REPORT_BASE.items():
+        indicator = indicators[key]
+        for code, base, target_base in rows:
+            if code not in units:
+                continue
+            for step in range(12):
+                period = _add_months(anchor, step - 11)
+                # План выручки и бюджет затрат — с той же сезонностью, что и факт, без разброса
+                target = round(target_base * _season(key, period.month), 1) if target_base else None
+                comment = ""
+                if step < 11:
+                    value = _demo_value(key, base, period.month, rng)
+                elif (key, code) in DEMO_REPORT_LATEST:
+                    value, comment = DEMO_REPORT_LATEST[(key, code)]
+                    if value is not None and key in MONEY_INDICATORS:
+                        value = round(target * value, 1)
+                else:
+                    value = round(base * _season(key, period.month), 1)
+                if value is None:
+                    continue
+                db.add(IndicatorValue(indicator_id=indicator.id, department_id=units[code], period=period,
+                                      value=value, target=target, comment=comment, source="manual",
+                                      updated_by_id=author.id if author else None))
+                count += 1
+    code, head, comment = DEMO_REPORT_NOTE
+    if code in units and head in users:
+        db.add(UnitStatusNote(department_id=units[code], period=anchor, status="watch", comment=comment,
+                              author_id=users[head].id))
+    db.flush()
+    log.info("Демонстрационный сквозной отчёт: показателей — %s, значений — %s, последний месяц — %s",
+             len(indicators), count, anchor.isoformat()[:7])
+
+
 def load_demo_data(db: Session) -> None:
     load_org(db)
     load_users(db)
@@ -226,4 +368,5 @@ def load_demo_data(db: Session) -> None:
     load_tp(db)
     load_naumen(db)
     load_partnerships(db)
+    load_reports(db)
     log.info("Демонстрационные данные загружены")

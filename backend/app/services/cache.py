@@ -114,3 +114,15 @@ def cached_json(db: Session, services: Iterable[str], key: Hashable, compute: Ca
         entry = _Entry(serialize(compute()))
         cache.put(full_key, entry)
     return _response(entry)
+
+
+def cached_body(key: Hashable, build: Callable[[], bytes]) -> Response:
+    """Готовое тело JSON по ключу, который уже включает всё, от чего зависит ответ (ревизии, права).
+    Крупное тело сжимается один раз — при записи в кэш."""
+    if not settings.response_cache:
+        return Response(build(), media_type="application/json")
+    entry = cache.get(key)
+    if entry is None:
+        entry = _Entry(build())
+        cache.put(key, entry)
+    return _response(entry)

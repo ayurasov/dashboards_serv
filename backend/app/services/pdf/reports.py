@@ -308,3 +308,87 @@ def partnerships_summary(db: Session, rows: list | None = None, filters: dict | 
               [[r["group"], r["label"], r["count"], fmt(r["share"], "%")] for r in lights], [20, 40, 12, 12],
               [r["light"] for r in lights], align_right_from=2)
     return rep.build()
+
+
+# ---------------------------------------------------------------- сквозной отчёт
+
+REPORT_COLUMNS = 6   # показателей в одной таблице (альбомный лист)
+
+
+def _cell_text(cell: dict | None, unit: str) -> str:
+    if cell is None:
+        return "—"
+    if cell["missing"]:
+        return traffic_light.MISSING_LABEL
+    text = fmt(cell["value"], unit)
+    if cell["target"] is not None and cell["value"] is not None:
+        text += f"<br/><font size='6' color='#6b7280'>цель {fmt(cell['target'], unit)}</font>"
+    return text
+
+
+def report_scorecard(db: Session, data: dict) -> bytes:
+    """Сквозной отчёт пользователя (уже отфильтрованный по его области, глубине и классам данных)."""
+    access = data["access"]
+    rep = Report("Сквозной отчёт", f"{data['period_label']} · {access['text']}", wide=True, palette=_palette(db))
+    units = data["units"]
+    if not units:
+        rep.text("В вашей области структуры нет подразделений — обратитесь к администратору.")
+        return rep.build()
+    by_id = {u["id"]: u for u in units}
+    summary = data["summary"]
+    tiles = [(by_id[r]["name"], by_id[r]["status_label"], by_id[r]["status"]) for r in data["roots"] if r in by_id]
+    tiles += [("Нарушений полноты", fmt(summary["missing_total"]), "red" if summary["missing_total"] else None),
+              ("Критично", fmt(summary["units"].get("red", 0)), "red"),
+              ("Внимание", fmt(summary["units"].get("yellow", 0)), "yellow"),
+              ("Норма", fmt(summary["units"].get("green", 0)), "green")]
+    rep.kpis(tiles)
+    for root in data["roots"]:
+        unit = by_id.get(root)
+        if unit is None:
+            continue
+        explanation = unit["explanation"]
+        lines = [item["text"] for item in explanation["items"]] or [explanation["text"]]
+        if explanation["more"]:
+            lines.append(f"и ещё {explanation['more']}")
+        rated = unit.get("rated_count", unit["indicator_count"])
+        basis = "доступным показателям" if data["access"].get("hidden_classes") else "показателям"
+        rep.text(f"<b>{unit['name']}</b> — статус по {rated} {basis}" if rated else
+                 f"<b>{unit['name']}</b> — нет оценённых показателей за период")
+        for line in lines:
+            rep.text(f"• {line}", "small")
+        rep.spacer(2)
+    indicators = data["indicators"]
+    for start in range(0, max(len(indicators), 1), REPORT_COLUMNS):
+        chunk = indicators[start:start + REPORT_COLUMNS]
+        title = "Подразделения и показатели" if start == 0 else "Подразделения и показатели (продолжение)"
+        rep.h2(title)
+        header = ["Подразделение", "Статус", *[f"{i['name']}" + (f", {i['unit']}" if i["unit"] else "")
+                                               for i in chunk]]
+        rows, cell_lights = [], []
+        for unit in units:
+            name = " " * 4 * unit["depth"] + unit["name"] + (" ›" if unit["drill_locked"] else "")
+            status = unit["status_label"] + (" · под контролем" if unit.get("note") else "")
+            cells = [unit["cells"].get(i["key"]) for i in chunk]
+            rows.append([name, status, *[_cell_text(c, i["unit"]) for c, i in zip(cells, chunk, strict=True)]])
+            cell_lights.append([None, unit["status"], *[(c["status"] if c and not c["missing"] else
+                                                          ("red" if c and c["missing"] else None)) for c in cells]])
+        rep.table(header, rows, [34, 14, *[16] * len(chunk)], align_right_from=2, cell_lights=cell_lights)
+    if any(u["drill_locked"] for u in units):
+        rep.text("› — вложенные подразделения за пределом доступной детализации: их значения входят в свёртку.",
+                 "small")
+    violations = summary["violations"]
+    if violations or summary["hidden_violations"]:
+        rep.h2("Нарушения полноты данных")
+        if violations:
+            rep.table(["Подразделение", "Показатель"], [[v["path"], v["indicator_name"]] for v in violations],
+                      [60, 40], ["red"] * len(violations))
+        if summary["hidden_violations"]:
+            rep.text(f"Ещё {summary['hidden_violations']} — во вложенных подразделениях за пределом детализации.",
+                     "small")
+    notes = [u for u in units if u.get("note")]
+    if notes:
+        rep.h2("Заметки руководителей")
+        rep.table(["Подразделение", "Заметка", "Автор"],
+                  [[u["path"], f"{u['note']['status_label']}: {u['note']['comment']}",
+                    (u["note"]["author"] or {}).get("full_name", "")] for u in notes], [40, 45, 15])
+    return rep.build()

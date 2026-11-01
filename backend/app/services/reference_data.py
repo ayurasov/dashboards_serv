@@ -19,8 +19,10 @@ from ..models import (
     Department,
     HrMetricDefinition,
     HrTarget,
+    Indicator,
     OrgRevision,
     PartnershipLightRule,
+    ReportRevision,
     Service,
     ServiceAccess,
     TrafficLightRule,
@@ -75,6 +77,27 @@ def ensure_access_profiles(db: Session) -> None:
     db.flush()
 
 
+def ensure_computed_indicators(db: Session) -> None:
+    """Вычисляемые из данных служб показатели — при первом запуске (каталог пуст): сквозной отчёт
+    сразу показывает приём и увольнение, текучесть, заявки и партнёрства. Дальше каталог ведёт
+    администратор; удалённые показатели не возвращаются."""
+    if db.scalar(select(func.count()).select_from(Indicator)):
+        return
+    for order, item in enumerate(registry.DEMO_INDICATORS, start=1):
+        if not item.source_key:
+            continue
+        threshold = item.rule_type == "threshold"
+        db.add(Indicator(key=item.key, name=item.name, description=item.description, unit=item.unit,
+                         data_class=item.data_class, direction=item.direction, rollup=item.rollup,
+                         rule_type=item.rule_type, green_threshold=item.green if threshold else None,
+                         yellow_threshold=item.yellow if threshold else None,
+                         green_deviation=None if threshold else item.green,
+                         yellow_deviation=None if threshold else item.yellow, default_target=item.default_target,
+                         source_type="computed", source_key=item.source_key, owner_service=item.owner_service,
+                         expected_kinds=list(item.expected_kinds), sort_order=order * 10, is_active=True))
+    db.flush()
+
+
 def ensure_org_settings(db: Session) -> None:
     existing = set(db.scalars(select(AppSetting.key)))
     for key, value in registry.ORG_SETTINGS_DEFAULTS.items():
@@ -82,6 +105,8 @@ def ensure_org_settings(db: Session) -> None:
             db.add(AppSetting(key=key, value=value))
     if db.get(OrgRevision, 1) is None:
         db.add(OrgRevision(id=1, revision=0))
+    if db.get(ReportRevision, 1) is None:
+        db.add(ReportRevision(id=1, revision=0))
     db.flush()
 
 
@@ -178,6 +203,7 @@ def sync_reference_data(db: Session) -> None:
     sync_departments(db)
     ensure_access_profiles(db)
     ensure_org_settings(db)
+    ensure_computed_indicators(db)
     sync_hr_metrics(db)
     _ensure_rules(db, "hr", registry.HR_DEFAULT_RULES)
     _ensure_rules(db, "tech", registry.TP_DEFAULT_RULES)

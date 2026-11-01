@@ -14,6 +14,7 @@ const crumbs = computed(() => {
   const service = key && app.service(key)
   if (service) out.push({ label: service.title, to: service.route_prefix })
   else if (route.path.startsWith('/admin')) out.push({ label: 'Администрирование' })
+  if (route.meta.parent) out.push(route.meta.parent)
   if (route.meta.title && route.path !== '/') out.push({ label: route.meta.title })
   return out
 })

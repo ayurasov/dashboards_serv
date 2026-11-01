@@ -15,7 +15,7 @@ function readCsrfCookie() {
  * как результат ({ …план, rejected: true, detail }), а не как ошибка: его показывают на странице.
  * Остальные ошибки — как в общем клиенте (сообщение и ApiError).
  */
-async function postPlan(path, { body, form } = {}) {
+export async function postPlan(path, { body, form } = {}) {
   const headers = { Accept: 'application/json', 'X-CSRF-Token': readCsrfCookie() }
   if (!form) headers['Content-Type'] = 'application/json'
   let response
@@ -42,7 +42,7 @@ async function postPlan(path, { body, form } = {}) {
   throw new ApiError(message, { status: response.status, code: payload?.code || 'error', fields: payload?.fields || {} })
 }
 
-function uploadForm(file, fields) {
+export function uploadForm(file, fields) {
   const form = new FormData()
   form.append('file', file)
   for (const [key, value] of Object.entries(fields)) {

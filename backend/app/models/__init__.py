@@ -45,4 +45,16 @@ from .partnerships import (  # noqa: F401
     Partnership,
     PartnershipLightRule,
 )
+from .reports import (  # noqa: F401
+    INDICATOR_DIRECTIONS,
+    INDICATOR_ROLLUPS,
+    INDICATOR_RULES,
+    INDICATOR_SOURCE_TYPES,
+    NOTE_STATUSES,
+    VALUE_SOURCES,
+    Indicator,
+    IndicatorValue,
+    ReportRevision,
+    UnitStatusNote,
+)
 from .tp import TP_METRIC_COLUMNS, NaumenTicket, TpWeeklyReport  # noqa: F401

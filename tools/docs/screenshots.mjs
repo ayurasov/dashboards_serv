@@ -6,7 +6,9 @@
 // Скрипт меняет демо-данные через API только временно и возвращает их: пропуск показателя
 // «Текучесть кадров» (снимки правила «Нет данных / Не заполнено»), тестовый пользователь для
 // временного пароля. Для снимков импорта сотрудников у технического директора появляется e-mail,
-// и проверяются (но не применяются) файлы загрузки. Запускайте на отдельной базе стенда.
+// и проверяются (но не применяются) файлы загрузки. Сквозной отчёт (0.3.0) снимается на демо-значениях
+// за июль 2026: ввод показателей — без сохранения, загрузка значений — только проверка.
+// Запускайте на отдельной базе стенда.
 // Для страниц «Вход по домену» сервер можно запустить с примером настроек AUTH_LDAP_* — адрес
 // каталога может быть недоступен: пароль домена не проверяется, входят по паролю системы.
 import { mkdirSync } from 'node:fs'
@@ -180,9 +182,9 @@ function memoryFile(name, mimeType, content) {
   await settle(p, 400)
   await shot(p, 'admin/02-user-access')
   await p.getByRole('tab', { name: 'Полномочия' }).click(); await settle(p, 300)
-  // Вкладка короткая — снимаем верх карточки
+  // Вкладка короткая — снимаем верх карточки (три полномочия)
   const drawer = await p.locator('aside.drawer').boundingBox()
-  await shot(p, 'admin/20-user-capabilities', { clip: { x: drawer.x, y: 0, width: drawer.width, height: 450 } })
+  await shot(p, 'admin/20-user-capabilities', { clip: { x: drawer.x, y: 0, width: drawer.width, height: 590 } })
   await p.keyboard.press('Escape'); await p.waitForTimeout(300)
   // Несохранённые изменения: система спрашивает, закрыть ли карточку
   const discard = p.getByRole('button', { name: /Закрыть без сохранения|Не сохранять|Закрыть/ })
@@ -295,6 +297,112 @@ function memoryFile(name, mimeType, content) {
     await shot(p, 'admin/16-transfer-list')
   }
   await open(p, '/admin/org-transfer?tab=ad'); await shot(p, 'admin/17-transfer-ad')
+  await context.close()
+}
+// ---------------------------------------------------------------- сквозной отчёт (0.3.0)
+// Демо-данные: последний месяц — июль 2026; пропуск «Выполнение плана работ» у Службы маркетинга,
+// заметка «под контролем» у Технической службы. Ввод и загрузка — только проверка, без сохранения.
+const REPORT = { width: 1440, height: 1140 }
+{
+  // Первое лицо: статус компании, «почему такой статус», матрица с замком детализации; карточка «Обзора»
+  const { context, page: p } = await session('ceo', 'ceo12345', { viewport: REPORT })
+  await open(p, '/reports?period=2026-07', 1200)
+  await shot(p, 'user/34-report-ceo')
+  await open(p, '/', 1200)
+  await shot(p, 'user/41-overview-report', { element: p.locator('[data-testid=report-summary]') })
+  await context.close()
+}
+{
+  // Вся компания: оргсхема статусов — все уровни раскрыты, схема вписана в окно (пропуски, «под контролем»)
+  const { context, page: p } = await session('admin', 'admin123')
+  await open(p, '/reports?period=2026-07&view=chart', 600)
+  await p.getByRole('button', { name: 'Свернуть меню' }).click()
+  await open(p, '/reports?period=2026-07&view=chart', 1500)
+  const chart = p.locator('[data-testid=report-chart]')
+  await chart.getByRole('button', { name: /Развернуть всё/ }).click(); await p.waitForTimeout(600)
+  await chart.scrollIntoViewIfNeeded()
+  await chart.getByRole('button', { name: /Вписать/ }).click(); await p.waitForTimeout(1200)
+  // Без пустого холста под схемой: до нижней карточки
+  const box = await chart.boundingBox()
+  const bottom = await chart.locator('article.ruc').evaluateAll((els) => Math.max(...els.map((e) => e.getBoundingClientRect().bottom)))
+  await shot(p, 'user/35-report-chart', { clip: { x: box.x, y: box.y, width: box.width, height: Math.min(box.height, bottom - box.y + 36) } })
+  await context.close()
+}
+{
+  // Руководитель направления: панель подразделения с трендами, подсказка ячейки, ввод и загрузка
+  const { context, page: p } = await session('tech_dir', 'td123456', { viewport: TALL })
+  await open(p, '/reports?period=2026-07&unit=3', 1600)
+  await shot(p, 'user/36-report-panel')
+  await context.close()
+}
+{
+  const { context, page: p } = await session('tech_dir', 'td123456', { viewport: REPORT })
+  if (wanted('user/37-report-tooltip')) {
+    await open(p, '/reports?period=2026-07', 1200)
+    const target = p.locator('tr.mx-row[data-unit="3"] td[data-key="fin.costs"]')
+    await target.hover(); await p.waitForTimeout(500)
+    const tip = await p.locator('.mx-tip').boundingBox()
+    const cell = await target.boundingBox()
+    const table = await p.getByTestId('report-matrix').boundingBox()
+    const x = Math.max(0, table.x - 2)
+    const y = Math.max(0, Math.min(tip.y, cell.y) - 60)
+    const right = Math.min(REPORT.width, Math.max(tip.x + tip.width, cell.x + cell.width) + 120)
+    const bottom = Math.min(REPORT.height, Math.max(tip.y + tip.height, cell.y + cell.height) + 70)
+    await shot(p, 'user/37-report-tooltip', { clip: { x, y, width: right - x, height: bottom - y } })
+  }
+  await context.close()
+}
+{
+  // Ввод показателей: одно изменённое значение (без сохранения) — выделение ячейки и панель «Сохранить»
+  const { context, page: p } = await session('tech_dir', 'td123456')
+  await open(p, '/reports/entry?period=2026-07', 1000)
+  if (wanted('user/39-report-entry')) {
+    await p.locator('[data-testid=entry-grid] input[data-field=value]').first().fill('97')
+    await p.mouse.move(5, 5); await p.waitForTimeout(500)
+    await shot(p, 'user/39-report-entry')
+    await p.getByRole('button', { name: 'Отменить', exact: true }).click(); await p.waitForTimeout(300)
+  }
+  if (wanted('user/40-report-import')) {
+    // План загрузки: новое значение, изменения и строка вне области ввода (Служба маркетинга)
+    const rows = [
+      'Подразделение;Показатель;Период;Значение;Цель;Комментарий',
+      'MKT;Выполнение плана работ;2026-07;90;;',
+      'АЛМИ Партнер / Техническая дирекция / ИТ-служба;Выполнение плана работ;2026-07;98,5;100;',
+      'SUP-OS;ops.plan;2026-07;95;100;',
+      'TECH;Удовлетворённость клиентов;2026-07;4,6;;',
+    ]
+    await p.getByTestId('entry-import').click()
+    const dialog = p.getByRole('dialog').first()
+    await dialog.getByTestId('values-file').setInputFiles(memoryFile('Показатели 2026-07.csv', 'text/csv', `\ufeff${rows.join('\r\n')}\r\n`))
+    await dialog.getByTestId('import-check').click(); await settle(p, 600)
+    await dialog.getByRole('radio', { name: 'Все' }).click(); await p.waitForTimeout(400)
+    await shot(p, 'user/40-report-import')
+    await p.keyboard.press('Escape'); await p.waitForTimeout(250)
+  }
+  await context.close()
+}
+{
+  // Сотрудник: своё подразделение, операционные показатели, без выгрузки
+  const { context, page: p } = await session('engineer', 'en123456', { viewport: REPORT })
+  await open(p, '/reports?period=2026-07', 1200)
+  const card = await p.locator('section.matrix-card').boundingBox()
+  await shot(p, 'user/38-report-engineer', { clip: { x: 0, y: 0, width: REPORT.width, height: Math.min(REPORT.height, card.y + card.height + 28) } })
+  await context.close()
+}
+{
+  // Каталог показателей, редактор с предпросмотром светофора, подразделения служб
+  const { context, page: p } = await session('admin', 'admin123', { viewport: TALL })
+  await open(p, '/admin/indicators', 1000)
+  await shot(p, 'admin/22-indicators')
+  await shot(p, 'admin/24-service-units', { element: p.locator('[data-testid=service-units]') })
+  if (wanted('admin/23-indicator-editor')) {
+    await p.getByRole('button', { name: 'Изменить «Затраты»' }).click(); await settle(p, 400)
+    const dialog = p.getByRole('dialog').first()
+    await dialog.getByLabel('Значение для проверки').fill('12,4')
+    await dialog.getByLabel('Цель для проверки').fill('11,3')
+    await p.waitForTimeout(300)
+    await dialogShot(p, 'admin/23-indicator-editor')
+  }
   await context.close()
 }
 {

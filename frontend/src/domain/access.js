@@ -58,6 +58,7 @@ export const INDIVIDUAL_LABEL = 'Индивидуальная настройка
 export const CAPABILITIES = [
   { key: 'org.manage', label: 'Ведёт структуру компании', hint: 'Подразделения, руководители, загрузка и выгрузка структуры' },
   { key: 'users.manage', label: 'Ведёт пользователей и доступ', hint: 'Учётные записи, профили и доступ — кроме администраторов' },
+  { key: 'reports.manage', label: 'Ведёт сквозные отчёты', hint: 'Каталог показателей, ввод значений любой службы, заметки о статусе' },
 ]
 
 /** Значки служб (как в справочнике служб на сервере). */
@@ -451,7 +452,8 @@ export function plainAccess(effective, serviceList = []) {
       scopeText: effective.service_scopes?.[key] ? `область — ${ORG_SCOPE_SHORT[effective.service_scopes[key]].toLowerCase()}` : '',
     }))
   const classes = normalizeClasses(effective.data_classes)
-  const depth = effective.drill_depth
+  // Область «своё подразделение» не раскрывается вниз в отчётах, какой бы ни была глубина в профиле
+  const depth = effective.org_scope === 'unit' ? 0 : effective.drill_depth
   const lines = [
     { key: 'org_scope', label: 'Область', ok: true, value: ORG_SCOPE_LABELS[effective.org_scope] || '—',
       text: { company: 'Вы видите данные всех подразделений компании.',

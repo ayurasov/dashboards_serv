@@ -1,0 +1,6 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,GET /api/partnerships/summary,"ConnectionResetError(104, 'Connection reset by peer')",2,2026-11-01T20:36:30Z,2026-11-01T20:36:43Z
+GET,GET /api/pdf/tp/dashboard,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-01T20:39:44Z,2026-11-01T20:39:44Z
+GET,GET /api/reports/periods,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-01T20:36:32Z,2026-11-01T20:36:32Z
+GET,GET /api/tp/reports,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-01T20:35:11Z,2026-11-01T20:35:11Z
+GET,GET /api/layouts/tech,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-01T20:36:29Z,2026-11-01T20:36:29Z

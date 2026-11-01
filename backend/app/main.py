@@ -24,6 +24,7 @@ from .api.routers import (
     org,
     partnerships,
     pdf,
+    reports,
     system,
     tp,
     users,
@@ -39,7 +40,7 @@ OPENAPI_TAGS = [
     {"name": "Вход и профиль"}, {"name": "Пользователи"}, {"name": "Подразделения"}, {"name": "Общее"},
     {"name": "Служба персонала"}, {"name": "Пользовательские дашборды"},
     {"name": "Техподдержка: недельный отчёт"}, {"name": "Техподдержка: заявки Naumen"},
-    {"name": "Партнёрства"}, {"name": "PDF-отчёты"}, {"name": "Система"},
+    {"name": "Партнёрства"}, {"name": "Сквозные отчёты"}, {"name": "PDF-отчёты"}, {"name": "Система"},
 ]
 
 
@@ -95,7 +96,8 @@ def create_app() -> FastAPI:
                                 "status": response.status_code, "duration_ms": duration})
         return response
 
-    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, pdf, system):
+    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, reports, pdf,
+                   system):
         app.include_router(module.router)
     app.include_router(org.departments_router)
 

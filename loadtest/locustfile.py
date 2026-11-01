@@ -53,6 +53,20 @@ class Employee(HttpUser):
     @task(10)
     def overview(self):
         self.page("/api/overview")
+        self.client.get("/api/reports/summary", name="GET /api/reports/summary")
+
+    # --- сквозной отчёт (доступен всем; объём и глубина — по правам пользователя)
+    @task(6)
+    def cross_report(self):
+        self.client.get("/api/reports/periods", name="GET /api/reports/periods")
+        with self.client.get("/api/reports/scorecard", name="GET /api/reports/scorecard",
+                             catch_response=True) as r:
+            if r.status_code != 200:
+                r.failure(f"отчёт: {r.status_code}")
+                return
+            units = [u["id"] for u in r.json().get("units", [])]
+        if units:
+            self.client.get(f"/api/reports/units/{random.choice(units)}", name="GET /api/reports/units/{id}")
 
     @task(8)
     def hr_dashboard(self):

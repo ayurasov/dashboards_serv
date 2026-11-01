@@ -71,9 +71,10 @@ def engine(db_url, monkeypatch):
     from app.api.routers import system
 
     monkeypatch.setattr(system, "engine", engine)
-    from app.services import org
+    from app.services import org, reports
 
     org.invalidate()  # снимок структуры процесса — от другой копии базы
+    reports.invalidate()  # и рассчитанные сквозные отчёты
     yield engine
     engine.dispose()
 

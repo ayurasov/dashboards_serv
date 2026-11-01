@@ -118,6 +118,7 @@ INDIVIDUAL_DEFAULTS: dict = {
 CAPABILITIES: dict[str, str] = {
     "org.manage": "Структура компании: подразделения, руководители, загрузка и выгрузка",
     "users.manage": "Пользователи и доступ (кроме администраторов)",
+    "reports.manage": "Ведёт сквозные отчёты: каталог показателей, ввод значений любой службы, заметки о статусе",
 }
 
 # ---------------------------------------------------------------- структура компании (ADR-0007)
@@ -314,4 +315,119 @@ PALETTE_PRESETS: tuple[dict, ...] = (
             "brand": {"primary": "#c62828", "muted": "#5a6570"},
         },
     },
+)
+
+
+# ---------------------------------------------------------------- сквозные отчёты (ADR-0010)
+
+@dataclass(frozen=True)
+class IndicatorSourceDef:
+    """Источник вычисляемого показателя: из данных какой службы и к какому подразделению относится.
+
+    attach: unit — значение у подразделений структуры (запись службы сопоставлена с подразделением
+    по названию или коду), company — у вершины компании, service — у подразделения службы
+    (настройка report_service_units)."""
+
+    key: str
+    service_key: str
+    name: str
+    unit: str
+    attach: str
+    description: str
+    direction: str
+    rollup: str
+    data_class: str = "operational"
+
+
+INDICATOR_SOURCES: tuple[IndicatorSourceDef, ...] = (
+    IndicatorSourceDef("hr.hired", "hr", "Принято за месяц", "чел.", "unit",
+                       "Приёмы из реестра службы персонала: подразделение записи сопоставляется с подразделением "
+                       "структуры по названию или коду; у вышестоящих — по всей ветке, у компании — все записи",
+                       "neutral", "sum"),
+    IndicatorSourceDef("hr.fired", "hr", "Уволено за месяц", "чел.", "unit",
+                       "Увольнения из реестра службы персонала, сопоставление — как у приёмов", "neutral", "sum"),
+    IndicatorSourceDef("hr.turnover", "hr", "Текучесть кадров", "%", "company",
+                       "Метрика службы персонала «Текучесть кадров» за месяц — уровня компании",
+                       "lower_is_better", "none"),
+    IndicatorSourceDef("hr.time_to_fill", "hr", "Время закрытия позиции", "дн.", "company",
+                       "Метрика службы персонала «Среднее время закрытия позиции» за месяц — уровня компании",
+                       "lower_is_better", "none"),
+    IndicatorSourceDef("tech.in_work", "tech", "Заявки в работе на конец месяца", "шт.", "service",
+                       "Недельный отчёт техподдержки: «Итого в работе» последней недели месяца "
+                       "(неделя относится к месяцу своего понедельника)", "lower_is_better", "sum"),
+    IndicatorSourceDef("tech.solved", "tech", "Решено заявок за месяц", "шт.", "service",
+                       "Недельный отчёт техподдержки: сумма «Решено за неделю» по неделям месяца",
+                       "higher_is_better", "sum"),
+    IndicatorSourceDef("tech.ratio", "tech", "Отношение решено / получено", "", "service",
+                       "Решено за месяц к принятым новым заявкам за месяц по недельному отчёту",
+                       "higher_is_better", "avg"),
+    IndicatorSourceDef("pp.green_share", "project_product", "Доля партнёрств «в норме»", "%", "service",
+                       "Доля записей реестра партнёрств со светофором «Норма» на конец месяца: срок сертификата — "
+                       "на конец месяца, статус, NDA и соглашение — текущие (истории изменений реестр не хранит)",
+                       "higher_is_better", "avg"),
+)
+INDICATOR_SOURCE_BY_KEY = {s.key: s for s in INDICATOR_SOURCES}
+# Подразделение службы по умолчанию — по коду подразделения структуры
+REPORT_SERVICE_UNIT_DEFAULTS: dict[str, str] = {"hr": "HR", "tech": "TECH", "project_product": "PROJ"}
+REPORT_SETTING_KEY = "report_service_units"
+
+INDICATOR_DIRECTION_LABELS = {"higher_is_better": "Больше — лучше", "lower_is_better": "Меньше — лучше",
+                              "neutral": "Без оценки"}
+INDICATOR_ROLLUP_LABELS = {"sum": "Сумма", "avg": "Среднее", "none": "Без свёртки"}
+INDICATOR_RULE_LABELS = {"threshold": "Пороги", "target": "Отклонение от цели"}
+
+
+@dataclass(frozen=True)
+class DemoIndicatorDef:
+    key: str
+    name: str
+    unit: str
+    data_class: str
+    direction: str
+    rollup: str
+    rule_type: str
+    green: float | None
+    yellow: float | None
+    default_target: float | None
+    source_key: str | None
+    owner_service: str | None
+    expected_kinds: tuple[str, ...]
+    description: str
+
+
+# Демонстрационный каталог: вычисляемые показатели служб и вводимые финансовые (служба-владелец —
+# финансовая служба) и операционные (Аппарат генерального директора). Для правила «target» green и
+# yellow — допустимое отклонение от цели в %, для «threshold» — границы зелёного и жёлтого.
+DEMO_INDICATORS: tuple[DemoIndicatorDef, ...] = (
+    DemoIndicatorDef("fin.revenue", "Выручка", "млн ₽", "financial", "higher_is_better", "sum", "target", 5, 15,
+                     None, None, "finance", (), "Выручка подразделения за месяц по данным финансовой службы"),
+    DemoIndicatorDef("fin.costs", "Затраты", "млн ₽", "financial", "lower_is_better", "sum", "target", 3, 8,
+                     None, None, "finance", ("service", "department"),
+                     "Затраты подразделения за месяц; цель — бюджет месяца"),
+    DemoIndicatorDef("fin.payroll", "ФОТ", "млн ₽", "financial", "lower_is_better", "sum", "target", 2, 5,
+                     None, None, "finance", ("service", "department"), "Фонд оплаты труда за месяц; цель — бюджет ФОТ"),
+    DemoIndicatorDef("fin.budget", "Исполнение бюджета", "%", "financial", "higher_is_better", "avg", "target", 5, 10,
+                     100, None, "finance", ("division",), "Исполнение бюджета доходов и расходов направления"),
+    DemoIndicatorDef("ops.plan", "Выполнение плана работ", "%", "operational", "higher_is_better", "avg", "target",
+                     5, 15, 100, None, "apparat_gd", ("service", "department", "group"),
+                     "Доля выполненных работ месячного плана подразделения"),
+    DemoIndicatorDef("ops.csat", "Удовлетворённость клиентов", "из 5", "operational", "higher_is_better", "avg",
+                     "threshold", 4.5, 4.0, None, None, "apparat_gd", (),
+                     "Средняя оценка клиентов по опросам после обращений, от 1 до 5"),
+    DemoIndicatorDef("hr.turnover", "Текучесть кадров", "%", "operational", "lower_is_better", "none", "threshold",
+                     5, 8, None, "hr.turnover", "hr", (), ""),
+    DemoIndicatorDef("hr.time_to_fill", "Время закрытия позиции", "дн.", "operational", "lower_is_better", "none",
+                     "threshold", 40, 60, None, "hr.time_to_fill", "hr", (), ""),
+    DemoIndicatorDef("hr.hired", "Принято сотрудников", "чел.", "operational", "neutral", "sum", "threshold",
+                     None, None, None, "hr.hired", "hr", (), ""),
+    DemoIndicatorDef("hr.fired", "Уволено сотрудников", "чел.", "operational", "neutral", "sum", "threshold",
+                     None, None, None, "hr.fired", "hr", (), ""),
+    DemoIndicatorDef("tech.in_work", "Заявки в работе", "шт.", "operational", "lower_is_better", "sum", "threshold",
+                     180, 220, None, "tech.in_work", "tech", (), ""),
+    DemoIndicatorDef("tech.solved", "Решено заявок", "шт.", "operational", "higher_is_better", "sum", "threshold",
+                     100, 75, None, "tech.solved", "tech", (), ""),
+    DemoIndicatorDef("tech.ratio", "Решено к полученным", "", "operational", "higher_is_better", "avg", "threshold",
+                     1, 0.8, None, "tech.ratio", "tech", (), ""),
+    DemoIndicatorDef("pp.green_share", "Партнёрства в норме", "%", "operational", "higher_is_better", "avg",
+                     "threshold", 25, 15, None, "pp.green_share", "project_product", (), ""),
 )
