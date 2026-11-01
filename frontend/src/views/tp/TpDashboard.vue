@@ -126,7 +126,7 @@ const summaryText = computed(() => `${weeksCount.value} ${plural(weeksCount.valu
 
 const pdfParams = computed(() => {
   if (quickN.value) return { weeks: quickN.value }
-  if (singleYear.value && f.years.length) return { year: singleYear.value }
+  if (singleYear.value && f.years.length) return { year: singleYear.value, week_from: f.from || null, week_to: f.to || null }
   return {}
 })
 

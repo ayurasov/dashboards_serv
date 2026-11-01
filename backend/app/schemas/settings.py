@@ -33,6 +33,7 @@ class TrafficRuleOut(Schema):
     green_threshold: float | None = None
     yellow_threshold: float | None = None
     enabled: bool
+    has_rule: bool = False
     updated_at: datetime | None = None
 
 

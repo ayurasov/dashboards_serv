@@ -117,7 +117,8 @@ def test_overview(login):
 @pytest.mark.parametrize("url", [
     "/api/pdf/hr/dashboard", "/api/pdf/hr/dashboard?months=2026-06", "/api/pdf/hr/summary?period_type=month",
     "/api/pdf/hr/registry?event_type=fired", "/api/pdf/hr/targets", "/api/pdf/tp/dashboard?weeks=8",
-    "/api/pdf/tp/dashboard?year=2025", "/api/pdf/tp/naumen?year=2025", "/api/pdf/partnerships/registry?light=red",
+    "/api/pdf/tp/dashboard?year=2025", "/api/pdf/tp/dashboard?year=2025&week_from=10&week_to=20",
+    "/api/pdf/tp/naumen?year=2025", "/api/pdf/partnerships/registry?light=red",
     "/api/pdf/partnerships/summary",
 ])
 def test_pdf_reports(admin, url):

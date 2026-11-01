@@ -202,7 +202,7 @@ def light_rules(service_key: str, db: Session = Depends(get_db), user: User = De
         out.append(TrafficRuleOut(metric_key=meta["key"], label=meta["label"], unit=meta["unit"], group=meta["group"],
                                   direction=direction, green_threshold=rule.green_threshold if rule else None,
                                   yellow_threshold=rule.yellow_threshold if rule else None,
-                                  enabled=rule.enabled if rule else False,
+                                  enabled=rule.enabled if rule else False, has_rule=rule is not None,
                                   updated_at=rule.updated_at if rule else None))
     return out
 
@@ -242,7 +242,7 @@ def set_light_rule(service_key: str, metric_key: str, body: TrafficRuleIn, reque
     db.commit()
     return TrafficRuleOut(metric_key=metric_key, label=meta["label"], unit=meta["unit"], group=meta["group"],
                           direction=rule.direction, green_threshold=g, yellow_threshold=y, enabled=rule.enabled,
-                          updated_at=rule.updated_at)
+                          has_rule=True, updated_at=rule.updated_at)
 
 
 # ---------- журнал ----------

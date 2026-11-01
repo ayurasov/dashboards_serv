@@ -138,16 +138,22 @@ def hr_targets(db: Session) -> bytes:
 
 # ---------------------------------------------------------------- техподдержка
 
-def _tp_rows(db: Session, year: int | None, weeks: int | None) -> list[TpWeeklyReport]:
+def _tp_rows(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
+             week_to: int | None = None) -> list[TpWeeklyReport]:
     stmt = select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)
     if year:
         stmt = stmt.where(TpWeeklyReport.year == year)
+        if week_from:
+            stmt = stmt.where(TpWeeklyReport.week >= week_from)
+        if week_to:
+            stmt = stmt.where(TpWeeklyReport.week <= week_to)
     rows = list(db.scalars(stmt))
     return rows[-weeks:] if weeks else rows
 
 
-def tp_dashboard(db: Session, year: int | None, weeks: int | None) -> bytes:
-    rows = _tp_rows(db, year, weeks)
+def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
+                 week_to: int | None = None) -> bytes:
+    rows = _tp_rows(db, year, weeks, week_from, week_to)
     period = f"{rows[0].period} — {rows[-1].period}" if rows else "нет данных"
     rep = Report("Техническая поддержка — недельный отчёт", f"Период: {period} · недель: {len(rows)}", wide=True,
                  palette=_palette(db))

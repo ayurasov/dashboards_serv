@@ -47,8 +47,9 @@ def hr_targets(db: Session = Depends(get_db), _: User = Depends(require_service(
 
 @router.get("/tp/dashboard", summary="Техподдержка: недельный отчёт")
 def tp_dashboard(year: int | None = None, weeks: int | None = Query(None, ge=1, le=520),
+                 week_from: int | None = Query(None, ge=1, le=53), week_to: int | None = Query(None, ge=1, le=53),
                  db: Session = Depends(get_db), _: User = Depends(require_service("tech"))):
-    return file_response(reports.tp_dashboard(db, year, weeks), "Техподдержка — отчёт.pdf")
+    return file_response(reports.tp_dashboard(db, year, weeks, week_from, week_to), "Техподдержка — отчёт.pdf")
 
 
 @router.get("/tp/naumen", summary="Техподдержка: заявки Naumen")
@@ -66,7 +67,8 @@ def partnerships_registry(year: int | None = None, status: str = "", almi_produc
         db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type, search=search,
         light=light)]
     filters = {"Год": str(year) if year else None, "Статус": status, "Продукт АЛМИ": almi_product,
-               "Направление": direction, "Тип": type, "Поиск": search}
+               "Направление": direction, "Тип": type, "Поиск": search,
+               "Светофор": {"green": "норма", "yellow": "внимание", "red": "критично"}.get(light)}
     return file_response(reports.partnerships_registry(db, rows, filters), "Партнёрства — реестр.pdf")
 
 
