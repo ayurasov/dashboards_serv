@@ -1,7 +1,14 @@
 // Снимки экрана для руководств (docs/manuals/images/{user,admin}).
-// Нужен сервер с демо-данными (DEMO_DATA=true) и собранным интерфейсом:
-//   cd frontend && SHOTS_BASE_URL=http://127.0.0.1:8000 node ../tools/docs/screenshots.mjs
+// Нужен сервер с демо-данными (DEMO_DATA=true) на чистой базе и собранным интерфейсом:
+//   cd frontend && SHOTS_BASE_URL=http://127.0.0.1:8000 node ../tools/docs/screenshots.mjs [часть-имени …]
 // Затем: python3 tools/docs/optimize_png.py docs/manuals/images
+//
+// Скрипт меняет демо-данные через API только временно и возвращает их: пропуск показателя
+// «Текучесть кадров» (снимки правила «Нет данных / Не заполнено»), тестовый пользователь для
+// временного пароля. Для снимков импорта сотрудников у технического директора появляется e-mail,
+// и проверяются (но не применяются) файлы загрузки. Запускайте на отдельной базе стенда.
+// Для страниц «Вход по домену» сервер можно запустить с примером настроек AUTH_LDAP_* — адрес
+// каталога может быть недоступен: пароль домена не проверяется, входят по паролю системы.
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,11 +21,15 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const BASE = process.env.SHOTS_BASE_URL || 'http://127.0.0.1:8000'
 const OUT = resolve(ROOT, 'docs/manuals/images')
 const only = process.argv.slice(2)
+const wanted = (...names) => !only.length || names.some((n) => only.some((o) => n.includes(o)))
 
 const browser = await chromium.launch()
+const NORMAL = { width: 1440, height: 900 }
+// Боковая карточка пользователя и высокие окна целиком
+const TALL = { width: 1440, height: 1300 }
 
-async function session(username, password, { theme = 'light' } = {}) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, colorScheme: theme, locale: 'ru-RU' })
+async function session(username, password, { theme = 'light', viewport = NORMAL } = {}) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1.5, colorScheme: theme, locale: 'ru-RU' })
   const page = await context.newPage()
   page.on('pageerror', (e) => console.error('  ошибка страницы:', e.message))
   await page.goto(`${BASE}/login`)
@@ -33,14 +44,17 @@ async function session(username, password, { theme = 'light' } = {}) {
 
 async function settle(page, ms = 900) {
   await page.waitForLoadState('networkidle').catch(() => {})
+  // Скелетоны загрузки не должны попадать в снимки
+  await page.locator('.skeleton').first().waitFor({ state: 'detached', timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(ms)
 }
 
-async function shot(page, name, { clip, full = false } = {}) {
-  if (only.length && !only.some((o) => name.includes(o))) return
+async function shot(page, name, { clip, full = false, element } = {}) {
+  if (!wanted(name)) return
   const path = `${OUT}/${name}.png`
   mkdirSync(dirname(path), { recursive: true })
-  await page.screenshot({ path, fullPage: full, clip })
+  if (element) await element.screenshot({ path })
+  else await page.screenshot({ path, fullPage: full, clip })
   console.log('  ', name)
 }
 
@@ -57,14 +71,30 @@ async function click(page, text) {
 async function dialogShot(page, name) {
   const dialog = page.getByRole('dialog').first()
   await dialog.waitFor()
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(400)
   await shot(page, name)
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(200)
+  await page.waitForTimeout(250)
+}
+
+/** Запрос к API от имени вошедшего пользователя (cookie сессии и CSRF-токен). */
+async function api(page, method, path, body) {
+  const csrf = (await page.context().cookies()).find((c) => c.name === 'ds_csrf')?.value
+  const response = await page.request.fetch(`${BASE}/api${path}`, {
+    method, headers: csrf ? { 'X-CSRF-Token': csrf } : {}, ...(body === undefined ? {} : { data: body }),
+  })
+  if (!response.ok()) throw new Error(`${method} ${path}: ${response.status()} ${await response.text()}`)
+  return response.json()
+}
+
+/** Файл для поля выбора файла — из памяти, без временных файлов на диске. */
+function memoryFile(name, mimeType, content) {
+  return { name, mimeType, buffer: Buffer.from(content, 'utf8') }
 }
 
 // ---------------------------------------------------------------- пользователь
 {
+  // Страница входа; при настроенном входе по домену под полями — подсказка
   const { context, page } = await session(null)
   await settle(page)
   await shot(page, 'user/01-login')
@@ -97,14 +127,35 @@ async function dialogShot(page, name) {
   await open(p, '/profile'); await shot(p, 'user/23-profile')
   await open(p, '/guide#дашборд-службы-персонала', 1200); await shot(p, 'user/24-guide')
 
+  // Правило «Нет данных / Не заполнено»: «Текучесть кадров» за последний месяц временно очищается
+  if (wanted('user/32-hr-missing', 'user/33-hr-missing-entry')) {
+    const months = await api(p, 'GET', '/hr/months')
+    const key = months.map((m) => m.key).sort().at(-1)
+    const month = await api(p, 'GET', `/hr/months/${key}`)
+    const turnover = month.metrics.find((m) => m.key === 'turnover')
+    await api(p, 'PUT', `/hr/months/${key}/metrics`, [{ metric_key: 'turnover', value: null, source_note: turnover.source_note || '' }])
+    try {
+      await open(p, '/hr?quick=6', 1400); await shot(p, 'user/32-hr-missing')
+      await open(p, `/hr/data?month=${key}`)
+      await p.locator('tr.missing').first().scrollIntoViewIfNeeded()
+      await p.mouse.wheel(0, 260); await p.waitForTimeout(500)
+      await shot(p, 'user/33-hr-missing-entry')
+    } finally {
+      await api(p, 'PUT', `/hr/months/${key}/metrics`, [{ metric_key: 'turnover', value: turnover.value, source_note: turnover.source_note || '' }])
+    }
+  }
+
   // администратор
   await open(p, '/admin/users'); await shot(p, 'admin/01-users')
-  await p.locator('tbody tr', { hasText: 'hr_head' }).first().click(); await settle(p, 400)
-  const accessTab = p.getByRole('tab', { name: 'Доступ' }).or(p.getByRole('button', { name: 'Доступ' }))
-  if (await accessTab.count()) { await accessTab.first().click(); await settle(p, 300) }
-  await shot(p, 'admin/02-user-access'); await p.keyboard.press('Escape'); await p.waitForTimeout(200)
-  await click(p, 'Добавить пользователя'); await dialogShot(p, 'admin/03-user-create')
   await open(p, '/admin/departments'); await shot(p, 'admin/05-departments')
+  const techRow = p.locator('tr', { has: p.locator('.dep-name', { hasText: /^Техническая служба$/ }) })
+  await techRow.getByRole('button', { name: /Руководители/ }).click(); await settle(p, 300)
+  await dialogShot(p, 'admin/11-department-heads')
+  await techRow.getByRole('button', { name: 'Изменить «Техническая служба»' }).click(); await settle(p, 300)
+  await dialogShot(p, 'admin/12-department-edit')
+  await open(p, '/admin/access-profiles', 1200); await shot(p, 'admin/18-access-profiles')
+  await shot(p, 'admin/19-profile-comparison', { element: p.locator('section.card', { has: p.locator('h3', { hasText: 'Сравнение профилей' }) }) })
+  await open(p, '/admin/integrations'); await shot(p, 'admin/21-domain-login')
   await open(p, '/admin/audit'); await shot(p, 'admin/06-audit')
   await open(p, '/admin/palettes'); await shot(p, 'admin/07-palettes')
   await open(p, '/admin/system'); await shot(p, 'admin/08-system')
@@ -113,19 +164,137 @@ async function dialogShot(page, name) {
   await context.close()
 }
 {
+  // Высокие окна: карточка пользователя (вкладка «Доступ» с личными настройками), создание, настройки структуры
+  const { context, page: p } = await session('admin', 'admin123', { viewport: TALL })
+  await open(p, '/admin/users')
+  await p.locator('.urow[data-user="ceo"]').click(); await settle(p, 400)
+  await p.getByRole('tab', { name: 'Доступ' }).click()
+  await p.locator('[data-testid=effective-access]').waitFor()
+  // Первому лицу — глубина детализации шире профиля и исходные записи (без сохранения)
+  const depth = p.locator('li.dim-row[data-dimension=drill_depth]')
+  await depth.locator('[data-action=override]').click()
+  await depth.locator('select').selectOption('3')
+  const records = p.locator('li.dim-row[data-dimension=can_view_records]')
+  await records.locator('[data-action=override]').click()
+  await records.getByRole('radio', { name: 'Реестры и списки' }).click()
+  await settle(p, 400)
+  await shot(p, 'admin/02-user-access')
+  await p.getByRole('tab', { name: 'Полномочия' }).click(); await settle(p, 300)
+  // Вкладка короткая — снимаем верх карточки
+  const drawer = await p.locator('aside.drawer').boundingBox()
+  await shot(p, 'admin/20-user-capabilities', { clip: { x: drawer.x, y: 0, width: drawer.width, height: 450 } })
+  await p.keyboard.press('Escape'); await p.waitForTimeout(300)
+  // Несохранённые изменения: система спрашивает, закрыть ли карточку
+  const discard = p.getByRole('button', { name: /Закрыть без сохранения|Не сохранять|Закрыть/ })
+  if (await p.getByRole('alertdialog').count() || await p.getByRole('dialog').count() > 1) await discard.last().click().catch(() => {})
+  await open(p, '/admin/users')
+  await click(p, 'Добавить пользователя'); await dialogShot(p, 'admin/03-user-create')
+  await open(p, '/admin/departments')
+  await click(p, 'Типы уровней и вложенность'); await dialogShot(p, 'admin/13-org-settings')
+  await context.close()
+}
+{
   // Временный пароль — на тестовом пользователе, который сразу удаляется
   const { context, page: p } = await session('admin', 'admin123')
   await open(p, '/admin/users')
   await click(p, 'Добавить пользователя')
   const dialog = p.getByRole('dialog').first()
-  await dialog.locator('input').nth(0).fill('demo.user')
-  await dialog.locator('input').nth(1).fill('Петрова Анна Сергеевна')
-  await dialog.getByRole('button', { name: /Создать|Сохранить/ }).click()
+  await dialog.locator('input[name=username]').fill('demo.user')
+  await dialog.locator('input[name=full_name]').fill('Петрова Анна Сергеевна')
+  await dialog.getByRole('button', { name: /Создать/ }).click()
   await settle(p, 600)
   await shot(p, 'admin/04-temp-password')
-  const csrf = (await context.cookies()).find((c) => c.name === 'ds_csrf')?.value
-  const users = await (await p.request.get(`${BASE}/api/users?search=demo.user`)).json()
-  for (const u of users) await p.request.delete(`${BASE}/api/users/${u.id}`, { headers: { 'X-CSRF-Token': csrf } })
+  const users = await api(p, 'GET', '/users?search=demo.user')
+  for (const u of users.items || users) await api(p, 'DELETE', `/users/${u.id}`)
+  await context.close()
+}
+{
+  // Структура компании глазами технического директора: «Вы здесь», руководитель по структуре
+  // Меню свёрнуто, схема вписана в окно — структура видна целиком
+  const { context, page: p } = await session('tech_dir', 'td123456')
+  await open(p, '/org?view=chart', 600)
+  await p.getByRole('button', { name: 'Свернуть меню' }).click()
+  const fit = async () => { await p.getByRole('button', { name: 'Вписать схему в окно' }).click(); await p.waitForTimeout(1200) }
+  await open(p, '/org?view=chart', 1500); await fit(); await shot(p, 'user/26-org-chart')
+  await open(p, '/org?view=people&user=9', 1500); await fit(); await shot(p, 'user/27-org-people')
+  await open(p, '/org?view=tree', 1200)
+  // «Где я» прокручивает дерево к своему подразделению — для снимка показываем начало списка
+  await p.evaluate(() => document.querySelectorAll('.org-body *').forEach((el) => { if (el.scrollTop) el.scrollTop = 0 }))
+  await p.waitForTimeout(500)
+  await shot(p, 'user/28-org-tree')
+  await open(p, '/org?view=table&unit=3', 1200); await shot(p, 'user/29-org-table')
+  await context.close()
+}
+{
+  // «Мой доступ» первого лица: профиль «Высшее руководство», без исходных записей
+  const { context, page: p } = await session('ceo', 'ceo12345')
+  await open(p, '/profile#my-access', 1000)
+  await shot(p, 'user/30-my-access', { element: p.locator('[data-testid=my-access]') })
+  // «Нет доступа» с причиной: реестр — исходные записи, профилю они не положены.
+  // (У сотрудника без служб, engineer, на /hr сейчас выводится текст «только администратору»:
+  // NoAccessView не находит название недоступной службы — снимок с engineer после исправления.)
+  await open(p, '/hr/registry', 800); await shot(p, 'user/31-no-access')
+  await context.close()
+}
+{
+  // Импорт и экспорт: проверка файлов (план), без применения
+  const { context, page: p } = await session('admin', 'admin123')
+  if (wanted('admin/14-transfer-structure', 'admin/15-transfer-employees')) {
+    // У технического директора есть e-mail — по нему сопоставляются руководители (структура) и сотрудник (импорт)
+    await api(p, 'PATCH', '/users/8', { email: 'm.sokolova@almi-partner.ru' })
+  }
+  if (wanted('admin/14-transfer-structure')) {
+    const bundle = await api(p, 'GET', '/org/export')
+    // Руководители демо-стенда без e-mail не сопоставляются — в файле оставляем только с e-mail
+    for (const d of bundle.departments) d.heads = (d.heads || []).filter((h) => h.email)
+    const tech = bundle.departments.find((d) => d.code === 'TECH')
+    bundle.departments = bundle.departments.filter((d) => d.code !== 'AHO')
+    bundle.departments.find((d) => d.code === 'COMMDIR').kind = 'direction'
+    bundle.departments.push({
+      key: 'impl', name: 'Группа внедрения', parent: tech.key, path: `${tech.path} / Группа внедрения`, kind: 'group',
+      sort_order: 30, code: 'SUP-IMPL', external_id: null,
+      heads: [{ email: 'o.kuznetsova@almi-partner.ru', name: 'Кузнецова Ольга Павловна', primary: true }],
+    })
+    bundle.settings.org_max_depth = 12
+    await open(p, '/admin/org-transfer?tab=structure')
+    await p.locator('[data-testid=structure-file]').setInputFiles(memoryFile('dashboards-structure-2026-11-01.json', 'application/json', JSON.stringify(bundle, null, 2)))
+    await p.locator('[data-testid=structure-check]').click(); await settle(p, 600)
+    await p.locator('[data-testid=structure-plan]').scrollIntoViewIfNeeded()
+    await p.evaluate(() => document.querySelector('[data-testid=structure-plan]')?.scrollIntoView({ block: 'start' }))
+    await p.mouse.wheel(0, -90); await p.waitForTimeout(400)
+    await shot(p, 'admin/14-transfer-structure')
+  }
+  if (wanted('admin/15-transfer-employees')) {
+    // Технический директор сопоставляется по e-mail; инженер без e-mail — вопрос «тот же человек?»
+    const csv = [
+      'Email;Логин;ФИО;Должность;Телефон;Подразделение',
+      'm.sokolova@almi-partner.ru;tech_dir;Соколова Мария Игоревна;Директор по технологиям;+7 495 120-45-10;АЛМИ Партнер / Техническая дирекция',
+      'i.petrov@almi-partner.ru;engineer;Петров Илья Сергеевич;Инженер технической поддержки;;АЛМИ Партнер / Техническая дирекция / Техническая служба / Группа поддержки AlterOS',
+      'o.kuznetsova@almi-partner.ru;o.kuznetsova;Кузнецова Ольга Павловна;Инженер технической поддержки;;АЛМИ Партнер / Техническая дирекция / Техническая служба / Группа поддержки AlterOffice',
+    ].join('\r\n')
+    await open(p, '/admin/org-transfer?tab=employees')
+    await p.locator('[data-testid=employees-file]').setInputFiles(memoryFile('employees.csv', 'text/csv', `\ufeff${csv}\r\n`))
+    await p.locator('[data-testid=employees-check]').click(); await settle(p, 600)
+    await p.evaluate(() => document.querySelector('[data-testid=employees-plan]')?.scrollIntoView({ block: 'start' }))
+    await p.mouse.wheel(0, -90); await p.waitForTimeout(400)
+    await shot(p, 'admin/15-transfer-employees')
+  }
+  if (wanted('admin/16-transfer-list')) {
+    const list = [
+      'email;ФИО;Подразделение;Должность;Руководитель;Руководит',
+      'o.kuznetsova@almi-partner.ru;Кузнецова Ольга Павловна;АЛМИ Партнер / Техническая дирекция / Техническая служба / Группа поддержки AlterOffice;Ведущий инженер;;да',
+      'a.belov@almi-partner.ru;Белов Артём Николаевич;АЛМИ Партнер / Техническая дирекция / Техническая служба / Группа поддержки AlterOffice;Инженер технической поддержки;;',
+      'n.orlova@almi-partner.ru;Орлова Наталья Викторовна;АЛМИ Партнер / Коммерческая дирекция / Отдел продаж;Менеджер по продажам;;',
+    ].join('\n')
+    await open(p, '/admin/org-transfer?tab=list')
+    await p.locator('[data-testid=list-text]').fill(list)
+    await p.locator('[data-testid=list-create]').check()
+    await p.locator('[data-testid=list-check]').click(); await settle(p, 600)
+    await p.evaluate(() => document.querySelector('[data-testid=import-plan]')?.scrollIntoView({ block: 'start' }))
+    await p.mouse.wheel(0, -90); await p.waitForTimeout(400)
+    await shot(p, 'admin/16-transfer-list')
+  }
+  await open(p, '/admin/org-transfer?tab=ad'); await shot(p, 'admin/17-transfer-ad')
   await context.close()
 }
 {

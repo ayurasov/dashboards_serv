@@ -20,7 +20,7 @@ services:
 
   app:
     build: .
-    image: dashboards:${APP_VERSION:-0.1.0}
+    image: dashboards:${APP_VERSION:-0.2.0}
     restart: unless-stopped
     depends_on:
       db:
@@ -33,6 +33,7 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       DEMO_DATA: ${DEMO_DATA:-false}
+      TIMEZONE: ${TIMEZONE:-Europe/Moscow}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       SESSION_LIFETIME_HOURS: ${SESSION_LIFETIME_HOURS:-12}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-}
@@ -42,6 +43,12 @@ services:
       PDF_CONCURRENCY: ${PDF_CONCURRENCY:-2}
       LOG_JSON: ${LOG_JSON:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Вход по учётной записи домена; остальные AUTH_LDAP_* и AD_SYNC_* — в docker-compose.override.yml
+      AUTH_LDAP_ENABLED: ${AUTH_LDAP_ENABLED:-false}
+      AUTH_LDAP_URL: ${AUTH_LDAP_URL:-}
+      AUTH_LDAP_BASE_DN: ${AUTH_LDAP_BASE_DN:-}
+      AUTH_LDAP_BIND_DN: ${AUTH_LDAP_BIND_DN:-}
+      AUTH_LDAP_BIND_PASSWORD: ${AUTH_LDAP_BIND_PASSWORD:-}
 
 volumes:
   pg_data:
