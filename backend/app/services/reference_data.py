@@ -1,0 +1,157 @@
+"""Справочники при старте: службы, подразделения, метрики, правила и палитры по умолчанию,
+первичный администратор. Идемпотентно; запускается после миграций одним процессом.
+"""
+from __future__ import annotations
+
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..core.config import settings
+from ..core.db import utcnow
+from ..core.security import generate_password, hash_password
+from ..models import (
+    ColorPalette,
+    DataRevision,
+    Department,
+    HrMetricDefinition,
+    HrTarget,
+    PartnershipLightRule,
+    Service,
+    ServiceAccess,
+    TrafficLightRule,
+    User,
+)
+from . import registry
+
+log = logging.getLogger("app.reference")
+
+
+def sync_services(db: Session) -> None:
+    existing = {s.key: s for s in db.scalars(select(Service))}
+    for order, item in enumerate(registry.SERVICES):
+        service = existing.get(item.key) or Service(key=item.key)
+        service.title = item.title
+        service.short_title = item.short_title
+        service.description = item.description
+        service.icon = item.icon
+        service.route_prefix = item.route_prefix
+        service.has_dashboard = item.has_dashboard
+        service.sort_order = order
+        db.add(service)
+    db.flush()
+    known = set(db.scalars(select(DataRevision.service_key)))
+    for item in registry.SERVICES:
+        if item.key not in known:
+            db.add(DataRevision(service_key=item.key, revision=0))
+    db.flush()
+
+
+def sync_departments(db: Session) -> None:
+    existing_codes = set(db.scalars(select(Department.code)))
+    existing_names = set(db.scalars(select(Department.name)))
+    for name, code in registry.DEPARTMENTS:
+        if code not in existing_codes and name not in existing_names:
+            db.add(Department(name=name, code=code))
+    db.flush()
+
+
+def sync_hr_metrics(db: Session) -> None:
+    """Описания метрик принадлежат коду: подписи, единицы и порядок обновляются при старте."""
+    existing = {d.key: d for d in db.scalars(select(HrMetricDefinition))}
+    for item in registry.HR_METRICS:
+        definition = existing.get(item.key) or HrMetricDefinition(key=item.key)
+        definition.label = item.label
+        definition.unit = item.unit
+        definition.category = item.category
+        definition.aggregation = item.aggregation
+        definition.direction = item.direction
+        definition.description = item.description
+        definition.sort_order = item.sort_order
+        definition.is_active = True
+        db.add(definition)
+    db.flush()
+
+
+def _ensure_rules(db: Session, service_key: str, defaults) -> None:
+    known = set(db.scalars(select(TrafficLightRule.metric_key).where(TrafficLightRule.service_key == service_key)))
+    for metric_key, green, yellow, direction, enabled in defaults:
+        if metric_key not in known:
+            db.add(TrafficLightRule(service_key=service_key, metric_key=metric_key, green_threshold=green,
+                                    yellow_threshold=yellow, direction=direction, enabled=enabled))
+    db.flush()
+
+
+def ensure_targets(db: Session) -> None:
+    known = {(t.metric_key, t.year) for t in db.scalars(select(HrTarget))}
+    for metric_key, year, label, reference, target, description, source in registry.HR_DEFAULT_TARGETS:
+        if (metric_key, year) not in known:
+            db.add(HrTarget(metric_key=metric_key, year=year, label=label, reference_value=reference,
+                            target_value=target, description=description, source=source))
+    db.flush()
+
+
+def ensure_partnership_rules(db: Session) -> None:
+    known = set(db.scalars(select(PartnershipLightRule.key)))
+    for order, (key, group, label, light, threshold) in enumerate(registry.PARTNERSHIP_DEFAULT_RULES):
+        if key not in known:
+            db.add(PartnershipLightRule(key=key, group_key=group, label=label, light=light,
+                                        threshold=threshold, sort_order=order))
+    db.flush()
+
+
+def ensure_palettes(db: Session) -> None:
+    palettes = {p.name: p for p in db.scalars(select(ColorPalette))}
+    for preset in registry.PALETTE_PRESETS:
+        palette = palettes.get(preset["name"])
+        if palette is None:
+            palette = ColorPalette(name=preset["name"], colors=preset["colors"], is_preset=True, is_active=False)
+            db.add(palette)
+            palettes[palette.name] = palette
+        else:
+            palette.is_preset = True
+    if not any(p.is_active for p in palettes.values()):
+        palettes[registry.DEFAULT_PALETTE_NAME].is_active = True
+    db.flush()
+
+
+def ensure_initial_admin(db: Session) -> str | None:
+    """Создаёт администратора, если в базе нет ни одного пользователя. Возвращает пароль,
+    если он сгенерирован (его нужно показать в журнале один раз)."""
+    if db.scalar(select(User.id).limit(1)) is not None:
+        return None
+    password = settings.admin_password or generate_password()
+    admin = User(username=settings.admin_username, full_name="Администратор", role="admin",
+                 password_hash=hash_password(password), must_change_password=True,
+                 password_changed_at=utcnow())
+    db.add(admin)
+    db.flush()
+    generated = None if settings.admin_password else password
+    if generated:
+        log.warning("Создан администратор «%s» со временным паролем: %s — смените его при первом входе",
+                    admin.username, generated)
+    else:
+        log.info("Создан администратор «%s» с паролем из ADMIN_PASSWORD", admin.username)
+    return generated
+
+
+def ensure_admin_access(db: Session) -> None:
+    """Удаляет «осиротевшие» строки доступа к службам, которых больше нет в справочнике."""
+    keys = set(registry.SERVICE_KEYS)
+    for row in db.scalars(select(ServiceAccess)):
+        if row.service_key not in keys:
+            db.delete(row)
+    db.flush()
+
+
+def sync_reference_data(db: Session) -> None:
+    sync_services(db)
+    sync_departments(db)
+    sync_hr_metrics(db)
+    _ensure_rules(db, "hr", registry.HR_DEFAULT_RULES)
+    _ensure_rules(db, "tech", registry.TP_DEFAULT_RULES)
+    ensure_targets(db)
+    ensure_partnership_rules(db)
+    ensure_palettes(db)
+    ensure_admin_access(db)

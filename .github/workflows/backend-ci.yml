@@ -1,0 +1,48 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, "v*.*.*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dash
+          POSTGRES_PASSWORD: dash
+          POSTGRES_DB: dashboards
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dash" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Tests (SQLite + PostgreSQL migrations)
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://dash:dash@localhost:5432/dashboards
+        run: pytest --cov=app --cov-report=term-missing:skip-covered
+      - name: Migrations on PostgreSQL from scratch, with demo data
+        env:
+          DATABASE_URL: postgresql+psycopg://dash:dash@localhost:5432/dashboards
+          DEMO_DATA: "true"
+          ADMIN_PASSWORD: Ci-admin-2026
+        run: |
+          python -m app.cli migrate
+          python -m app.cli check-schema
+          python -m app.cli migrate

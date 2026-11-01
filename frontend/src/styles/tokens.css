@@ -1,0 +1,94 @@
+/*
+ * Дизайн-токены. Все цвета, отступы, радиусы и тени интерфейса берутся отсюда.
+ * Цвета светофора и серий графиков переопределяет активная палитра (stores/palette.js).
+ */
+:root {
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Шкала отступов (4px) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 13.5px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-kpi: 28px;
+
+  --sidebar-w: 256px;
+  --sidebar-w-collapsed: 68px;
+  --topbar-h: 56px;
+  --content-max: 1600px;
+
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: .12s var(--ease);
+  --t: .2s var(--ease);
+
+  /* Палитра (значения по умолчанию — палитра «Сдержанная») */
+  --brand: #c8302c;
+  --brand-hover: #b22825;
+  --brand-soft: rgba(200, 48, 44, .09);
+  --brand-muted: #6b7280;
+  --light-green: #3f9f6b;
+  --light-yellow: #d29a2f;
+  --light-red: #d1495b;
+  --light-gray: #a3acb9;
+  --accent: #3f6fb5; /* фокус, ссылки, информационные значки */
+  /* Серии графиков намеренно не совпадают с цветами светофора */
+  --chart-1: #3f6fb5; --chart-2: #2c9aa6; --chart-3: #7a5ba6; --chart-4: #5b5fc7;
+  --chart-5: #b07aa1; --chart-6: #8c6d46; --chart-7: #64748b;
+}
+
+:root, [data-theme='light'] {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --surface-3: #f0f2f5;
+  --border: #e6e8ec;
+  --border-strong: #d5d9e0;
+  --text: #1c2130;
+  --text-2: #4a5263;
+  --muted: #7a8293;
+  --faint: #a6adba;
+  --focus: rgba(63, 111, 181, .35);
+  --shadow-sm: 0 1px 2px rgba(20, 27, 45, .05);
+  --shadow: 0 1px 2px rgba(20, 27, 45, .04), 0 4px 16px rgba(20, 27, 45, .05);
+  --shadow-lg: 0 12px 40px rgba(20, 27, 45, .16);
+  --overlay: rgba(18, 22, 33, .42);
+  --sidebar-bg: #fbfbfc;
+  --row-hover: #f6f7fa;
+  --skeleton: linear-gradient(90deg, #eef0f3 0%, #f6f7f9 50%, #eef0f3 100%);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1218;
+  --bg-elevated: #171b23;
+  --surface: #161a22;
+  --surface-2: #1b2029;
+  --surface-3: #222833;
+  --border: #262c38;
+  --border-strong: #333b49;
+  --text: #e8eaef;
+  --text-2: #b8bfcc;
+  --muted: #8a93a4;
+  --faint: #5f6878;
+  --focus: rgba(110, 150, 220, .45);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 6px 20px rgba(0, 0, 0, .25);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, .5);
+  --overlay: rgba(0, 0, 0, .55);
+  --sidebar-bg: #12161d;
+  --row-hover: #1d222c;
+  --brand-soft: rgba(230, 90, 85, .14);
+  --skeleton: linear-gradient(90deg, #1d222b 0%, #252b36 50%, #1d222b 100%);
+}

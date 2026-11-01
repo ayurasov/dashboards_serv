@@ -1,97 +1,60 @@
 import { defineStore } from 'pinia'
-import { api } from '../api/client.js'
+import { api } from '@/api/client'
 
-const FALLBACK = {
-  traffic_light: { green: '#5a9e68', yellow: '#c9974a', red: '#c97171', neutral: '#b8bec7' },
-  charts: ['#5a9e68', '#6F8FBF', '#c9974a', '#8BBE9F', '#c97171', '#A9B2C3'],
-  brand: { primary: '#c0392b', muted: '#6b6a65' },
+/** Палитра «Сдержанная» — до ответа сервера и если он недоступен. Совпадает с app/services/registry.py. */
+export const FALLBACK = {
+  traffic_light: { green: '#3f9f6b', yellow: '#d29a2f', red: '#d1495b', neutral: '#a3acb9' },
+  charts: ['#3f6fb5', '#2c9aa6', '#7a5ba6', '#5b5fc7', '#b07aa1', '#8c6d46', '#64748b'],
+  brand: { primary: '#c8302c', muted: '#6b7280' },
 }
 
-/** Lighten a hex colour toward white — used for the *-l background variants. */
-function tint(hex, amount = 0.82) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '')
-  if (!m) return hex
-  const n = parseInt(m[1], 16)
-  const mix = (c) => Math.round(c + (255 - c) * amount)
-  const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255)
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
+function shade(hex, amount) {
+  const n = parseInt(hex.slice(1).padEnd(6, '0'), 16)
+  const ch = (v) => Math.max(0, Math.min(255, Math.round(v * (1 + amount))))
+  const r = ch(n >> 16), g = ch((n >> 8) & 255), b = ch(n & 255)
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+
+export function applyPalette(colors) {
+  const c = { ...FALLBACK, ...colors }
+  const root = document.documentElement.style
+  const tl = { ...FALLBACK.traffic_light, ...(c.traffic_light || {}) }
+  root.setProperty('--light-green', tl.green)
+  root.setProperty('--light-yellow', tl.yellow)
+  root.setProperty('--light-red', tl.red)
+  root.setProperty('--light-gray', tl.neutral)
+  const charts = c.charts?.length ? c.charts : FALLBACK.charts
+  // Семь переменных заполняются всегда: короткая палитра повторяется по кругу
+  for (let i = 0; i < 7; i++) root.setProperty(`--chart-${i + 1}`, charts[i % charts.length])
+  const brand = c.brand?.primary || FALLBACK.brand.primary
+  root.setProperty('--brand', brand)
+  root.setProperty('--brand-hover', shade(brand, -0.12))
+  root.setProperty('--brand-soft', `color-mix(in srgb, ${brand} 11%, transparent)`)
+  root.setProperty('--brand-muted', c.brand?.muted || FALLBACK.brand.muted)
 }
 
 export const usePaletteStore = defineStore('palette', {
-  state: () => ({
-    id: null,
-    name: '',
-    colors: structuredClone(FALLBACK),
-    loaded: false,
-  }),
+  state: () => ({ colors: FALLBACK, name: '' }),
   getters: {
-    trafficLight: (s) => ({ ...FALLBACK.traffic_light, ...(s.colors.traffic_light || {}) }),
     chartColors: (s) => (s.colors.charts?.length ? s.colors.charts : FALLBACK.charts),
-    brand: (s) => ({ ...FALLBACK.brand, ...(s.colors.brand || {}) }),
+    lightColors: (s) => ({ ...FALLBACK.traffic_light, ...(s.colors.traffic_light || {}) }),
   },
   actions: {
     async load() {
       try {
-        const p = await api.get('/palette')
-        this.id = p.id
-        this.name = p.name
-        this.colors = { ...structuredClone(FALLBACK), ...p.colors }
+        const palette = await api.get('/palette/active', null, { silent: true })
+        this.colors = palette.colors
+        this.name = palette.name
       } catch {
-        // Keep the fallback palette — the app must render even without the API.
-        this.colors = structuredClone(FALLBACK)
-      } finally {
-        this.loaded = true
-        this.apply()
+        this.colors = FALLBACK
       }
+      applyPalette(this.colors)
     },
-
-    apply() {
-      const tl = this.trafficLight
-      const root = document.documentElement.style
-      root.setProperty('--c-ok', tl.green)
-      root.setProperty('--c-warn', tl.yellow)
-      root.setProperty('--c-err', tl.red)
-      root.setProperty('--c-faint', tl.neutral)
-      const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-      const amt = dark ? -0.72 : 0.82
-      root.setProperty('--c-ok-l', dark ? shade(tl.green) : tint(tl.green, amt))
-      root.setProperty('--c-warn-l', dark ? shade(tl.yellow) : tint(tl.yellow, amt))
-      root.setProperty('--c-err-l', dark ? shade(tl.red) : tint(tl.red, amt))
+    preview(colors) {
+      applyPalette(colors)
     },
-
-    async save(id, payload) {
-      const p = await api.put(`/palette/${id}`, payload)
-      if (p.is_active) this._adopt(p)
-      return p
-    },
-
-    async create(payload) {
-      const p = await api.post('/palette', payload)
-      if (p.is_active) this._adopt(p)
-      return p
-    },
-
-    async activate(id) {
-      const p = await api.put(`/palette/${id}/activate`, {})
-      this._adopt(p)
-      return p
-    },
-
-    _adopt(p) {
-      this.id = p.id
-      this.name = p.name
-      this.colors = { ...structuredClone(FALLBACK), ...p.colors }
-      this.apply()
+    reset() {
+      applyPalette(this.colors)
     },
   },
 })
-
-/** Darken a hex colour toward black for dark-theme background variants. */
-function shade(hex, amount = 0.72) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '')
-  if (!m) return hex
-  const n = parseInt(m[1], 16)
-  const mix = (c) => Math.round(c * (1 - amount))
-  const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255)
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
-}

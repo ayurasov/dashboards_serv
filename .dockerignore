@@ -1,25 +1,14 @@
-# Git
 .git
-.gitignore
-
-# Dev artifacts
+**/node_modules
 **/__pycache__
 **/*.pyc
-**/*.pyo
 **/.pytest_cache
-**/.mypy_cache
 **/.ruff_cache
-**/.venv
-**/node_modules
-frontend/.vite
-
-# Build outputs (will be built inside Docker)
+**/*.db
+**/*.db-*
 frontend/dist
-
-# Local DB (mounted via volume in Docker)
-backend/hr_dashboard.db
-tp-report/data/*.db
-
-# Docs / misc
-*.md
-scripts/
+frontend/test-results
+frontend/playwright-report
+.env
+docs/manuals/*.docx
+tools/docs/.build

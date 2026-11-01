@@ -1,97 +1,136 @@
-import { toastError } from '../composables/useToast.js'
+/**
+ * HTTP-клиент API: сессионная cookie (её ставит сервер) + CSRF-токен в заголовке для
+ * изменяющих запросов. Ошибки приводятся к ApiError с текстом для человека; по умолчанию
+ * показываются всплывающим сообщением (silent: true — без него).
+ */
+import { toastError } from '@/composables/useToast'
 
 const BASE = '/api'
+const NETWORK_MESSAGE = 'Нет связи с сервером. Проверьте подключение и повторите'
 
-const NETWORK_MESSAGE = 'Нет соединения с сервером'
+let csrfToken = ''
+let onUnauthorized = () => {}
+let onPasswordChangeRequired = () => {}
 
-// Statuses where the server's own `detail` is too terse to show a user.
-const STATUS_MESSAGES = {
-  401: 'Необходима авторизация',
-  403: 'Недостаточно прав для выполнения действия',
-  404: 'Данные не найдены',
-  500: 'Ошибка сервера. Попробуйте позже',
+export function setCsrfToken(token) {
+  csrfToken = token || ''
 }
 
-function getToken() {
-  return localStorage.getItem('hr_token')
+function readCsrfCookie() {
+  const match = document.cookie.match(/(?:^|;\s*)ds_csrf=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
 }
 
-async function errorMessage(res, raw = false) {
-  let detail = ''
-  try { detail = (await res.json())?.detail || '' } catch {}
-  if (typeof detail !== 'string') detail = ''
-  if (res.status >= 500) return STATUS_MESSAGES[500]
-  if (raw && detail) return detail
-  return STATUS_MESSAGES[res.status] || detail || `Ошибка ${res.status}`
+export function configureClient({ unauthorized, passwordChangeRequired } = {}) {
+  if (unauthorized) onUnauthorized = unauthorized
+  if (passwordChangeRequired) onPasswordChangeRequired = passwordChangeRequired
 }
 
-/**
- * `raw` opts out of the global toast and keeps the server's own message — used by
- * the login form, where "Неверный логин или пароль" matters more than the generic
- * 401 text and the error is rendered inline anyway.
- */
-async function request(method, path, body = null, { raw = false } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
-  const token = getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const opts = { method, headers }
-  if (body !== null) opts.body = JSON.stringify(body)
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = 'error', fields = {} } = {}) {
+    super(message)
+    this.status = status
+    this.code = code
+    this.fields = fields
+  }
+}
 
-  let res
+function query(params) {
+  if (!params) return ''
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) continue
+    qs.set(key, Array.isArray(value) ? value.join(',') : String(value))
+  }
+  const text = qs.toString()
+  return text ? `?${text}` : ''
+}
+
+async function parseError(response) {
+  let body = {}
+  try { body = await response.json() } catch {}
+  const message = typeof body.detail === 'string' && body.detail
+    ? body.detail
+    : response.status >= 500 ? 'Ошибка сервера. Попробуйте позже' : `Ошибка ${response.status}`
+  return new ApiError(message, { status: response.status, code: body.code || 'error', fields: body.fields || {} })
+}
+
+export async function request(method, path, { body, params, silent = false, raw = false, form } = {}) {
+  const headers = { Accept: 'application/json' }
+  if (method !== 'GET' && method !== 'HEAD') headers['X-CSRF-Token'] = csrfToken || readCsrfCookie()
+  let payload
+  if (form) payload = form
+  else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    payload = JSON.stringify(body)
+  }
+  let response
   try {
-    res = await fetch(`${BASE}${path}`, opts)
+    response = await fetch(`${BASE}${path}${query(params)}`, { method, headers, body: payload, credentials: 'same-origin' })
   } catch {
-    if (!raw) toastError(NETWORK_MESSAGE)
-    throw new Error(NETWORK_MESSAGE)
+    const error = new ApiError(NETWORK_MESSAGE, { code: 'network' })
+    if (!silent) toastError(error.message)
+    throw error
   }
+  if (!response.ok) {
+    const error = await parseError(response)
+    if (response.status === 401 && error.code === 'not_authenticated') {
+      // Тихие запросы (проверка сессии при открытии) сами решают, что делать
+      if (!silent) onUnauthorized()
+      throw error
+    }
+    if (error.code === 'password_change_required') {
+      onPasswordChangeRequired()
+      throw error
+    }
+    // Ошибки полей формы (422 с fields) форма показывает рядом с полями — без второго уведомления
+    const formErrors = response.status === 422 && method !== 'GET' && Object.keys(error.fields).length > 0
+    if (!silent && !formErrors) toastError(error.message)
+    throw error
+  }
+  if (raw) return response
+  if (response.status === 204) return null
+  const type = response.headers.get('content-type') || ''
+  return type.includes('application/json') ? response.json() : response.text()
+}
 
-  if (res.status === 401 && !raw) {
-    localStorage.removeItem('hr_token')
-    localStorage.removeItem('hr_user')
-    toastError(STATUS_MESSAGES[401])
-    if (location.pathname !== '/login') location.href = '/login'
-    throw new Error(STATUS_MESSAGES[401])
-  }
-  if (!res.ok) {
-    let msg
-    try { msg = await errorMessage(res, raw) } catch { msg = `Ошибка ${res.status}` }
-    if (!raw) toastError(msg)
-    throw new Error(msg)
-  }
-  const ct = res.headers.get('content-type') || ''
-  if (ct.includes('application/json')) return res.json()
-  if (ct.includes('application/pdf')) return res.blob()
-  return res.text()
+function filenameFrom(response, fallback) {
+  const header = response.headers.get('content-disposition') || ''
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (star) return decodeURIComponent(star[1])
+  const plain = header.match(/filename="?([^";]+)"?/i)
+  return plain ? plain[1] : fallback
+}
+
+/** Скачивает файл (PDF, Excel, CSV) с именем, которое предложил сервер. */
+export async function download(path, params, fallback = 'file') {
+  const response = await request('GET', path, { params, raw: true })
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filenameFrom(response, fallback)
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  // Ссылка и адрес живут, пока браузер не начнёт загрузку: при мгновенном удалении
+  // часть браузеров сохраняет файл под именем «download»
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 1500)
+}
+
+export function upload(path, file, fields = {}) {
+  const form = new FormData()
+  form.append('file', file)
+  for (const [key, value] of Object.entries(fields)) form.append(key, value)
+  return request('POST', path, { form })
 }
 
 export const api = {
-  get: (p) => request('GET', p),
-  post: (p, b) => request('POST', p, b),
-  put: (p, b) => request('PUT', p, b),
-  del: (p) => request('DELETE', p),
-  login: (username, password) => request('POST', '/auth/login', { username, password }, { raw: true }),
-  /** Fetches any /api/pdf/* report as a Blob. `params` skips empty values. */
-  pdfBlob: async (report, params = {}) => {
-    const qs = new URLSearchParams()
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== null && v !== undefined && v !== '') qs.set(k, v)
-    }
-    const query = qs.toString()
-    let res
-    try {
-      res = await fetch(`${BASE}/pdf/${report}${query ? `?${query}` : ''}`, {
-        headers: { 'Authorization': `Bearer ${getToken()}` }
-      })
-    } catch {
-      toastError(NETWORK_MESSAGE)
-      throw new Error(NETWORK_MESSAGE)
-    }
-    if (!res.ok) {
-      const msg = await errorMessage(res)
-      toastError(msg)
-      throw new Error(msg)
-    }
-    return res.blob()
-  },
-  downloadPdf: (period = '') => api.pdfBlob('dashboard', { period }),
+  get: (path, params, options = {}) => request('GET', path, { params, ...options }),
+  post: (path, body, options = {}) => request('POST', path, { body, ...options }),
+  put: (path, body, options = {}) => request('PUT', path, { body, ...options }),
+  patch: (path, body, options = {}) => request('PATCH', path, { body, ...options }),
+  del: (path, options = {}) => request('DELETE', path, options),
+  download,
+  upload,
 }
