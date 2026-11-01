@@ -1,15 +1,21 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-sqlalchemy==2.0.36
-alembic==1.14.0
-bcrypt==4.2.1
-python-jose[cryptography]==3.3.0
-python-multipart==0.0.20
-pydantic==2.10.4
-pydantic-settings==2.7.1
+# Веб-платформа
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+gunicorn==26.2.0
+pydantic==2.14.2
+pydantic-settings==2.16.2
 email-validator==2.2.0
-reportlab==4.2.5
-matplotlib==3.10.0
-pytest==8.3.4
-httpx==0.28.1
+python-multipart==0.0.20
+
+# База данных
+SQLAlchemy==2.1.6
+alembic==1.20.1
+psycopg[binary]==3.3.6
+
+# Безопасность
+bcrypt==5.0.0
+
+# Отчёты и импорт
 openpyxl==3.1.5
+reportlab==5.1.0
+matplotlib==3.11.2

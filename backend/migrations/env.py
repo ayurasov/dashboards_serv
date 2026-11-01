@@ -1,65 +1,67 @@
-"""Alembic environment — reads DATABASE_URL from env, imports all models
-so autogenerate can detect new tables and columns.
-"""
-import os
-from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from alembic import context
+"""Окружение Alembic. Адрес базы — из DATABASE_URL (как у приложения)."""
+from __future__ import annotations
 
-# ── Import Base + all models so autogenerate sees every table ───────────────
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from logging.config import fileConfig
+from pathlib import Path
 
-from app.database import Base  # noqa: E402
-from app import models  # noqa: F401 — registers all ORM classes on Base.metadata
+from alembic import context
+from sqlalchemy import MetaData, create_engine, pool
 
-# ── Alembic Config object ───────────────────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app import models  # noqa: E402,F401 — регистрирует таблицы в Base.metadata
+from app.core.config import settings  # noqa: E402
+from app.core.db import Base  # noqa: E402
+
 config = context.config
-
-# Override sqlalchemy.url from the environment so Docker works without
-# modifying alembic.ini.
-_db_url = os.environ.get("DATABASE_URL")
-if not _db_url:
-    # Local dev fallback: SQLite file next to backend/
-    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    _db_url = f"sqlite:///{os.path.join(_root, 'hr_dashboard.db')}"
-config.set_main_option("sqlalchemy.url", _db_url)
-
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+if config.config_file_name is not None and not config.attributes.get("skip_logging"):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
 
+def _metadata():
+    # Старые ревизии (до 0012) писались без единой конвенции имён ограничений; с ней
+    # они конфликтуют на PostgreSQL. app.core.migrate прогоняет их отдельным шагом.
+    if config.attributes.get("legacy_naming"):
+        return MetaData()
+    return target_metadata
+
+
+def _url() -> str:
+    return config.attributes.get("database_url") or settings.database_url
+
+
 def run_migrations_offline() -> None:
-    context.configure(
-        url=_db_url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,  # required for SQLite ALTER TABLE support
-    )
+    context.configure(url=_url(), target_metadata=_metadata(), literal_binds=True,
+                      render_as_batch=True, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    # SQLite requires StaticPool for thread-safety in Alembic's connect context
-    connect_args = {"check_same_thread": False} if _db_url.startswith("sqlite") else {}
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.StaticPool,
-        connect_args=connect_args,
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        _run(connection)
+        return
+    url = _url()
+    # Отдельный движок без PRAGMA foreign_keys: в SQLite перестройка таблиц требует
+    # выключенной проверки внешних ключей (она выключена по умолчанию).
+    connectable = create_engine(url, poolclass=pool.NullPool)
+    with connectable.connect() as conn:
+        _run(conn)
+
+
+def _run(connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=_metadata(),
+        render_as_batch=True,
+        compare_type=True,
     )
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            render_as_batch=True,  # required for SQLite ALTER TABLE support
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():

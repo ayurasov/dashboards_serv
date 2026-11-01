@@ -1,0 +1,111 @@
+"""Техническая поддержка: аналитика заявок Naumen SD."""
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from sqlalchemy import extract, func, select
+from sqlalchemy.orm import Session
+
+from ...core.db import get_db, utcnow
+from ...models import DataImport, NaumenTicket, TpWeeklyReport, User
+from ...schemas.common import ImportResult
+from ...services import audit
+from ...services import naumen as naumen_service
+from ..deps import require_service
+from ..uploads import read_upload
+
+router = APIRouter(prefix="/api/tp/naumen", tags=["Техподдержка: заявки Naumen"])
+SERVICE = "tech"
+read = require_service(SERVICE, "viewer")
+manage = require_service(SERVICE, "manager")
+
+
+@router.get("/filters", summary="Значения для фильтров: годы и организации")
+def filters(db: Session = Depends(get_db), _: User = Depends(read)):
+    years = sorted(int(y) for y in db.scalars(
+        select(extract("year", NaumenTicket.registered_at)).where(NaumenTicket.registered_at.is_not(None)).distinct()))
+    orgs = list(db.execute(
+        select(NaumenTicket.org, func.count()).where(NaumenTicket.org != "")
+        .group_by(NaumenTicket.org).order_by(func.count().desc())).all())
+    last_import = db.scalar(select(DataImport).where(DataImport.dataset == "naumen")
+                            .order_by(DataImport.created_at.desc()).limit(1))
+    return {
+        "years": years,
+        "orgs": [{"org": org, "count": count} for org, count in orgs],
+        "last_import": None if last_import is None else {
+            "created_at": last_import.created_at, "filename": last_import.filename,
+            "username": last_import.username, "rows": last_import.rows_total},
+    }
+
+
+@router.get("/summary", summary="Сводная аналитика заявок")
+def summary(year: int | None = Query(None, ge=2000, le=2100), org: str | None = None,
+            months: int | None = Query(None, ge=1, le=120),
+            db: Session = Depends(get_db), _: User = Depends(read)):
+    stmt = select(NaumenTicket).order_by(NaumenTicket.registered_at)
+    if year:
+        stmt = stmt.where(extract("year", NaumenTicket.registered_at) == year)
+    if org:
+        stmt = stmt.where(NaumenTicket.org == org)
+    tickets = list(db.scalars(stmt))
+    if months:
+        tickets = naumen_service.last_months_filter(tickets, months)
+    return naumen_service.summary(tickets)
+
+
+@router.get("/match", summary="Отчёт ТП в сравнении с заявками Naumen")
+def match(db: Session = Depends(get_db), _: User = Depends(read)):
+    rows = list(db.scalars(select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)))
+    tickets = list(db.scalars(select(NaumenTicket)))
+    return naumen_service.match(rows, tickets)
+
+
+@router.post("/import", response_model=ImportResult, summary="Загрузить выгрузку Naumen (xlsx)")
+async def import_tickets(request: Request, file: UploadFile = File(...),
+                         mode: Literal["merge", "replace"] = Form("merge"),
+                         db: Session = Depends(get_db), user: User = Depends(manage)):
+    """merge — заявки сопоставляются по номеру: новые добавляются, известные обновляются;
+    replace — все заявки заменяются содержимым файла."""
+    raw = await read_upload(file)
+    records, skipped = naumen_service.parse_xlsx(raw)
+    created = updated = 0
+    now = utcnow()
+    if mode == "replace":
+        db.query(NaumenTicket).delete()
+        db.flush()
+        existing: dict = {}
+    else:
+        numbers = [r["number"] for r in records if r["number"] is not None]
+        existing = {t.number: t for t in db.scalars(select(NaumenTicket).where(NaumenTicket.number.in_(numbers)))} \
+            if numbers else {}
+    seen: set[int] = set()
+    for rec in records:
+        number = rec["number"]
+        if number is not None and number in seen:
+            skipped += 1
+            continue
+        if number is not None:
+            seen.add(number)
+        ticket = existing.get(number) if number is not None else None
+        if ticket is None:
+            db.add(NaumenTicket(**rec, imported_at=now))
+            created += 1
+        else:
+            for key, value in rec.items():
+                setattr(ticket, key, value)
+            ticket.imported_at = now
+            updated += 1
+    total = len(records) + skipped
+    db.add(DataImport(service_key=SERVICE, dataset="naumen", filename=(file.filename or "")[:300], mode=mode,
+                      rows_total=total, rows_created=created, rows_updated=updated, rows_skipped=skipped,
+                      user_id=user.id, username=user.username))
+    audit.record(db, user, service_key=SERVICE, entity_type="naumen_ticket", action="import",
+                 summary=f"Загружена выгрузка Naumen «{file.filename}»: новых {created}, обновлено {updated}",
+                 after={"mode": mode, "created": created, "updated": updated, "skipped": skipped}, request=request)
+    db.commit()
+    message = f"Новых заявок: {created}, обновлено: {updated}"
+    if skipped:
+        message += f", пропущено строк: {skipped}"
+    return ImportResult(dataset="naumen", mode=mode, rows_total=total, rows_created=created,
+                        rows_updated=updated, rows_skipped=skipped, message=message)
