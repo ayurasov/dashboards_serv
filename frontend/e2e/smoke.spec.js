@@ -28,6 +28,7 @@ const PAGES = [
   ['/settings/partnership-lights', 'Светофор'], ['/admin/users', 'Пользователи'], ['/admin/departments', 'Подразделения'],
   ['/admin/audit', 'Журнал'], ['/admin/palettes', 'Палитр'], ['/admin/system', 'систем'], ['/profile', 'Профиль'],
   ['/guide', 'Руководство пользователя'], ['/guide/admin', 'Руководство администратора'], ['/about', 'О программе'],
+  ['/reports', 'Сквозной отчёт'], ['/reports/entry', 'Ввод показателей'], ['/admin/indicators', 'Показатели'],
 ]
 
 test('все страницы открываются без ошибок', async ({ page }) => {

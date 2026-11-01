@@ -4,13 +4,14 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import LightBadge from '@/components/ui/LightBadge.vue'
+import ReportSummaryCard from '@/components/reports/ReportSummaryCard.vue'
 import { api } from '@/api/client'
 import { useAsync } from '@/composables/useAsync'
 import { useAuthStore, LEVEL_LABELS } from '@/stores/auth'
 import { deltaTone, formatDateTime, formatDelta, formatNumber, formatRelative } from '@/utils/format'
 import { LIGHT_LABELS } from '@/utils/lights'
 
-/** Обзор: главное по каждой доступной службе — показатели, светофор, свежесть данных. */
+/** Обзор: статус области пользователя из сквозного отчёта и главное по каждой доступной службе — показатели, светофор, свежесть данных. */
 const auth = useAuthStore()
 const { data, loading, error, reload } = useAsync(() => api.get('/overview'))
 
@@ -34,6 +35,8 @@ function lightTotal(counts) {
 <template>
   <div class="page">
     <PageHeader :title="greeting" description="Главное по службам, к которым у вас есть доступ" />
+
+    <ReportSummaryCard />
 
     <div v-if="loading && !data" class="cards">
       <div v-for="i in 3" :key="i" class="card skeleton" style="height: 260px" />

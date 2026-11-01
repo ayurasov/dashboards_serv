@@ -36,6 +36,7 @@ export const ADMIN_NAV = [
   { to: '/admin/access-profiles', label: 'Профили доступа', icon: 'shield', capability: 'users.manage' },
   { to: '/admin/departments', label: 'Подразделения', icon: 'building', capability: 'org.manage' },
   { to: '/admin/org-transfer', label: 'Импорт и экспорт', icon: 'upload', capability: 'org.manage' },
+  { to: '/admin/indicators', label: 'Показатели', icon: 'target', capability: 'reports.manage' },
   { to: '/admin/integrations', label: 'Вход по домену', icon: 'key', admin: true },
   { to: '/admin/audit', label: 'Журнал изменений', icon: 'history', admin: true },
   { to: '/admin/palettes', label: 'Палитры', icon: 'palette', admin: true },

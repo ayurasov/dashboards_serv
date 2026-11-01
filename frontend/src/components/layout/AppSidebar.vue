@@ -75,6 +75,9 @@ async function logout() {
       <router-link to="/org" class="item" :class="{ active: route.path === '/org' }" title="Структура компании">
         <AppIcon name="org" :size="17" /><span class="label">Структура компании</span>
       </router-link>
+      <router-link to="/reports" class="item" :class="{ active: route.path === '/reports' || route.path.startsWith('/reports/') }" title="Сквозной отчёт">
+        <AppIcon name="traffic" :size="17" /><span class="label">Сквозной отчёт</span>
+      </router-link>
 
       <div class="section-label">Службы</div>
       <div v-for="g in groups" :key="g.key" class="group" :class="{ current: groupActive(g) }">
@@ -141,6 +144,7 @@ async function logout() {
   position: relative; display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px;
   border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: var(--fs-base); font-weight: 520;
   cursor: pointer; text-align: left; transition: background var(--t-fast), color var(--t-fast);
+  flex-shrink: 0; /* длинное меню прокручивается, пункты не сжимаются */
 }
 .item:hover, .group-head:hover { background: var(--surface-3); color: var(--text); }
 .item.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
