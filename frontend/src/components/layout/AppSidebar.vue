@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import { ADMIN_NAV, HELP_NAV, SERVICE_NAV } from '@/router/navigation'
+import { ADMIN_NAV, HELP_NAV, navItemAllowed, SERVICE_NAV } from '@/router/navigation'
 import { useAuthStore, LEVEL_LABELS } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 
@@ -22,7 +22,7 @@ const groups = computed(() => app.dashboards
     short: s.short_title,
     icon: s.icon,
     level: s.level,
-    items: SERVICE_NAV[s.key].filter((i) => !i.level || auth.can(s.key, i.level)),
+    items: SERVICE_NAV[s.key].filter((i) => navItemAllowed(auth, s.key, i)),
   })))
 
 const helpItems = computed(() => HELP_NAV.filter((i) => !i.admin || auth.isAdmin))
@@ -46,6 +46,11 @@ function toggle(key) {
   closed.value = next
   localStorage.setItem(OPEN_KEY, JSON.stringify([...next]))
 }
+
+// Под именем — профиль доступа (у индивидуальной настройки — должность)
+const subtitle = computed(() => auth.profileName || auth.user?.position || 'Пользователь')
+const meTitle = computed(() => [auth.fullName, auth.profileName ? `профиль доступа «${auth.profileName}»` : '', 'открыть профиль']
+  .filter(Boolean).join(' — '))
 
 async function logout() {
   await auth.logout()
@@ -105,14 +110,14 @@ async function logout() {
     </nav>
 
     <div class="footer">
-      <router-link to="/profile" class="me" :title="`${auth.fullName} — профиль`">
+      <router-link to="/profile" class="me" :title="meTitle">
         <span class="avatar">
           <img v-if="auth.user?.avatar" :src="auth.user.avatar" alt="" />
           <template v-else>{{ auth.initials }}</template>
         </span>
         <span v-if="!app.sidebarCollapsed" class="me-text">
           <strong class="ellipsis">{{ auth.fullName }}</strong>
-          <span>{{ auth.isAdmin ? 'Администратор' : (auth.user?.position || 'Пользователь') }}</span>
+          <span data-testid="sidebar-profile">{{ subtitle }}</span>
         </span>
       </router-link>
       <button class="icon-btn" type="button" title="Выйти" @click="logout"><AppIcon name="logout" :size="16" /></button>

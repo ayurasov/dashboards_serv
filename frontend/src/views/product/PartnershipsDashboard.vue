@@ -74,7 +74,10 @@ const recordTotal = computed(() => recordSegments.value.reduce((s, x) => s + x.c
 
 const compact = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== '' && v !== null && v !== undefined))
 const registryQuery = computed(() => compact(params.value))
+// Переходы в реестр — только с правом на исходные записи (ADR-0009)
+const canRegistry = computed(() => auth.canRecords)
 function toRegistry(extra) {
+  if (!canRegistry.value) return
   router.push({ path: '/product/registry', query: compact({ ...params.value, ...extra }) })
 }
 
@@ -197,7 +200,7 @@ const periodText = computed(() => {
   <div class="page">
     <PageHeader title="Технологические партнёрства" :description="periodText" :updatedAt="app.service('project_product')?.data_updated_at">
       <button class="btn btn-ghost" type="button" title="Состав и порядок блоков" @click="layoutOpen = true"><AppIcon name="settings" :size="15" />Настроить</button>
-      <router-link :to="{ path: '/product/registry', query: registryQuery }" class="btn"><AppIcon name="list" :size="15" />Реестр</router-link>
+      <router-link v-if="canRegistry" :to="{ path: '/product/registry', query: registryQuery }" class="btn"><AppIcon name="list" :size="15" />Реестр</router-link>
       <PdfButton report="partnerships/summary" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </PageHeader>
@@ -250,10 +253,10 @@ const periodText = computed(() => {
                 <span v-for="s in recordSegments" v-show="s.count" :key="s.light" class="seg" :class="s.light" :style="{ flexGrow: s.count }" :title="`${LIGHT_LABELS[s.light]}: ${s.count} (${formatNumber(s.share)}%)`" />
               </div>
               <div class="legend">
-                <button v-for="s in recordSegments" :key="s.light" class="legend-item" type="button" :title="`Открыть в реестре: ${LIGHT_LABELS[s.light].toLowerCase()}`" @click="toRegistry({ light: s.light })">
+                <button v-for="s in recordSegments" :key="s.light" class="legend-item" type="button" :disabled="!canRegistry" :title="canRegistry ? `Открыть в реестре: ${LIGHT_LABELS[s.light].toLowerCase()}` : LIGHT_LABELS[s.light]" @click="toRegistry({ light: s.light })">
                   <LightBadge :light="s.light" dot />{{ LIGHT_LABELS[s.light] }}
                   <b class="num">{{ formatNumber(s.count) }}</b><span class="muted num">{{ formatNumber(s.share) }}%</span>
-                  <AppIcon name="chevron-right" :size="12" class="go" />
+                  <AppIcon v-if="canRegistry" name="chevron-right" :size="12" class="go" />
                 </button>
               </div>
             </div>
@@ -342,7 +345,8 @@ const periodText = computed(() => {
 .legend-item { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px 0 9px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; transition: all var(--t-fast); }
 .legend-item b { color: var(--text); font-weight: 650; }
 .legend-item .go { color: var(--faint); opacity: 0; transition: opacity var(--t-fast); }
-.legend-item:hover { background: var(--surface); border-color: var(--border); color: var(--text); }
+.legend-item:hover:not(:disabled) { background: var(--surface); border-color: var(--border); color: var(--text); }
+.legend-item:disabled { cursor: default; color: inherit; }
 .legend-item:hover .go { opacity: 1; }
 
 .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); margin-top: var(--sp-5); }

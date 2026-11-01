@@ -338,6 +338,7 @@ const overdueNote = `Просрочка: до ${OVERDUE_LEVELS.yellow}% — но
             </header>
             <div class="card-body flush">
               <div v-if="first" class="skeleton" style="height: 320px; margin: 0 16px" />
+              <div v-else-if="data?.responsibles_hidden" class="muted empty-line hidden-note"><AppIcon name="lock" :size="14" />Ответственные скрыты: нет доступа к персональным данным</div>
               <div v-else-if="!people.length" class="muted empty-line">Ответственные в выгрузке не указаны</div>
               <div v-else class="table-wrap scroll-thin">
                 <table class="table table-compact">
@@ -401,4 +402,5 @@ tr.selected td { background: color-mix(in srgb, var(--chart-2) 8%, transparent);
 .strong { font-weight: 600; }
 .table-foot { display: flex; gap: var(--sp-2); padding: 8px 10px; border-top: 1px solid var(--border); }
 .empty-line { padding: 24px 20px; font-size: var(--fs-sm); }
+.hidden-note { display: flex; align-items: center; gap: 8px; }
 </style>

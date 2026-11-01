@@ -145,8 +145,10 @@ function onImported() {
 <template>
   <div class="page">
     <PageHeader title="Недельный отчёт" :description="description" :updatedAt="app.service('tech')?.data_updated_at">
-      <button class="btn" type="button" title="Все недели в формате исходного отчёта" @click="tpApi.exportXlsx()"><AppIcon name="sheet" :size="15" />Excel</button>
-      <button class="btn" type="button" title="Все недели, разделитель — точка с запятой" @click="tpApi.exportCsv()"><AppIcon name="file" :size="15" />CSV</button>
+      <template v-if="auth.canExport && auth.canRecords">
+        <button class="btn" type="button" title="Все недели в формате исходного отчёта" @click="tpApi.exportXlsx()"><AppIcon name="sheet" :size="15" />Excel</button>
+        <button class="btn" type="button" title="Все недели, разделитель — точка с запятой" @click="tpApi.exportCsv()"><AppIcon name="file" :size="15" />CSV</button>
+      </template>
       <PdfButton report="tp/dashboard" :params="{ year: f.year || undefined }" />
       <button v-if="canManage" class="btn" type="button" @click="importOpen = true"><AppIcon name="upload" :size="15" />Загрузить файл</button>
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="editing = { row: null }"><AppIcon name="plus" :size="15" />Добавить неделю</button>

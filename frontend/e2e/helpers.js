@@ -1,4 +1,7 @@
-export const PASSWORDS = { admin: 'admin123', hr_head: 'hr123456', tp_lead: 'tp123456', product: 'pp123456', viewer: 'view1234', it_viewer: 'it123456' }
+export const PASSWORDS = {
+  admin: 'admin123', hr_head: 'hr123456', tp_lead: 'tp123456', product: 'pp123456', viewer: 'view1234', it_viewer: 'it123456',
+  ceo: 'ceo12345', tech_dir: 'td123456', engineer: 'en123456',
+}
 
 export async function login(page, username = 'admin') {
   await page.goto('/login')

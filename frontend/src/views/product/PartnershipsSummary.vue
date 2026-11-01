@@ -10,6 +10,7 @@ import LightBadge from '@/components/ui/LightBadge.vue'
 import PdfButton from '@/components/ui/PdfButton.vue'
 import EChart from '@/components/charts/EChart.vue'
 import { partnershipsApi } from '@/api/services'
+import { useAuthStore } from '@/stores/auth'
 import { useAsync } from '@/composables/useAsync'
 import { useQueryState } from '@/composables/useQueryState'
 import { cssVar, lightColor } from '@/components/charts/echarts'
@@ -18,6 +19,9 @@ import { LIGHT_LABELS } from '@/utils/lights'
 import { countWord, lightSegments, orderStatuses, share, sortedEntries, summaryTotals, yearDelta } from '@/domain/partnerships'
 
 const router = useRouter()
+const auth = useAuthStore()
+// Переходы в реестр — только с правом на исходные записи (ADR-0009)
+const canRegistry = computed(() => auth.canRecords)
 const { state: f } = useQueryState({ year: 0 })
 const { data, loading } = useAsync(() => partnershipsApi.summary())
 
@@ -94,6 +98,7 @@ const productRows = computed(() => sortedEntries(current.value?.by_almi_product)
   .map(([name, count]) => ({ name, count, share: share(count, current.value.total) })))
 
 function toRegistry(extra = {}) {
+  if (!canRegistry.value) return
   router.push({ path: '/product/registry', query: { year: String(current.value.year), ...extra } })
 }
 </script>
@@ -113,7 +118,7 @@ function toRegistry(extra = {}) {
 
     <EmptyState v-else-if="data && !periods.length" icon="calendar" title="Нет партнёрств с датой сертификата"
                 text="Сводка строится по году сертификата. Укажите дату сертификата в реестре — и годы появятся здесь.">
-      <router-link to="/product/registry" class="btn btn-primary">Открыть реестр</router-link>
+      <router-link v-if="canRegistry" to="/product/registry" class="btn btn-primary">Открыть реестр</router-link>
     </EmptyState>
 
     <template v-else-if="current">
@@ -131,7 +136,7 @@ function toRegistry(extra = {}) {
           <h2>{{ current.label }}</h2>
           <span class="muted">{{ previous ? `изменение к ${previous.year} году` : 'предыдущего года в данных нет' }}</span>
           <span class="spacer" />
-          <button class="btn btn-sm btn-ghost" type="button" @click="toRegistry()">Записи года в реестре<AppIcon name="chevron-right" :size="13" /></button>
+          <button v-if="canRegistry" class="btn btn-sm btn-ghost" type="button" @click="toRegistry()">Записи года в реестре<AppIcon name="chevron-right" :size="13" /></button>
         </div>
         <div class="grid grid-kpi kpis">
           <KpiCard v-for="k in kpis" :key="k.key" :label="k.label" :value="k.value" :light="k.light || ''" :delta="k.delta"
@@ -212,7 +217,7 @@ function toRegistry(extra = {}) {
           <div class="card-body">
             <ul class="bars">
               <li v-for="r in statusRows" :key="r.name">
-                <button type="button" class="bar-row" :title="`Открыть в реестре: ${r.name}, ${current.year}`" @click="toRegistry({ status: r.name })">
+                <button type="button" class="bar-row" :disabled="!canRegistry" :title="canRegistry ? `Открыть в реестре: ${r.name}, ${current.year}` : r.name" @click="toRegistry({ status: r.name })">
                   <span class="bar-label">{{ r.name }}</span>
                   <span class="bar-track"><span class="bar-fill" :style="{ width: `${r.share}%` }" /></span>
                   <b class="num">{{ formatNumber(r.count) }}</b>
@@ -227,7 +232,7 @@ function toRegistry(extra = {}) {
           <div class="card-body">
             <ul v-if="productRows.length" class="bars">
               <li v-for="r in productRows" :key="r.name">
-                <button type="button" class="bar-row" :title="`Открыть в реестре: ${r.name}, ${current.year}`" @click="toRegistry({ almi_product: r.name })">
+                <button type="button" class="bar-row" :disabled="!canRegistry" :title="canRegistry ? `Открыть в реестре: ${r.name}, ${current.year}` : r.name" @click="toRegistry({ almi_product: r.name })">
                   <span class="bar-label">{{ r.name }}</span>
                   <span class="bar-track"><span class="bar-fill alt" :style="{ width: `${r.share}%` }" /></span>
                   <b class="num">{{ formatNumber(r.count) }}</b>
@@ -273,7 +278,8 @@ tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--chart-2); }
 
 .bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .bar-row { width: 100%; display: grid; grid-template-columns: minmax(110px, 180px) 1fr 44px 52px; align-items: center; gap: 12px; padding: 7px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font-size: var(--fs-sm); text-align: left; cursor: pointer; transition: background var(--t-fast); }
-.bar-row:hover { background: var(--row-hover); }
+.bar-row:hover:not(:disabled) { background: var(--row-hover); }
+.bar-row:disabled { cursor: default; color: var(--text); }
 .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .bar-track { height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
 .bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--chart-2); }

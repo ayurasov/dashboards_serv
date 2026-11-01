@@ -7,8 +7,9 @@ import { api } from '@/api/client'
 import { useAsync } from '@/composables/useAsync'
 import { confirm } from '@/composables/useConfirm'
 import { toastOk } from '@/composables/useToast'
-import { useAuthStore, LEVEL_LABELS } from '@/stores/auth'
+import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { INDIVIDUAL_LABEL, plainAccess } from '@/domain/access'
 import { formatDateTime, formatRelative } from '@/utils/format'
 
 const route = useRoute()
@@ -16,6 +17,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const app = useAppStore()
 const required = computed(() => auth.mustChangePassword)
+// Доступ простыми словами (ADR-0009): службы, область, классы данных, глубина, записи, выгрузка
+const mine = computed(() => plainAccess(auth.access, app.services))
+const SCOPE_ICONS = { org_scope: 'org', data_classes: 'layers', drill_depth: 'chart', can_view_records: 'list', can_export: 'download' }
 
 const profile = reactive({
   full_name: auth.user?.full_name || '', email: auth.user?.email || '',
@@ -103,7 +107,7 @@ async function closeOthers() {
 
 <template>
   <div class="page narrow">
-    <PageHeader title="Профиль" description="Личные данные, пароль и активные сессии" />
+    <PageHeader title="Профиль" description="Личные данные, пароль, доступ и активные сессии" />
 
     <div v-if="required" class="notice">
       <AppIcon name="lock" :size="18" />
@@ -131,7 +135,20 @@ async function closeOthers() {
         </div>
       </section>
 
-      <section class="card" :class="{ highlight: required }">
+      <section v-if="auth.isDomainUser" class="card domain" data-testid="domain-password">
+        <header class="card-head"><h3>Пароль</h3></header>
+        <div class="card-body stack">
+          <div class="domain-note">
+            <span class="d-icon"><AppIcon name="key" :size="18" /></span>
+            <div>
+              <strong>Вы входите по учётной записи домена</strong>
+              <p>Пароль меняется в домене — так же, как пароль для входа в Windows; здесь новый пароль начнёт действовать сразу. Забыли пароль — обратитесь в ИТ-службу.</p>
+            </div>
+          </div>
+          <p v-if="auth.user?.auth_linked_at" class="muted small">Учётная запись связана с доменом {{ formatDateTime(auth.user.auth_linked_at) }}</p>
+        </div>
+      </section>
+      <section v-else class="card" :class="{ highlight: required }">
         <header class="card-head"><h3>Смена пароля</h3></header>
         <form class="card-body stack" @submit.prevent="changePassword">
           <label class="field"><span>Текущий пароль</span>
@@ -149,19 +166,34 @@ async function closeOthers() {
       </section>
     </div>
 
-    <section class="card">
+    <section id="my-access" class="card" data-testid="my-access">
       <header class="card-head">
-        <h3>Доступ</h3>
-        <span class="hint">{{ auth.isAdmin ? 'Администратор: полный доступ ко всем службам и настройкам' : 'Уровни доступа выдаёт администратор' }}</span>
+        <h3>Мой доступ</h3>
+        <span class="hint">{{ auth.isAdmin ? 'Администратор: полный доступ ко всем службам, данным и настройкам' : `Профиль доступа: ${mine.profile || INDIVIDUAL_LABEL}` }}</span>
       </header>
-      <div v-if="!auth.isAdmin" class="card-body">
-        <div class="row-wrap">
-          <span v-for="a in auth.user?.access || []" :key="a.service_key" class="badge">
-            {{ app.service(a.service_key)?.title || a.service_key }} — {{ LEVEL_LABELS[a.level] }}<template v-if="a.department_scope"> (свои подразделения)</template>
-          </span>
-          <span v-if="!auth.user?.access?.length" class="muted">Доступ к службам не выдан</span>
+      <div v-if="!auth.isAdmin" class="card-body access-grid">
+        <div class="svc-col">
+          <h4>Службы</h4>
+          <ul v-if="mine.services.length" class="svc-list">
+            <li v-for="s in mine.services" :key="s.key">
+              <span class="svc-title">{{ s.title }}</span>
+              <span class="badge badge-brand">{{ s.levelText }}</span>
+              <small>{{ s.hint }}<template v-if="s.scopeText">; {{ s.scopeText }}</template></small>
+            </li>
+          </ul>
+          <p v-else class="muted small">Доступ к службам не выдан — обратитесь к администратору.</p>
         </div>
+        <ul class="lines">
+          <li v-for="l in mine.lines" :key="l.key" :class="{ no: !l.ok }" :data-line="l.key">
+            <span class="l-icon"><AppIcon :name="SCOPE_ICONS[l.key] || 'info'" :size="15" /></span>
+            <div>
+              <span class="l-label">{{ l.label }}: <b>{{ l.value }}</b></span>
+              <p>{{ l.text }}</p>
+            </div>
+          </li>
+        </ul>
       </div>
+      <p v-if="!auth.isAdmin" class="card-foot muted small">Права выдаёт администратор: профиль доступа и личные настройки поверх него.</p>
     </section>
 
     <section class="card">
@@ -204,4 +236,26 @@ async function closeOthers() {
 .strength[data-level='2'] i.on { background: var(--light-yellow); }
 .strength[data-level='3'] i.on, .strength[data-level='4'] i.on { background: var(--light-green); }
 .help { font-size: var(--fs-xs); }
+.small { font-size: var(--fs-sm); }
+.domain-note { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); }
+.d-icon { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.domain-note strong { color: var(--text); }
+.domain-note p { margin-top: 3px; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.5; }
+.access-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 24px; }
+.access-grid h4 { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 8px; }
+.svc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.svc-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.svc-title { font-weight: 560; }
+.svc-list small { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--muted); }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
+.lines li { display: flex; gap: 10px; align-items: flex-start; }
+.l-icon { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--light-green) 12%, transparent); color: var(--light-green); }
+.lines li.no .l-icon { background: var(--surface-3); color: var(--muted); }
+.l-label { font-size: var(--fs-sm); color: var(--text-2); }
+.l-label b { color: var(--text); font-weight: 620; }
+.lines p { margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.45; }
+.card-foot { padding: 0 var(--sp-5) var(--sp-4); }
+@media (max-width: 860px) {
+  .access-grid, .lines { grid-template-columns: minmax(0, 1fr); }
+}
 </style>

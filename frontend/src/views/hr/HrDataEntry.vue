@@ -241,13 +241,16 @@ async function removeNote(note) {
 const EVENTS_SHOWN = 6
 const events = computed(() => [...(ready.value ? month.data.value.events : [])].sort((a, b) => String(b.event_date).localeCompare(String(a.event_date))))
 const hiredCount = computed(() => events.value.filter((e) => e.event_type === 'hired').length)
+// Записи реестра — с правом на исходные записи и персональные данные (сервер присылает events_hidden)
+const eventsHidden = computed(() => ready.value && !!month.data.value.events_hidden)
+const canRegistry = computed(() => !auth.denial({ service: 'hr', records: true, dataClass: 'personal' }))
 const shortDate = (d) => formatDate(d).slice(0, 5)
 </script>
 
 <template>
   <div class="page">
     <PageHeader title="Ввод данных" description="Значения метрик, комментарии и заметки по месяцам" :updatedAt="ready ? month.data.value.updated_at : null">
-      <router-link v-if="current" :to="{ path: '/hr/registry', query: { month: current } }" class="btn"><AppIcon name="list" :size="15" />Реестр месяца</router-link>
+      <router-link v-if="current && canRegistry" :to="{ path: '/hr/registry', query: { month: current } }" class="btn"><AppIcon name="list" :size="15" />Реестр месяца</router-link>
       <button class="btn" type="button" @click="openAdd()"><AppIcon name="plus" :size="15" />Добавить месяц</button>
     </PageHeader>
 
@@ -394,8 +397,9 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
                   <span class="who"><span class="ellipsis">{{ e.full_name }}</span><span class="dept ellipsis">{{ e.department || e.position || '—' }}</span></span>
                 </li>
               </ul>
+              <p v-else-if="eventsHidden" class="muted small hidden-note"><AppIcon name="lock" :size="13" />Записи реестра скрыты: для них нужны исходные записи и персональные данные.</p>
               <p v-else-if="ready" class="muted small">Записей за месяц нет.</p>
-              <router-link v-if="current" :to="{ path: '/hr/registry', query: { month: current } }" class="link more">
+              <router-link v-if="current && canRegistry" :to="{ path: '/hr/registry', query: { month: current } }" class="link more">
                 {{ events.length > EVENTS_SHOWN ? `Все записи месяца (${events.length})` : 'Открыть в реестре' }}<AppIcon name="chevron-right" :size="13" />
               </router-link>
             </div>
@@ -497,6 +501,8 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
 .notes .meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: var(--fs-xs); color: var(--muted); }
 .small { font-size: var(--fs-sm); }
 
+.hidden-note { display: flex; align-items: flex-start; gap: 6px; }
+.hidden-note :deep(svg) { flex: 0 0 auto; margin-top: 2px; }
 .events { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; }
 .events li { display: grid; grid-template-columns: 42px 8px minmax(0, 1fr); align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
 .events li:last-child { border-bottom: 0; }

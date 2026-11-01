@@ -134,7 +134,7 @@ const createDefaults = computed(() => ({ status: f.status || 'В работе', 
 <template>
   <div class="page">
     <PageHeader title="Реестр партнёрств" description="Сертификации продуктов партнёров: статус, документы, срок сертификата">
-      <button class="btn" type="button" :disabled="exporting" title="Выгрузить записи с текущими фильтрами" @click="exportXlsx"><AppIcon name="sheet" :size="15" />{{ exporting ? 'Выгрузка…' : 'Excel' }}</button>
+      <button v-if="auth.canExport" class="btn" type="button" :disabled="exporting" title="Выгрузить записи с текущими фильтрами" @click="exportXlsx"><AppIcon name="sheet" :size="15" />{{ exporting ? 'Выгрузка…' : 'Excel' }}</button>
       <PdfButton report="partnerships/registry" :params="exportParams" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="edit()"><AppIcon name="plus" :size="15" />Добавить</button>
     </PageHeader>

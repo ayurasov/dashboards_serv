@@ -3,8 +3,9 @@ import { useAuthStore } from '@/stores/auth'
 
 /**
  * meta: title — заголовок вкладки и хлебных крошек; service — служба страницы; level — минимальный
- * уровень доступа; admin — только администратор; capability — полномочие администрирования
- * (org.manage, users.manage); public — без входа; guide — раздел руководства.
+ * уровень доступа; records — исходные записи (реестры и списки, ADR-0009); dataClass — класс данных
+ * страницы (personal, financial); admin — только администратор; capability — полномочие
+ * администрирования (org.manage, users.manage); public — без входа; guide — раздел руководства.
  */
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true, title: 'Вход', bare: true } },
@@ -13,7 +14,7 @@ const routes = [
 
   // Служба персонала
   { path: '/hr', name: 'hr-dashboard', component: () => import('@/views/hr/HrDashboard.vue'), meta: { service: 'hr', title: 'Дашборд', guide: 'дашборд-службы-персонала' } },
-  { path: '/hr/registry', name: 'hr-registry', component: () => import('@/views/hr/HrRegistry.vue'), meta: { service: 'hr', title: 'Приёмы и увольнения', guide: 'приёмы-и-увольнения' } },
+  { path: '/hr/registry', name: 'hr-registry', component: () => import('@/views/hr/HrRegistry.vue'), meta: { service: 'hr', records: true, dataClass: 'personal', title: 'Приёмы и увольнения', guide: 'приёмы-и-увольнения' } },
   { path: '/hr/data', name: 'hr-data', component: () => import('@/views/hr/HrDataEntry.vue'), meta: { service: 'hr', level: 'editor', title: 'Ввод данных', guide: 'ввод-данных-месяца' } },
   { path: '/hr/summary', name: 'hr-summary', component: () => import('@/views/hr/HrSummary.vue'), meta: { service: 'hr', title: 'Сводка по периодам', guide: 'сводка-по-периодам' } },
   { path: '/hr/targets', name: 'hr-targets', component: () => import('@/views/hr/HrTargets.vue'), meta: { service: 'hr', title: 'Цели', guide: 'цели-и-бенчмарки' } },
@@ -28,9 +29,9 @@ const routes = [
 
   // Проектный и продуктовый офис
   { path: '/product', name: 'product-dashboard', component: () => import('@/views/product/PartnershipsDashboard.vue'), meta: { service: 'project_product', title: 'Дашборд', guide: 'дашборд-партнёрств' } },
-  { path: '/product/registry', name: 'product-registry', component: () => import('@/views/product/PartnershipsRegistry.vue'), meta: { service: 'project_product', title: 'Реестр партнёрств', guide: 'реестр-партнёрств' } },
+  { path: '/product/registry', name: 'product-registry', component: () => import('@/views/product/PartnershipsRegistry.vue'), meta: { service: 'project_product', records: true, title: 'Реестр партнёрств', guide: 'реестр-партнёрств' } },
   { path: '/product/summary', name: 'product-summary', component: () => import('@/views/product/PartnershipsSummary.vue'), meta: { service: 'project_product', title: 'Сводка по годам', guide: 'сводка-и-хронология' } },
-  { path: '/product/timeline', name: 'product-timeline', component: () => import('@/views/product/PartnershipsTimeline.vue'), meta: { service: 'project_product', title: 'Хронология', guide: 'сводка-и-хронология' } },
+  { path: '/product/timeline', name: 'product-timeline', component: () => import('@/views/product/PartnershipsTimeline.vue'), meta: { service: 'project_product', records: true, title: 'Хронология', guide: 'сводка-и-хронология' } },
 
   // Настройки служб
   { path: '/settings/traffic-light/:service(hr|tech)', name: 'traffic-light', component: () => import('@/views/settings/TrafficLightSettings.vue'), meta: { serviceParam: true, level: 'manager', title: 'Светофор', guide: 'настройка-светофора' } },
@@ -95,10 +96,11 @@ router.beforeEach(async (to) => {
   }
   if (!auth.isLoggedIn) return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
   if (auth.mustChangePassword && !to.meta.allowPasswordChange) return { name: 'profile', query: { password: 'required' } }
-  if (to.meta.admin && !auth.isAdmin) return { name: 'no-access' }
-  if (to.meta.capability && !auth.hasCapability(to.meta.capability)) return { name: 'no-access' }
+  if (to.meta.admin && !auth.isAdmin) return { name: 'no-access', query: { reason: 'admin' } }
+  if (to.meta.capability && !auth.hasCapability(to.meta.capability)) return { name: 'no-access', query: { reason: 'capability', capability: to.meta.capability } }
   const service = routeService(to)
-  if (service && !auth.can(service, to.meta.level || 'viewer')) return { name: 'no-access', query: { service } }
+  const reason = auth.denial({ service, level: to.meta.level || 'viewer', records: !!to.meta.records, dataClass: to.meta.dataClass })
+  if (reason) return { name: 'no-access', query: { reason, ...(service ? { service } : {}), page: to.meta.title } }
   return true
 })
 

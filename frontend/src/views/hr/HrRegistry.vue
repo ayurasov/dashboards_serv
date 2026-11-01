@@ -13,6 +13,7 @@ import { useQueryState } from '@/composables/useQueryState'
 import { confirm } from '@/composables/useConfirm'
 import { toastOk } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { ORG_SCOPE_LABELS } from '@/domain/access'
 import { formatDate, monthLabel, plural } from '@/utils/format'
 
 const auth = useAuthStore()
@@ -93,12 +94,12 @@ watch(() => form.month, (m, old) => {
 <template>
   <div class="page">
     <PageHeader title="Приёмы и увольнения" description="Реестр кадровых событий по месяцам">
-      <button class="btn" type="button" @click="hrApi.exportEvents(params)"><AppIcon name="sheet" :size="15" />Excel</button>
+      <button v-if="auth.canExport" class="btn" type="button" @click="hrApi.exportEvents(params)"><AppIcon name="sheet" :size="15" />Excel</button>
       <PdfButton report="hr/registry" :params="params" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="open()"><AppIcon name="plus" :size="15" />Добавить</button>
     </PageHeader>
 
-    <p v-if="auth.departmentScoped('hr')" class="scope muted"><AppIcon name="info" :size="14" />Показаны только записи ваших подразделений</p>
+    <p v-if="auth.departmentScoped('hr')" class="scope muted"><AppIcon name="info" :size="14" />Показаны только записи подразделений вашей области: {{ ORG_SCOPE_LABELS[auth.scopeFor('hr')].toLowerCase() }}</p>
 
     <FilterBar :summary="summary" :resettable="!isDefault()" @reset="reset">
       <label class="field"><span>Месяц</span>
