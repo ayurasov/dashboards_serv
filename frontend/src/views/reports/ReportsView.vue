@@ -199,7 +199,7 @@ function setView(value) { q.view = value }
           </div>
           <span class="spacer" />
           <span v-if="filtered" class="shown">Показано {{ shown }} из {{ units.length }} <button type="button" class="link-btn" @click="resetFilters">Сбросить</button></span>
-          <template v-if="view === 'matrix' && !filtered && forest.length">
+          <template v-if="view === 'matrix' && !filtered && units.some((u) => u.child_ids?.length)">
             <div class="tree-tools" role="group" aria-label="Уровни">
               <button type="button" class="icon-tool" title="Развернуть все уровни" aria-label="Развернуть всё" @click="expandAll"><OrgIcon name="expand-all" :size="16" /></button>
               <button type="button" class="icon-tool" title="Свернуть до вершин и уровня под ними" aria-label="Свернуть" @click="collapse"><OrgIcon name="collapse-all" :size="16" /></button>

@@ -295,11 +295,14 @@ def _demo_value(key: str, base: float, month: int, rng: random.Random) -> float:
 
 
 def load_reports(db: Session) -> None:
-    """Каталог показателей и 12 месяцев вводимых значений — только в пустые таблицы."""
-    if not _empty(db, Indicator):
+    """Вводимые показатели и 12 месяцев значений — если вводимых показателей ещё нет. Вычисляемые
+    из данных служб создаются при первом запуске справочниками (reference_data)."""
+    if db.scalar(select(func.count()).select_from(Indicator).where(Indicator.source_type == "manual")):
         return
-    indicators: dict[str, Indicator] = {}
+    indicators: dict[str, Indicator] = {i.key: i for i in db.scalars(select(Indicator))}
     for order, item in enumerate(DEMO_INDICATORS, start=1):
+        if item.key in indicators:
+            continue
         threshold = item.rule_type == "threshold"
         row = Indicator(key=item.key, name=item.name, description=item.description, unit=item.unit,
                         data_class=item.data_class, direction=item.direction, rollup=item.rollup,

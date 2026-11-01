@@ -452,7 +452,8 @@ export function plainAccess(effective, serviceList = []) {
       scopeText: effective.service_scopes?.[key] ? `область — ${ORG_SCOPE_SHORT[effective.service_scopes[key]].toLowerCase()}` : '',
     }))
   const classes = normalizeClasses(effective.data_classes)
-  const depth = effective.drill_depth
+  // Область «своё подразделение» не раскрывается вниз в отчётах, какой бы ни была глубина в профиле
+  const depth = effective.org_scope === 'unit' ? 0 : effective.drill_depth
   const lines = [
     { key: 'org_scope', label: 'Область', ok: true, value: ORG_SCOPE_LABELS[effective.org_scope] || '—',
       text: { company: 'Вы видите данные всех подразделений компании.',

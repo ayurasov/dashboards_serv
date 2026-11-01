@@ -125,6 +125,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Полномочия reports.manage в 0.2.0 нет: без этого 0.2.0 отклоняла бы изменение полномочий пользователя
+    bind = op.get_bind()
+    users = sa.table("users", sa.column("id", sa.Integer), sa.column("capabilities", sa.JSON))
+    for row in bind.execute(sa.select(users.c.id, users.c.capabilities)).all():
+        caps = list(row.capabilities or [])
+        if "reports.manage" in caps:
+            bind.execute(users.update().where(users.c.id == row.id)
+                         .values(capabilities=[c for c in caps if c != "reports.manage"]))
     op.execute("DELETE FROM app_settings WHERE key = 'report_service_units'")
     op.drop_table("report_revision")
     op.drop_index("ix_unit_status_notes_period", table_name="unit_status_notes")

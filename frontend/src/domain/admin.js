@@ -239,6 +239,10 @@ export const ACTION_LABELS = {
 export const ACTION_TONES = { create: 'green', update: 'blue', delete: 'red', login: 'gray', password: 'yellow', import: 'dark', grant: 'green' }
 
 export const ENTITY_LABELS = {
+  indicator: 'Показатель',
+  indicator_value: 'Значения показателей',
+  unit_status_note: 'Заметка о статусе',
+  report_settings: 'Настройки сквозного отчёта',
   user: 'Пользователь',
   user_access: 'Доступ пользователя',
   access_profile: 'Профиль доступа',

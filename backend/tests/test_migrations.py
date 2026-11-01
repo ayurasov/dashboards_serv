@@ -352,3 +352,45 @@ def test_demo_and_reference_data_fit_postgres_constraints(pg_url):
                   for t in ("users", "hr_months", "tp_weekly_reports", "naumen_tickets", "partnerships")}
     engine.dispose()
     assert counts == {"users": 9, "hr_months": 7, "tp_weekly_reports": 109, "naumen_tickets": 1868, "partnerships": 142}
+
+
+def test_0015_downgrade_removes_reports_capability(tmp_path):
+    """В 0.2.0 полномочия reports.manage нет — откат снимает его, иначе 0.2.0 отклоняла бы
+    любое изменение полномочий такого пользователя."""
+    url = f"sqlite:///{tmp_path / 'caps.db'}"
+    upgrade(url)
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, full_name, role, is_active, must_change_password, "
+                          "reports_to_none, auth_source, access_overrides, capabilities, created_at, updated_at) "
+                          "VALUES (201, 'rep', 'Ведущий отчётов', 'user', true, false, false, 'local', '{}', "
+                          "'[\"org.manage\", \"reports.manage\"]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    engine.dispose()
+    command.downgrade(alembic_config(url), "0014_org_access")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        caps = conn.execute(text("SELECT capabilities FROM users WHERE id = 201")).scalar()
+    engine.dispose()
+    assert "reports.manage" not in caps and "org.manage" in caps
+
+
+def test_first_start_seeds_computed_indicators(tmp_path, monkeypatch):
+    """Без демо-данных сквозной отчёт сразу получает показатели из данных служб."""
+    from sqlalchemy.orm import Session
+
+    from app.models import Indicator
+    from app.services.reference_data import sync_reference_data
+
+    url = f"sqlite:///{tmp_path / 'fresh-reports.db'}"
+    upgrade(url)
+    engine = create_engine(url)
+    with Session(engine) as db:
+        sync_reference_data(db)
+        db.commit()
+        rows = db.query(Indicator).all()
+        assert rows and all(i.source_type == "computed" for i in rows)
+        keys = {i.key for i in rows}
+        sync_reference_data(db)  # повторный запуск ничего не добавляет
+        db.commit()
+        assert {i.key for i in db.query(Indicator).all()} == keys
+    engine.dispose()

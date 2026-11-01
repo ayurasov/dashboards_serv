@@ -8,6 +8,16 @@ const row = (page, id) => matrix(page).locator(`tr.mx-row[data-unit="${id}"]`)
 const cell = (page, unitId, key) => row(page, unitId).locator(`td[data-key="${key}"]`)
 const FINANCIAL_WORDS = ['Выручка', 'Затраты', 'ФОТ', 'Исполнение бюджета', '₽']
 
+/** Идентификаторы показателей по ключу и подразделений по коду — не зависят от порядка создания. */
+async function entryIds(page) {
+  const indicators = await apiGet(page, '/reports/indicators')
+  const departments = await apiGet(page, '/departments')
+  return {
+    ind: Object.fromEntries(indicators.map((i) => [i.key, i.id])),
+    dep: Object.fromEntries(departments.map((d) => [d.code, d.id])),
+  }
+}
+
 test('первое лицо: компания и 4 направления с замком детализации, финансовые столбцы, PDF', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'ceo')
@@ -91,19 +101,22 @@ test('руководитель направления вводит операц�
 
   // Только операционные показатели службы «Аппарат ГД» и подразделения своей ветки
   const grid = page.getByTestId('entry-grid')
+  const { ind, dep } = await entryIds(page)
+  const planCell = `${ind['ops.plan']}:${dep['SUP-OFFICE']}`
+  const csatCell = `${ind['ops.csat']}:${dep.IT}`
   await expect(grid.locator('th.ind')).toHaveCount(2)
   await expect(grid.locator('tbody tr')).toHaveCount(5)
   const value = Number((80 + (Date.now() % 97) / 10).toFixed(1))
-  const input = grid.locator('[data-cell="5:13"] input[data-field=value]')
+  const input = grid.locator(`[data-cell="${planCell}"] input[data-field=value]`)
   await input.fill(String(value).replace('.', ','))
-  await grid.locator('[data-cell="5:13"] button[data-field=comment]').click()
+  await grid.locator(`[data-cell="${planCell}"] button[data-field=comment]`).click()
   await page.getByTestId('entry-comment').fill('Внедрение у заказчика завершено')
   await page.getByRole('button', { name: 'Готово' }).click()
   // Ошибка ввода видна у ячейки и не уходит на сервер
-  await grid.locator('[data-cell="6:2"] input[data-field=value]').fill('много')
+  await grid.locator(`[data-cell="${csatCell}"] input[data-field=value]`).fill('много')
   await page.getByTestId('entry-save').click()
-  await expect(grid.locator('[data-cell="6:2"]')).toContainText('Нужно число')
-  await grid.locator('[data-cell="6:2"] input[data-field=value]').fill('')
+  await expect(grid.locator(`[data-cell="${csatCell}"]`)).toContainText('Нужно число')
+  await grid.locator(`[data-cell="${csatCell}"] input[data-field=value]`).fill('')
   await page.getByTestId('entry-save').click()
   await expect(page.getByText(/Сохранено: изменено 1/)).toBeVisible()
   await expect(page.getByTestId('entry-save')).toHaveCount(0)
@@ -119,6 +132,9 @@ test('руководитель направления вводит операц�
 test('ввод: загрузка CSV — план с ошибками, затем применение', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'tech_dir')
+  // Исходное значение — независимо от остатков прерванных прогонов
+  const { ind, dep } = await entryIds(page)
+  await api(page, 'PUT', '/reports/values', { period: '2026-07', items: [{ indicator_id: ind['ops.plan'], department_id: dep.IT, value: 99, target: 100, comment: '' }] })
   await page.goto('/reports/entry?period=2026-07')
   await page.getByTestId('entry-import').click()
   const dialog = page.getByRole('dialog')
@@ -136,9 +152,9 @@ test('ввод: загрузка CSV — план с ошибками, зате�
   await dialog.getByTestId('import-apply').click()
   await expect(dialog.getByTestId('import-applied')).toContainText('изменено: 1')
   await dialog.getByRole('button', { name: 'Готово' }).click()
-  await expect(page.getByTestId('entry-grid').locator('[data-cell="5:2"] input[data-field=value]')).toHaveValue('98,5')
+  await expect(page.getByTestId('entry-grid').locator(`[data-cell="${ind['ops.plan']}:${dep.IT}"] input[data-field=value]`)).toHaveValue('98,5')
   // Возврат значения
-  await api(page, 'PUT', '/reports/values', { period: '2026-07', items: [{ indicator_id: 5, department_id: 2, value: 99, target: null, comment: '' }] })
+  await api(page, 'PUT', '/reports/values', { period: '2026-07', items: [{ indicator_id: ind['ops.plan'], department_id: dep.IT, value: 99, target: null, comment: '' }] })
   expect(errors).toEqual([])
 })
 

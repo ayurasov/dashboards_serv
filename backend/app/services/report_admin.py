@@ -335,7 +335,7 @@ def values_listing(db: Session, user: User, period_text: str, indicator: str | N
             raise _right_error(entry_right(db, user, found))
     if not rights:
         raise Forbidden("Ввод показателей вам недоступен: нужен уровень «Ввод данных» к службе-владельцу "
-                        "показателя или полномочие «Сквозные отчёты»", code="entry_forbidden")
+                        "показателя или полномочие «Ведёт сквозные отчёты»", code="entry_forbidden")
     if unit is not None and unit not in snap.units:
         raise NotFound("Подразделение не найдено")
     every = any(r.units is None for _, r in rights)

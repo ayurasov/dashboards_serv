@@ -14,8 +14,8 @@ const routes = [
   { path: '/org', name: 'org', component: () => import('@/views/org/OrgView.vue'), meta: { title: 'Структура компании', guide: 'структура-компании' } },
 
   // Сквозные отчёты (ADR-0010): отчёт — любому вошедшему; ввод — по признаку me.can_enter (проверяет страница)
-  { path: '/reports', name: 'reports', component: () => import('@/views/reports/ReportsView.vue'), meta: { title: 'Сквозной отчёт' } },
-  { path: '/reports/entry', name: 'reports-entry', component: () => import('@/views/reports/ReportsEntry.vue'), meta: { title: 'Ввод показателей', parent: { label: 'Сквозной отчёт', to: '/reports' } } },
+  { path: '/reports', name: 'reports', component: () => import('@/views/reports/ReportsView.vue'), meta: { title: 'Сквозной отчёт', guide: 'сквозной-отчёт' } },
+  { path: '/reports/entry', name: 'reports-entry', component: () => import('@/views/reports/ReportsEntry.vue'), meta: { title: 'Ввод показателей', guide: 'ввод-показателей', parent: { label: 'Сквозной отчёт', to: '/reports' } } },
 
   // Служба персонала
   { path: '/hr', name: 'hr-dashboard', component: () => import('@/views/hr/HrDashboard.vue'), meta: { service: 'hr', title: 'Дашборд', guide: 'дашборд-службы-персонала' } },

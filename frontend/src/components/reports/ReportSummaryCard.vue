@@ -34,7 +34,7 @@ function open(unit) {
         <h2>Статус: {{ title }}</h2>
         <div class="rs-line">
           <StatusChip :status="data.status" :label="data.status_label" size="lg" />
-          <span class="muted">{{ count(data.indicators, INDICATOR_FORMS) }} в отчёте</span>
+          <span class="muted" title="Показатели сквозного отчёта, доступные вам; статус считается по оценённым из них">{{ count(data.indicators, INDICATOR_FORMS) }} доступно в отчёте</span>
         </div>
       </div>
     </div>

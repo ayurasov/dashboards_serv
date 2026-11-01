@@ -350,7 +350,10 @@ def report_scorecard(db: Session, data: dict) -> bytes:
         lines = [item["text"] for item in explanation["items"]] or [explanation["text"]]
         if explanation["more"]:
             lines.append(f"и ещё {explanation['more']}")
-        rep.text(f"<b>{unit['name']}</b> — статус по {unit['indicator_count']} доступным показателям")
+        rated = unit.get("rated_count", unit["indicator_count"])
+        basis = "доступным показателям" if data["access"].get("hidden_classes") else "показателям"
+        rep.text(f"<b>{unit['name']}</b> — статус по {rated} {basis}" if rated else
+                 f"<b>{unit['name']}</b> — нет оценённых показателей за период")
         for line in lines:
             rep.text(f"• {line}", "small")
         rep.spacer(2)
