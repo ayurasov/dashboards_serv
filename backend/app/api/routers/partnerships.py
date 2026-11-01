@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ...core.db import get_db
 from ...core.errors import NotFound, ValidationFailed
+from ...core.timeutil import local_today
 from ...models import Partnership, User
 from ...schemas.common import Ok
 from ...schemas.partnerships import LightRuleChange, LightRuleOut, PartnershipIn, PartnershipPatch
@@ -91,7 +92,7 @@ def list_partnerships(year: int | None = None, status: str = "", almi_product: s
                          search=search, light=light)
         return [p_service.serialize(r, rules) for r in rows]
 
-    key = ("pp.list", year, status, almi_product, direction, type, search.strip().lower(), light)
+    key = ("pp.list", year, status, almi_product, direction, type, search.strip().lower(), light, local_today())
     return cached_json(db, [SERVICE], key, compute)
 
 
@@ -117,7 +118,7 @@ def analytics(year: int | None = None, status: str = "", almi_product: str = "",
         data["record_lights"] = _record_lights(rows, rules)
         return data
 
-    return cached_json(db, [SERVICE], ("pp.analytics", year, status, almi_product), compute)
+    return cached_json(db, [SERVICE], ("pp.analytics", year, status, almi_product, local_today()), compute)
 
 
 def _record_lights(rows: list[Partnership], rules) -> dict[str, int]:
@@ -130,7 +131,7 @@ def _record_lights(rows: list[Partnership], rules) -> dict[str, int]:
 
 @router.get("/summary", summary="Сводка по годам сертификации")
 def summary(db: Session = Depends(get_db), _: User = Depends(read)):
-    return cached_json(db, [SERVICE], ("pp.summary",),
+    return cached_json(db, [SERVICE], ("pp.summary", local_today()),
                        lambda: p_service.summary_by_year(_filtered(db), p_service.rule_map(db)))
 
 
@@ -142,7 +143,7 @@ def timeline(db: Session = Depends(get_db), _: User = Depends(records)):
         rows.sort(key=lambda r: r.last_modified or r.cert_date, reverse=True)
         return [p_service.serialize(r, rules) for r in rows]
 
-    return cached_json(db, [SERVICE], ("pp.timeline",), compute)
+    return cached_json(db, [SERVICE], ("pp.timeline", local_today()), compute)
 
 
 @router.get("/light-rules", response_model=list[LightRuleOut], summary="Правила светофора партнёрств")

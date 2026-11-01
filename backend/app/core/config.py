@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     # Применять миграции при старте (в Docker это делает docker-entrypoint.sh)
     migrate_on_start: bool = False
 
+    # Часовой пояс компании: границы дней в фильтрах журнала, время в PDF-отчётах
+    timezone: str = "Europe/Moscow"
+
     cors_origins: str = ""
     log_level: str = "INFO"
     log_json: bool = False

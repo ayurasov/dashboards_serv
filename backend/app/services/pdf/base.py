@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 from collections.abc import Sequence
-from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -33,6 +32,7 @@ from reportlab.platypus import (  # noqa: E402
 )
 
 from ... import APP_NAME, __version__  # noqa: E402
+from ...core.timeutil import local_now
 
 FONT_DIR = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
 FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
@@ -218,7 +218,7 @@ class Report:
         canvas.setFont(FONT, 7)
         canvas.setFillColor(MUTED)
         canvas.drawString(15 * mm, 9 * mm, f"{APP_NAME} {__version__} · сформировано "
-                                           f"{datetime.now().strftime('%d.%m.%Y %H:%M')}")
+                                           f"{local_now().strftime('%d.%m.%Y %H:%M')}")
         canvas.drawRightString(w - 15 * mm, 9 * mm, f"стр. {doc.page}")
         canvas.restoreState()
 

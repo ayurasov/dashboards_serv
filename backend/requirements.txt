@@ -21,3 +21,6 @@ ldap3==2.9.1
 openpyxl==3.1.5
 reportlab==5.1.0
 matplotlib==3.11.2
+
+# База часовых поясов (в slim-образе её нет)
+tzdata==2026.6

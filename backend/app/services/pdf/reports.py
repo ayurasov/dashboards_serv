@@ -85,8 +85,16 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
     return rep.build()
 
 
-def hr_summary(db: Session, period_type: str, scope: set[str] | None) -> bytes:
-    periods = hr_service.period_summary(db, period_type, scope)
+def _period_range(periods: list[dict], from_key: str = "", to_key: str = "") -> list[dict]:
+    """Периоды от from_key до to_key включительно (как выбрано на странице сводки)."""
+    keys = [p["key"] for p in periods]
+    start = keys.index(from_key) if from_key in keys else 0
+    end = keys.index(to_key) + 1 if to_key in keys else len(periods)
+    return periods[start:end] if start < end else periods[end - 1:start + 1]
+
+
+def hr_summary(db: Session, period_type: str, scope: set[str] | None, from_key: str = "", to_key: str = "") -> bytes:
+    periods = _period_range(hr_service.period_summary(db, period_type, scope), from_key, to_key)
     names = {"month": "месяцам", "quarter": "кварталам", "half": "полугодиям", "year": "годам"}
     defs = hr_service.definitions(db)
     rep = Report("Служба персонала — сводка", f"Сводка по {names.get(period_type, period_type)}", wide=True,
@@ -145,8 +153,12 @@ def hr_targets(db: Session) -> bytes:
 # ---------------------------------------------------------------- техподдержка
 
 def _tp_rows(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
-             week_to: int | None = None) -> list[TpWeeklyReport]:
+             week_to: int | None = None, years: list[int] | None = None) -> list[TpWeeklyReport]:
     stmt = select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)
+    if years and not year and len(years) > 1:
+        stmt = stmt.where(TpWeeklyReport.year.in_(years))
+    elif years and not year:
+        year = years[0]
     if year:
         stmt = stmt.where(TpWeeklyReport.year == year)
         if week_from:
@@ -158,8 +170,8 @@ def _tp_rows(db: Session, year: int | None, weeks: int | None, week_from: int | 
 
 
 def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
-                 week_to: int | None = None) -> bytes:
-    rows = _tp_rows(db, year, weeks, week_from, week_to)
+                 week_to: int | None = None, years: list[int] | None = None) -> bytes:
+    rows = _tp_rows(db, year, weeks, week_from, week_to, years)
     period = f"{rows[0].period} — {rows[-1].period}" if rows else "нет данных"
     rules = traffic_light.rules_for(db, "tech")
     rep = Report("Техническая поддержка — недельный отчёт", f"Период: {period} · недель: {len(rows)}", wide=True,
@@ -262,12 +274,15 @@ def partnerships_registry(db: Session, rows: Sequence[dict], filters: dict[str, 
     return rep.build()
 
 
-def partnerships_summary(db: Session) -> bytes:
+def partnerships_summary(db: Session, rows: list | None = None, filters: dict | None = None) -> bytes:
     rules = p_service.rule_map(db)
     from ...models import Partnership
 
-    all_rows = list(db.scalars(select(Partnership)))
-    rep = Report("Технологические партнёрства — сводка", "Сертификации по годам и светофор", palette=_palette(db))
+    all_rows = rows if rows is not None else list(db.scalars(select(Partnership)))
+    subtitle = _filters_line(filters or {})
+    rep = Report("Технологические партнёрства — сводка",
+                 "Сертификации по годам и светофор" + (f" · {subtitle}" if subtitle != "Все данные" else ""),
+                 palette=_palette(db))
     stats = p_service.analytics(all_rows)
     rep.kpis([("Всего", fmt(stats["total"]), None), ("NDA подписано", fmt(stats["nda_count"]), None),
               ("Соглашений", fmt(stats["agreement_count"]), None),

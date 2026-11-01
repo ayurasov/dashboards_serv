@@ -61,9 +61,11 @@ def hr_dashboard(months: str = "", db: Session = Depends(get_db), user: User = D
 
 @router.get("/hr/summary", summary="Служба персонала: сводка по периодам")
 def hr_summary(period_type: str = Query("quarter", pattern="^(month|quarter|half|year)$"),
+               from_key: str = Query("", max_length=20, description="Первый период (ключ, как на странице)"),
+               to_key: str = Query("", max_length=20, description="Последний период"),
                db: Session = Depends(get_db), user: User = Depends(hr_pdf)):
     with _pdf_slot(db):
-        content = reports.hr_summary(db, period_type, access.department_scope(db, user))
+        content = reports.hr_summary(db, period_type, access.department_scope(db, user), from_key, to_key)
     return file_response(content, "Персонал — сводка.pdf")
 
 
@@ -90,9 +92,11 @@ def hr_targets(db: Session = Depends(get_db), _: User = Depends(hr_pdf)):
 @router.get("/tp/dashboard", summary="Техподдержка: недельный отчёт")
 def tp_dashboard(year: int | None = None, weeks: int | None = Query(None, ge=1, le=520),
                  week_from: int | None = Query(None, ge=1, le=53), week_to: int | None = Query(None, ge=1, le=53),
+                 years: str = Query("", max_length=200, description="Несколько лет через запятую"),
                  db: Session = Depends(get_db), _: User = Depends(tp_pdf)):
+    year_list = sorted({int(y) for y in years.split(",") if y.strip().isdigit()})
     with _pdf_slot(db):
-        content = reports.tp_dashboard(db, year, weeks, week_from, week_to)
+        content = reports.tp_dashboard(db, year, weeks, week_from, week_to, year_list)
     return file_response(content, "Техподдержка — отчёт.pdf")
 
 
@@ -121,7 +125,11 @@ def partnerships_registry(year: int | None = None, status: str = "", almi_produc
 
 
 @router.get("/partnerships/summary", summary="Партнёрства: сводка")
-def partnerships_summary(db: Session = Depends(get_db), _: User = Depends(pp_pdf)):
+def partnerships_summary(year: int | None = None, status: str = "", almi_product: str = "",
+                         db: Session = Depends(get_db), _: User = Depends(pp_pdf)):
+    """Сводка с фильтрами дашборда партнёрств (год сертификации, статус, продукт АЛМИ)."""
+    rows = _filtered(db, year=year, status=status, almi_product=almi_product)
+    filters = {"Год": str(year) if year else None, "Статус": status, "Продукт АЛМИ": almi_product}
     with _pdf_slot(db):
-        content = reports.partnerships_summary(db)
+        content = reports.partnerships_summary(db, rows, filters)
     return file_response(content, "Партнёрства — сводка.pdf")
