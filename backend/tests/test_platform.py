@@ -166,3 +166,33 @@ def test_openapi_is_generated(client):
     schema = client.get("/api/openapi.json").json()
     assert schema["info"]["version"] == "0.1.0"
     assert "/api/hr/analytics/dashboard" in schema["paths"] and "/api/tp/naumen/import" in schema["paths"]
+
+
+def test_response_cache_is_invalidated_by_writes(admin, login):
+    from app.services.cache import cache
+
+    cache.clear()
+    viewer = login("viewer")
+    first = viewer.get("/api/hr/analytics/dashboard", params={"months": "2026-07"}).json()
+    again = viewer.get("/api/hr/analytics/dashboard", params={"months": "2026-07"}).json()
+    assert first == again and cache.hits >= 1
+    admin.put("/api/hr/months/2026-07/metrics", json=[{"metric_key": "turnover", "value": 9.9}])
+    fresh = viewer.get("/api/hr/analytics/dashboard", params={"months": "2026-07"}).json()
+    turnover = next(m for m in fresh["series"][0]["metrics"] if m["key"] == "turnover")
+    assert turnover["value"] == 9.9 and turnover["light"] == "red"
+
+
+def test_cache_respects_department_scope(login):
+    full = login("viewer").get("/api/hr/events").json()
+    scoped = login("it_viewer").get("/api/hr/events").json()
+    assert len(scoped) < len(full)
+
+
+def test_revision_bumps_only_for_changed_service(admin, db):
+    from app.services.cache import revisions
+
+    before = {k: rev for k, rev, _ts in revisions(db, ["hr", "tech"])}
+    admin.post("/api/tp/reports", json={"year": 2031, "week": 1})
+    db.expire_all()
+    after = {k: rev for k, rev, _ts in revisions(db, ["hr", "tech"])}
+    assert after["tech"] == before["tech"] + 1 and after["hr"] == before["hr"]

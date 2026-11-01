@@ -40,6 +40,7 @@ from ...services import access, audit, traffic_light
 from ...services import hr as hr_service
 from ...services import partnerships as p_service
 from ...services import tp as tp_service
+from ...services.cache import cached_json
 from ...services.registry import HR_METRIC_CATEGORIES, SERVICE_BY_KEY
 from ..deps import active_user, current_user, require_admin
 from ..uploads import file_response
@@ -62,6 +63,14 @@ def _data_updated(db: Session) -> dict[str, datetime | None]:
 
 @router.get("/services", response_model=list[ServiceOut], summary="Службы, доступные пользователю")
 def list_services(all: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    key = ("services", bool(all and user.is_admin), tuple(sorted(access.accessible_services(user))))
+    return cached_json(db, DATA_SERVICES, key, lambda: _services(db, user, all))
+
+
+DATA_SERVICES = ("hr", "tech", "project_product")
+
+
+def _services(db: Session, user: User, all: bool) -> list[ServiceOut]:
     levels = dict(access.accessible_services(user))
     updated = _data_updated(db)
     services = list(db.scalars(select(Service).order_by(Service.sort_order)))
@@ -130,6 +139,12 @@ def _pp_overview(db: Session) -> dict:
 
 @router.get("/overview", summary="Стартовая страница: главное по каждой доступной службе")
 def overview(db: Session = Depends(get_db), user: User = Depends(active_user)):
+    scope = access.department_scope(user)
+    key = ("overview", tuple(sorted(access.accessible_services(user))), None if scope is None else tuple(sorted(scope)))
+    return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user))
+
+
+def _overview(db: Session, user: User) -> dict:
     levels = dict(access.accessible_services(user))
     updated = _data_updated(db)
     builders = {"hr": lambda: _hr_overview(db, user), "tech": lambda: _tp_overview(db),

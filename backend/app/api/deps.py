@@ -4,7 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from fastapi import Depends, Request
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from ..core.config import settings
 from ..core.db import get_db
@@ -31,7 +32,9 @@ def current_session(request: Request, db: Session = Depends(get_db)) -> UserSess
 
 
 def current_user(session: UserSession = Depends(current_session), db: Session = Depends(get_db)) -> User:
-    user = db.get(User, session.user_id)
+    # Пользователь вместе с доступом и подразделениями — одним запросом (это каждый запрос API)
+    user = db.scalars(select(User).options(joinedload(User.access), joinedload(User.departments))
+                      .where(User.id == session.user_id)).unique().first()
     if user is None or not user.is_active:
         raise Unauthorized("Учётная запись недоступна", code="not_authenticated")
     return user

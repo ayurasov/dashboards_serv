@@ -569,7 +569,7 @@ def _create_schema() -> dict[str, sa.Table]:
         "partnerships",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("partner", sa.String(300), nullable=False),
-        sa.Column("product", sa.String(300), nullable=False),
+        sa.Column("product", sa.Text(), nullable=False),
         sa.Column("direction", sa.String(300), nullable=False),
         sa.Column("almi_product", sa.String(200), nullable=False),
         sa.Column("almi_version", sa.String(200), nullable=False),
@@ -899,7 +899,7 @@ def _transfer(bind, t: dict[str, sa.Table], parked: dict[str, str | None]) -> No
     for r in old("partnerships"):
         created = _dt(r.get("created_at")) or now
         partnerships.append({
-            "id": r["id"], "partner": _s(r.get("partner"), 300) or "—", "product": _s(r.get("product"), 300),
+            "id": r["id"], "partner": _s(r.get("partner"), 300) or "—", "product": _s(r.get("product")),
             "direction": _s(r.get("direction"), 300), "almi_product": _s(r.get("almi_product"), 200),
             "almi_version": _s(r.get("almi_version"), 200), "status": _s(r.get("status"), 60) or "В работе",
             "cert_date": _d(r.get("cert_date")), "nda": _b(r.get("nda")), "agreement": _b(r.get("agreement")),

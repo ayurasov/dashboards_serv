@@ -12,6 +12,7 @@ from ...schemas.common import Ok
 from ...schemas.partnerships import LightRuleChange, LightRuleOut, PartnershipIn, PartnershipPatch
 from ...services import audit
 from ...services import partnerships as p_service
+from ...services.cache import cached_json
 from ...services.registry import PARTNERSHIP_LIGHT_GROUPS
 from ..deps import require_service
 from ..uploads import file_response
@@ -64,6 +65,10 @@ def _snapshot(p: Partnership) -> dict:
 
 @router.get("/options", summary="Значения для фильтров и форм")
 def options(db: Session = Depends(get_db), _: User = Depends(read)):
+    return cached_json(db, [SERVICE], ("pp.options",), lambda: _options(db))
+
+
+def _options(db: Session) -> dict:
     def distinct(column):
         return sorted({v for v in db.scalars(select(column).distinct()) if v})
 
@@ -77,10 +82,14 @@ def options(db: Session = Depends(get_db), _: User = Depends(read)):
 def list_partnerships(year: int | None = None, status: str = "", almi_product: str = "", direction: str = "",
                       type: str = "", search: str = "", light: str = "",
                       db: Session = Depends(get_db), _: User = Depends(read)):
-    rules = p_service.rule_map(db)
-    rows = _filtered(db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type,
-                     search=search, light=light)
-    return [p_service.serialize(r, rules) for r in rows]
+    def compute():
+        rules = p_service.rule_map(db)
+        rows = _filtered(db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type,
+                         search=search, light=light)
+        return [p_service.serialize(r, rules) for r in rows]
+
+    key = ("pp.list", year, status, almi_product, direction, type, search.strip().lower(), light)
+    return cached_json(db, [SERVICE], key, compute)
 
 
 @router.get("/export.xlsx", summary="Выгрузить реестр в Excel")
@@ -96,23 +105,30 @@ def export(year: int | None = None, status: str = "", almi_product: str = "", di
 @router.get("/analytics", summary="Аналитика партнёрств")
 def analytics(year: int | None = None, status: str = "", almi_product: str = "",
               db: Session = Depends(get_db), _: User = Depends(read)):
-    rows = _filtered(db, year=year, status=status, almi_product=almi_product)
-    data = p_service.analytics(rows)
-    data["lights"] = p_service.light_rows(rows, p_service.rule_map(db))
-    return data
+    def compute():
+        rows = _filtered(db, year=year, status=status, almi_product=almi_product)
+        data = p_service.analytics(rows)
+        data["lights"] = p_service.light_rows(rows, p_service.rule_map(db))
+        return data
+
+    return cached_json(db, [SERVICE], ("pp.analytics", year, status, almi_product), compute)
 
 
 @router.get("/summary", summary="Сводка по годам сертификации")
 def summary(db: Session = Depends(get_db), _: User = Depends(read)):
-    return p_service.summary_by_year(_filtered(db), p_service.rule_map(db))
+    return cached_json(db, [SERVICE], ("pp.summary",),
+                       lambda: p_service.summary_by_year(_filtered(db), p_service.rule_map(db)))
 
 
 @router.get("/timeline", summary="Хронология сертификаций и изменений")
 def timeline(db: Session = Depends(get_db), _: User = Depends(read)):
-    rules = p_service.rule_map(db)
-    rows = [r for r in _filtered(db) if r.last_modified or r.cert_date]
-    rows.sort(key=lambda r: r.last_modified or r.cert_date, reverse=True)
-    return [p_service.serialize(r, rules) for r in rows]
+    def compute():
+        rules = p_service.rule_map(db)
+        rows = [r for r in _filtered(db) if r.last_modified or r.cert_date]
+        rows.sort(key=lambda r: r.last_modified or r.cert_date, reverse=True)
+        return [p_service.serialize(r, rules) for r in rows]
+
+    return cached_json(db, [SERVICE], ("pp.timeline",), compute)
 
 
 @router.get("/light-rules", response_model=list[LightRuleOut], summary="Правила светофора партнёрств")

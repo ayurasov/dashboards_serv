@@ -11,7 +11,7 @@ from ...services import partnerships as p_service
 from ...services.pdf import reports
 from ..deps import require_service
 from ..uploads import file_response
-from .hr import list_events
+from .hr import query_events
 from .partnerships import _filtered
 
 router = APIRouter(prefix="/api/pdf", tags=["PDF-отчёты"])
@@ -33,7 +33,7 @@ def hr_summary(period_type: str = Query("quarter", pattern="^(month|quarter|half
 def hr_registry(month: str = "", year: int | None = None, event_type: str = Query("", pattern="^(|hired|fired)$"),
                 department: str = "", search: str = "", db: Session = Depends(get_db),
                 user: User = Depends(require_service("hr"))):
-    events = list_events(month, year, event_type, department, search, db, user)
+    events = query_events(month, year, event_type, department, search, db, user)
     filters = {"Месяц": month, "Год": str(year) if year else None,
                "Событие": {"hired": "приёмы", "fired": "увольнения"}.get(event_type), "Подразделение": department,
                "Поиск": search}

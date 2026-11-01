@@ -10,6 +10,7 @@ from .core import (  # noqa: F401
     CustomDashboardWidget,
     DashboardLayout,
     DataImport,
+    DataRevision,
     Department,
     Service,
     ServiceAccess,

@@ -64,4 +64,9 @@ def record(
         user_agent=(request.headers.get("user-agent", "") if request else "")[:300],
     )
     db.add(entry)
+    if service_key:
+        # Данные службы изменились: ответы аналитики в кэше всех процессов становятся неактуальными
+        from .cache import bump
+
+        bump(db, service_key)
     return entry

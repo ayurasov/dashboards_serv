@@ -183,3 +183,11 @@ def test_partnership_analytics_summary_timeline(login):
     assert dates == sorted(dates, reverse=True)
     export = c.get("/api/partnerships/export.xlsx")
     assert export.status_code == 200 and export.headers["content-type"].startswith("application/vnd.openxml")
+
+
+def test_long_product_names_are_kept(login):
+    c = login("product")
+    product = "Сканер Avision " + " / ".join(f"AD{i}" for i in range(120))
+    created = c.post("/api/partnerships", json={"partner": "ООО Длинный", "product": product})
+    assert created.status_code == 201
+    assert c.get(f"/api/partnerships/{created.json()['id']}").json()["product"] == product

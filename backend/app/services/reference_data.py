@@ -13,6 +13,7 @@ from ..core.db import utcnow
 from ..core.security import generate_password, hash_password
 from ..models import (
     ColorPalette,
+    DataRevision,
     Department,
     HrMetricDefinition,
     HrTarget,
@@ -39,6 +40,11 @@ def sync_services(db: Session) -> None:
         service.has_dashboard = item.has_dashboard
         service.sort_order = order
         db.add(service)
+    db.flush()
+    known = set(db.scalars(select(DataRevision.service_key)))
+    for item in registry.SERVICES:
+        if item.key not in known:
+            db.add(DataRevision(service_key=item.key, revision=0))
     db.flush()
 
 

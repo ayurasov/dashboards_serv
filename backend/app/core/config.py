@@ -62,6 +62,10 @@ class Settings(BaseSettings):
 
     max_upload_mb: int = Field(default=20, ge=1, le=200)
 
+    # Кэш готовых ответов аналитики (сбрасывается по ревизии данных службы)
+    response_cache: bool = True
+    response_cache_size: int = Field(default=512, ge=16, le=10000)
+
     frontend_dist: Path = PROJECT_DIR / "frontend" / "dist"
 
     @field_validator("database_url")

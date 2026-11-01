@@ -19,7 +19,7 @@ class Partnership(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     partner: Mapped[str] = mapped_column(String(300), index=True)
-    product: Mapped[str] = mapped_column(String(300), default="")
+    product: Mapped[str] = mapped_column(Text, default="")  # бывает списком моделей на сотни символов
     direction: Mapped[str] = mapped_column(String(300), default="")
     almi_product: Mapped[str] = mapped_column(String(200), default="", index=True)
     almi_version: Mapped[str] = mapped_column(String(200), default="")

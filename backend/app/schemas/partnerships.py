@@ -11,7 +11,7 @@ from .common import Input, Schema
 
 class PartnershipIn(Input):
     partner: str = Field(min_length=1, max_length=300)
-    product: str = Field(default="", max_length=300)
+    product: str = Field(default="", max_length=2000)
     direction: str = Field(default="", max_length=300)
     almi_product: str = Field(default="", max_length=200)
     almi_version: str = Field(default="", max_length=200)
@@ -28,7 +28,7 @@ class PartnershipIn(Input):
 
 class PartnershipPatch(Input):
     partner: str | None = Field(default=None, min_length=1, max_length=300)
-    product: str | None = Field(default=None, max_length=300)
+    product: str | None = Field(default=None, max_length=2000)
     direction: str | None = Field(default=None, max_length=300)
     almi_product: str | None = Field(default=None, max_length=200)
     almi_version: str | None = Field(default=None, max_length=200)

@@ -21,6 +21,7 @@ from app.core.migrate import LEGACY_HEAD, alembic_config, upgrade
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
+HEAD = "0013_data_revisions"
 
 
 def _diff(url: str) -> list:
@@ -48,19 +49,35 @@ def pg_url():
 
 def test_single_head():
     heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-    assert heads == ["0012_v0_1_0_schema"]
+    assert heads == [HEAD]
 
 
 def test_fresh_sqlite_matches_models(tmp_path):
     url = f"sqlite:///{tmp_path / 'fresh.db'}"
-    assert upgrade(url) == "0012_v0_1_0_schema"
+    assert upgrade(url) == HEAD
     assert _diff(url) == []
 
 
 def test_upgrade_is_idempotent(tmp_path):
     url = f"sqlite:///{tmp_path / 'twice.db'}"
     upgrade(url)
-    assert upgrade(url) == "0012_v0_1_0_schema"
+    assert upgrade(url) == HEAD
+
+
+def test_0013_downgrade_and_upgrade(tmp_path):
+    url = f"sqlite:///{tmp_path / 'rev.db'}"
+    upgrade(url)
+    cfg = alembic_config(url)
+    command.downgrade(cfg, "0012_v0_1_0_schema")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        assert "data_revisions" not in inspect(conn).get_table_names()
+    engine.dispose()
+    assert upgrade(url) == HEAD
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM data_revisions")).scalar() == 9
+    engine.dispose()
 
 
 def test_downgrade_of_0012_is_refused(tmp_path):
@@ -77,7 +94,7 @@ def test_legacy_create_all_database_is_upgraded(tmp_path):
     con.executescript((FIXTURES / "legacy_create_all.sql").read_text(encoding="utf-8"))
     con.close()
     url = f"sqlite:///{path}"
-    assert upgrade(url) == "0012_v0_1_0_schema"
+    assert upgrade(url) == HEAD
     assert _diff(url) == []
 
     engine = create_engine(url)
@@ -134,7 +151,7 @@ def test_legacy_alembic_database_is_upgraded_on_sqlite(tmp_path):
 
 @pytest.mark.postgres
 def test_fresh_postgres_matches_models(pg_url):
-    assert upgrade(pg_url) == "0012_v0_1_0_schema"
+    assert upgrade(pg_url) == HEAD
     assert _diff(pg_url) == []
 
 
@@ -179,7 +196,7 @@ def _legacy_chain_with_data(url: str) -> None:
                           "VALUES (1, 'product_partnerships', 'edit_metrics')"))
     engine.dispose()
 
-    assert upgrade(url) == "0012_v0_1_0_schema"
+    assert upgrade(url) == HEAD
     assert _diff(url) == []
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -195,3 +212,26 @@ def _legacy_chain_with_data(url: str) -> None:
             "SELECT direction, green_threshold FROM traffic_light_rules WHERE service_key = 'tech'")).one()
         assert tuple(rule) == ("lower_is_better", 1.0)
     engine.dispose()
+
+
+@pytest.mark.postgres
+def test_demo_and_reference_data_fit_postgres_constraints(pg_url):
+    """PostgreSQL, в отличие от SQLite, проверяет длину строк и типы: все наборы данных должны входить."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.db import make_engine
+    from app.services.demo_data import load_demo_data
+    from app.services.reference_data import ensure_initial_admin, sync_reference_data
+
+    upgrade(pg_url)
+    engine = make_engine(pg_url)
+    with sessionmaker(bind=engine)() as session:
+        sync_reference_data(session)
+        load_demo_data(session)
+        ensure_initial_admin(session)
+        session.commit()
+    with engine.connect() as conn:
+        counts = {t: conn.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+                  for t in ("users", "hr_months", "tp_weekly_reports", "naumen_tickets", "partnerships")}
+    engine.dispose()
+    assert counts == {"users": 6, "hr_months": 7, "tp_weekly_reports": 109, "naumen_tickets": 1868, "partnerships": 142}

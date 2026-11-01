@@ -12,6 +12,7 @@ from ...models import DataImport, NaumenTicket, TpWeeklyReport, User
 from ...schemas.common import ImportResult
 from ...services import audit
 from ...services import naumen as naumen_service
+from ...services.cache import cached_json
 from ..deps import require_service
 from ..uploads import read_upload
 
@@ -23,6 +24,10 @@ manage = require_service(SERVICE, "manager")
 
 @router.get("/filters", summary="Значения для фильтров: годы и организации")
 def filters(db: Session = Depends(get_db), _: User = Depends(read)):
+    return cached_json(db, [SERVICE], ("naumen.filters",), lambda: _filters(db))
+
+
+def _filters(db: Session) -> dict:
     years = sorted(int(y) for y in db.scalars(
         select(extract("year", NaumenTicket.registered_at)).where(NaumenTicket.registered_at.is_not(None)).distinct()))
     orgs = list(db.execute(
@@ -43,6 +48,10 @@ def filters(db: Session = Depends(get_db), _: User = Depends(read)):
 def summary(year: int | None = Query(None, ge=2000, le=2100), org: str | None = None,
             months: int | None = Query(None, ge=1, le=120),
             db: Session = Depends(get_db), _: User = Depends(read)):
+    return cached_json(db, [SERVICE], ("naumen.summary", year, org, months), lambda: _summary(db, year, org, months))
+
+
+def _summary(db: Session, year: int | None, org: str | None, months: int | None) -> dict:
     stmt = select(NaumenTicket).order_by(NaumenTicket.registered_at)
     if year:
         stmt = stmt.where(extract("year", NaumenTicket.registered_at) == year)
@@ -56,9 +65,11 @@ def summary(year: int | None = Query(None, ge=2000, le=2100), org: str | None = 
 
 @router.get("/match", summary="Отчёт ТП в сравнении с заявками Naumen")
 def match(db: Session = Depends(get_db), _: User = Depends(read)):
-    rows = list(db.scalars(select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)))
-    tickets = list(db.scalars(select(NaumenTicket)))
-    return naumen_service.match(rows, tickets)
+    def compute():
+        rows = list(db.scalars(select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)))
+        return naumen_service.match(rows, list(db.scalars(select(NaumenTicket))))
+
+    return cached_json(db, [SERVICE], ("naumen.match",), compute)
 
 
 @router.post("/import", response_model=ImportResult, summary="Загрузить выгрузку Naumen (xlsx)")

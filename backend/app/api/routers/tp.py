@@ -15,6 +15,7 @@ from ...schemas.settings import SettingValue
 from ...schemas.tp import TpColumnOut, TpReportIn, TpReportOut, TpReportPatch
 from ...services import audit
 from ...services import tp as tp_service
+from ...services.cache import cached_json
 from ..deps import require_service
 from ..uploads import file_response, read_upload
 
@@ -50,14 +51,19 @@ def _ensure_unique(db: Session, year: int, week: int, exclude_id: int | None = N
 
 
 @router.get("/columns", response_model=list[TpColumnOut], summary="Показатели отчёта")
-def columns(_: User = Depends(read)):
+def columns(db: Session = Depends(get_db), _: User = Depends(read)):
+    return cached_json(db, [SERVICE], ("tp.columns",), _columns)
+
+
+def _columns():
     return [TpColumnOut(key=k, label=label, group=g, group_label=tp_service.TP_GROUPS[g], unit=u)
             for k, label, g, u in tp_service.COLUMN_META]
 
 
 @router.get("/reports", response_model=list[TpReportOut], summary="Недели отчёта")
 def list_reports(year: int | None = None, db: Session = Depends(get_db), _: User = Depends(read)):
-    return [tp_service.row_to_dict(r) for r in _ordered(db, year)]
+    return cached_json(db, [SERVICE], ("tp.reports", year),
+                       lambda: [tp_service.row_to_dict(r) for r in _ordered(db, year)])
 
 
 @router.post("/reports", response_model=TpReportOut, status_code=201, summary="Добавить неделю")

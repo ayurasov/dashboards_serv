@@ -203,6 +203,19 @@ class TrafficLightRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class DataRevision(Base):
+    """Номер ревизии данных службы: увеличивается при каждом изменении (вместе с записью в журнал).
+    По нему процессы сервера согласованно сбрасывают кэш ответов (app/services/cache.py)."""
+
+    __tablename__ = "data_revisions"
+
+    service_key: Mapped[str] = mapped_column(
+        ForeignKey("services.key", ondelete="CASCADE", onupdate="CASCADE"), primary_key=True
+    )
+    revision: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class DataImport(Base):
     """Журнал загрузок файлов: что, кем и когда загружено — для «Данные обновлены …»."""
 
