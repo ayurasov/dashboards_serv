@@ -380,3 +380,20 @@ test('числа в ru-RU: helper разбирает типографские п
   expect(num('−1,87 п.п.')).toBe(-1.87)
   expect(num('—')).toBe(null)
 })
+
+test('PDF сводки и дашбордов — по фильтрам страницы', async ({ page }) => {
+  await login(page)
+  const summary = await apiGet(page, '/hr/analytics/summary?period_type=quarter')
+  const [first, second] = summary.map((p) => p.key)
+  await page.goto(`/hr/summary?period=quarter&from=${first}&to=${second}`)
+  const hrPdf = page.waitForRequest((r) => r.url().includes('/api/pdf/hr/summary'))
+  await page.getByRole('button', { name: 'PDF' }).click()
+  const hrUrl = new URL((await hrPdf).url())
+  expect(hrUrl.searchParams.get('from_key')).toBe(first)
+  expect(hrUrl.searchParams.get('to_key')).toBe(second)
+
+  await page.goto('/product?status=Завершено')
+  const ppPdf = page.waitForRequest((r) => r.url().includes('/api/pdf/partnerships/summary'))
+  await page.getByRole('button', { name: 'PDF' }).click()
+  expect(new URL((await ppPdf).url()).searchParams.get('status')).toBe('Завершено')
+})

@@ -125,7 +125,7 @@ const countText = computed(() => {
   <div class="page">
     <PageHeader title="Сводка по периодам" :description="periods.length ? `Периоды: ${rangeText(periods)}` : 'Метрики службы персонала по месяцам, кварталам, полугодиям и годам'"
                 :updatedAt="app.service('hr')?.data_updated_at">
-      <PdfButton report="hr/summary" :params="{ period_type: f.period }" />
+      <PdfButton report="hr/summary" :params="{ period_type: f.period, from_key: f.from || undefined, to_key: f.to || undefined }" />
     </PageHeader>
 
     <FilterBar :summary="countText" :resettable="!isDefault()" @reset="reset">

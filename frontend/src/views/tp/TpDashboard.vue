@@ -127,6 +127,8 @@ const summaryText = computed(() => `${weeksCount.value} ${plural(weeksCount.valu
 const pdfParams = computed(() => {
   if (quickN.value) return { weeks: quickN.value }
   if (singleYear.value && f.years.length) return { year: singleYear.value, week_from: f.from || null, week_to: f.to || null }
+  // Несколько выбранных лет — отчёт по ним, а не за всё время
+  if (f.years.length > 1) return { years: activeYears.value.join(',') }
   return {}
 })
 

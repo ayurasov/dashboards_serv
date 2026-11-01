@@ -201,7 +201,7 @@ const periodText = computed(() => {
     <PageHeader title="Технологические партнёрства" :description="periodText" :updatedAt="app.service('project_product')?.data_updated_at">
       <button class="btn btn-ghost" type="button" title="Состав и порядок блоков" @click="layoutOpen = true"><AppIcon name="settings" :size="15" />Настроить</button>
       <router-link v-if="canRegistry" :to="{ path: '/product/registry', query: registryQuery }" class="btn"><AppIcon name="list" :size="15" />Реестр</router-link>
-      <PdfButton report="partnerships/summary" />
+      <PdfButton report="partnerships/summary" :params="params" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </PageHeader>
 
