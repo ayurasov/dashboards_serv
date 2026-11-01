@@ -1,22 +1,35 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import router from './router.js'
-import App from './App.vue'
-import { usePaletteStore } from './stores/palette.js'
-import './style.css'
-
-// The palette's *-l variants are derived per theme, so the theme has to be on the
-// document before the palette is applied.
-document.documentElement.setAttribute('data-theme', localStorage.getItem('hr_theme') || 'light')
+import '@fontsource-variable/inter'
+import '@/styles/tokens.css'
+import '@/styles/base.css'
+import App from '@/App.vue'
+import router from '@/router'
+import { configureClient } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
+import { usePaletteStore } from '@/stores/palette'
 
 const app = createApp(App)
-app.use(createPinia())
-app.use(router)
+const pinia = createPinia()
+app.use(pinia)
 
-// Charts read their colours at first render, so the palette must be resolved before
-// mount — otherwise every chart paints with fallback colours and repaints a moment
-// later. An unreachable API must not white-screen the app, hence the deadline.
-Promise.race([
-  usePaletteStore().load(),
-  new Promise(resolve => setTimeout(resolve, 1500)),
-]).finally(() => app.mount('#app'))
+configureClient({
+  unauthorized() {
+    const auth = useAuthStore()
+    auth.setUser(null)
+    const current = router.currentRoute.value
+    if (!current.meta.public) router.push({ name: 'login', query: { redirect: current.fullPath, expired: '1' } })
+  },
+  passwordChangeRequired() {
+    router.push({ name: 'profile', query: { password: 'required' } })
+  },
+})
+
+const appStore = useAppStore()
+appStore.applyTheme()
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => appStore.applyTheme())
+
+app.use(router)
+usePaletteStore().load()
+app.mount('#app')

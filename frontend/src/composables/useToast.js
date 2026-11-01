@@ -1,29 +1,23 @@
-import { ref } from 'vue'
+import { reactive } from 'vue'
 
-const TOAST_MS = 4000
+/** Всплывающие сообщения. Ошибки держатся дольше успехов; одинаковые подряд не дублируются. */
+export const toasts = reactive([])
 let seq = 0
 
-export const toasts = ref([])
+function push(kind, message, timeout) {
+  const last = toasts[toasts.length - 1]
+  if (last && last.message === message && last.kind === kind) return
+  const id = ++seq
+  toasts.push({ id, kind, message })
+  if (toasts.length > 4) toasts.shift()
+  setTimeout(() => dismissToast(id), timeout)
+}
 
 export function dismissToast(id) {
-  toasts.value = toasts.value.filter(t => t.id !== id)
+  const index = toasts.findIndex((t) => t.id === id)
+  if (index >= 0) toasts.splice(index, 1)
 }
 
-/** kind: 'info' | 'ok' | 'err' */
-export function pushToast(message, kind = 'info') {
-  if (!message) return
-  // A single failing screen can fire the same request many times; one toast is enough.
-  if (toasts.value.some(t => t.message === message)) return
-  const id = ++seq
-  toasts.value.push({ id, message, kind })
-  setTimeout(() => dismissToast(id), TOAST_MS)
-  return id
-}
-
-export function toastError(message) {
-  pushToast(message, 'err')
-}
-
-export function toastOk(message) {
-  pushToast(message, 'ok')
-}
+export const toastOk = (message) => push('ok', message, 3200)
+export const toastError = (message) => push('error', message, 6000)
+export const toastInfo = (message) => push('info', message, 4000)

@@ -1,0 +1,98 @@
+/** API служб. Пути и параметры совпадают с backend/app/api/routers (OpenAPI — /api/docs). */
+import { api } from './client'
+
+export const hrApi = {
+  metrics: () => api.get('/hr/metrics'),
+  departments: () => api.get('/hr/departments'),
+  months: () => api.get('/hr/months'),
+  month: (key) => api.get(`/hr/months/${key}`),
+  createMonth: (body) => api.post('/hr/months', body),
+  updateMonth: (key, body) => api.patch(`/hr/months/${key}`, body),
+  deleteMonth: (key) => api.del(`/hr/months/${key}`),
+  saveMetrics: (key, values) => api.put(`/hr/months/${key}/metrics`, values),
+  events: (params) => api.get('/hr/events', params),
+  exportEvents: (params) => api.download('/hr/events/export.xlsx', params, 'registry.xlsx'),
+  addEvent: (key, body) => api.post(`/hr/months/${key}/events`, body),
+  updateEvent: (id, body) => api.patch(`/hr/events/${id}`, body),
+  deleteEvent: (id) => api.del(`/hr/events/${id}`),
+  addNote: (key, content) => api.post(`/hr/months/${key}/notes`, { content }),
+  deleteNote: (id) => api.del(`/hr/notes/${id}`),
+  dashboard: (months) => api.get('/hr/analytics/dashboard', { months }),
+  summary: (periodType) => api.get('/hr/analytics/summary', { period_type: periodType }),
+  targets: () => api.get('/hr/targets'),
+  createTarget: (body) => api.post('/hr/targets', body),
+  updateTarget: (id, body) => api.patch(`/hr/targets/${id}`, body),
+  deleteTarget: (id) => api.del(`/hr/targets/${id}`),
+  dashboards: () => api.get('/dashboards'),
+  createDashboard: (body) => api.post('/dashboards', body),
+  updateDashboard: (id, body) => api.put(`/dashboards/${id}`, body),
+  deleteDashboard: (id) => api.del(`/dashboards/${id}`),
+}
+
+export const tpApi = {
+  columns: () => api.get('/tp/columns'),
+  reports: (params) => api.get('/tp/reports', params),
+  createReport: (body) => api.post('/tp/reports', body),
+  updateReport: (id, body) => api.patch(`/tp/reports/${id}`, body),
+  deleteReport: (id) => api.del(`/tp/reports/${id}`),
+  exportXlsx: () => api.download('/tp/reports/export.xlsx', null, 'tp.xlsx'),
+  exportCsv: () => api.download('/tp/reports/export.csv', null, 'tp.csv'),
+  importEndpoint: '/tp/reports/import',
+  setting: (key) => api.get(`/tp/settings/${key}`),
+  saveSetting: (key, value) => api.put(`/tp/settings/${key}`, { value }),
+  naumenFilters: () => api.get('/tp/naumen/filters'),
+  naumenSummary: (params) => api.get('/tp/naumen/summary', params),
+  naumenMatch: () => api.get('/tp/naumen/match'),
+  naumenImportEndpoint: '/tp/naumen/import',
+}
+
+export const partnershipsApi = {
+  options: () => api.get('/partnerships/options'),
+  list: (params) => api.get('/partnerships', params),
+  get: (id) => api.get(`/partnerships/${id}`),
+  create: (body) => api.post('/partnerships', body),
+  update: (id, body) => api.patch(`/partnerships/${id}`, body),
+  remove: (id) => api.del(`/partnerships/${id}`),
+  analytics: (params) => api.get('/partnerships/analytics', params),
+  summary: () => api.get('/partnerships/summary'),
+  timeline: () => api.get('/partnerships/timeline'),
+  lightRules: () => api.get('/partnerships/light-rules'),
+  saveLightRules: (changes) => api.put('/partnerships/light-rules', changes),
+  exportXlsx: (params) => api.download('/partnerships/export.xlsx', params, 'partnerships.xlsx'),
+}
+
+export const commonApi = {
+  overview: () => api.get('/overview'),
+  imports: (service, limit = 10) => api.get('/imports', { service, limit }),
+  lightRules: (service) => api.get(`/traffic-light/${service}`),
+  saveLightRule: (service, metric, body) => api.put(`/traffic-light/${service}/${metric}`, body),
+  layout: (service) => api.get(`/layouts/${service}`, null, { silent: true }),
+  saveLayout: (service, widgets) => api.put(`/layouts/${service}`, { widgets }),
+  resetLayout: (service) => api.del(`/layouts/${service}`),
+  /** PDF-отчёт: report — путь после /api/pdf/, например 'hr/dashboard'. */
+  pdf: (report, params) => api.download(`/pdf/${report}`, params, 'report.pdf'),
+}
+
+export const adminApi = {
+  users: (params) => api.get('/users', params),
+  user: (id) => api.get(`/users/${id}`),
+  createUser: (body) => api.post('/users', body),
+  updateUser: (id, body) => api.patch(`/users/${id}`, body),
+  setAccess: (id, rows) => api.put(`/users/${id}/access`, rows),
+  resetPassword: (id) => api.post(`/users/${id}/reset-password`),
+  deleteUser: (id) => api.del(`/users/${id}`),
+  departments: () => api.get('/departments'),
+  createDepartment: (body) => api.post('/departments', body),
+  updateDepartment: (id, body) => api.put(`/departments/${id}`, body),
+  deleteDepartment: (id) => api.del(`/departments/${id}`),
+  services: () => api.get('/services', { all: true }),
+  audit: (params) => api.get('/audit', params),
+  auditFacets: () => api.get('/audit/facets'),
+  exportAudit: (params) => api.download('/audit/export.csv', params, 'audit.csv'),
+  palettes: () => api.get('/palettes'),
+  createPalette: (body) => api.post('/palettes', body),
+  updatePalette: (id, body) => api.put(`/palettes/${id}`, body),
+  activatePalette: (id) => api.post(`/palettes/${id}/activate`),
+  deletePalette: (id) => api.del(`/palettes/${id}`),
+  systemInfo: () => api.get('/system/info'),
+}

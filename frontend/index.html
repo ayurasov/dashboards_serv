@@ -1,17 +1,23 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Дашборды компании — АЛМИ Партнер</title>
-  <link rel="icon" type="image/png" href="/assets/favicon-32.png">
-  <link rel="apple-touch-icon" href="/assets/app-icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-</head>
-<body>
-  <div id="app"></div>
-  <script type="module" src="/src/main.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Дашборды компании</title>
+    <link rel="icon" type="image/png" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/app-icon-192.png" />
+    <script>
+      // Тема применяется до отрисовки, чтобы не было вспышки светлой темы
+      try {
+        const t = localStorage.getItem('ds_theme') || 'system'
+        const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      } catch { /* приватный режим браузера */ }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
