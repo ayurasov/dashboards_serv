@@ -92,8 +92,9 @@ def _org_fixture(conn):
                       "CURRENT_TIMESTAMP), (103, 'Отдел', 'отдел', NULL, 102, 'group', 0, 'manual', "
                       "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
     conn.execute(text("INSERT INTO users (id, username, full_name, role, is_active, must_change_password, "
-                      "reports_to_none, auth_source, access_overrides, department_id, created_at, updated_at) VALUES "
-                      "(101, 'u101', 'Без пароля', 'user', true, false, false, 'ldap', '{}', 102, "
+                      "reports_to_none, auth_source, access_overrides, capabilities, department_id, created_at, "
+                      "updated_at) "
+                      "VALUES (101, 'u101', 'Без пароля', 'user', true, false, false, 'ldap', '{}', '[]', 102, "
                       "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
     conn.execute(text("INSERT INTO user_access_units (user_id, department_id) VALUES (101, 103)"))
     conn.execute(text("INSERT INTO department_heads (department_id, user_id, is_primary) VALUES (102, 101, true)"))

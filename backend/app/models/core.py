@@ -165,6 +165,8 @@ class User(TimestampMixin, Base):
     access_profile_id: Mapped[int | None] = mapped_column(ForeignKey("access_profiles.id", ondelete="RESTRICT"),
                                                           index=True)
     access_overrides: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Полномочия администрирования без роли администратора: org.manage, users.manage
+    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     department: Mapped[Department | None] = relationship(foreign_keys=[department_id], lazy="joined")
     manager: Mapped[User | None] = relationship(remote_side=[id], foreign_keys=[manager_id])
@@ -185,6 +187,10 @@ class User(TimestampMixin, Base):
     @property
     def has_password(self) -> bool:
         return bool(self.password_hash)
+
+    def can(self, capability: str) -> bool:
+        """Полномочие администрирования (администратор — все)."""
+        return self.is_admin or (self.is_active and capability in (self.capabilities or []))
 
 
 class UserSession(Base):

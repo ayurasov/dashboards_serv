@@ -4,7 +4,8 @@
   имена уникальны среди соседей (частичные индексы), код необязателен;
 - department_heads — руководители подразделений с основным;
 - users: основное подразделение, явный руководитель, «первое лицо», внешний идентификатор,
-  способ входа (local/ldap) и связь с каталогом, профиль доступа и личные настройки;
+  способ входа (local/ldap) и связь с каталогом, профиль доступа и личные настройки,
+  полномочия администрирования (org.manage, users.manage);
   password_hash может быть пустым (учётная запись домена или «без доступа»);
 - user_departments → user_access_units: первое по алфавиту подразделение пользователя становится
   основным, остальные — дополнительными подразделениями области доступа;
@@ -144,12 +145,14 @@ def upgrade() -> None:
         batch.add_column(sa.Column("auth_linked_at", sa.DateTime(), nullable=True))
         batch.add_column(sa.Column("access_profile_id", sa.Integer(), nullable=True))
         batch.add_column(sa.Column("access_overrides", sa.JSON(), nullable=True))
+        batch.add_column(sa.Column("capabilities", sa.JSON(), nullable=True))
         batch.alter_column("password_hash", existing_type=sa.String(255), nullable=True)
 
     users = sa.table("users", sa.column("id", sa.Integer), sa.column("department_id", sa.Integer),
                      sa.column("reports_to_none", sa.Boolean), sa.column("auth_source", sa.String),
-                     sa.column("access_overrides", sa.JSON))
-    bind.execute(users.update().values(reports_to_none=False, auth_source="local", access_overrides={}))
+                     sa.column("access_overrides", sa.JSON), sa.column("capabilities", sa.JSON))
+    bind.execute(users.update().values(reports_to_none=False, auth_source="local", access_overrides={},
+                                       capabilities=[]))
 
     # Основное подразделение — первое по алфавиту из прежних; остальные — дополнительная область доступа
     links = bind.execute(sa.text(
@@ -169,6 +172,7 @@ def upgrade() -> None:
         batch.alter_column("reports_to_none", existing_type=sa.Boolean(), nullable=False)
         batch.alter_column("auth_source", existing_type=sa.String(10), nullable=False)
         batch.alter_column("access_overrides", existing_type=sa.JSON(), nullable=False)
+        batch.alter_column("capabilities", existing_type=sa.JSON(), nullable=False)
         batch.create_foreign_key("fk_users_department_id_departments", "departments", ["department_id"], ["id"],
                                  ondelete="SET NULL")
         batch.create_foreign_key("fk_users_manager_id_users", "users", ["manager_id"], ["id"], ondelete="SET NULL")
@@ -250,7 +254,7 @@ def downgrade() -> None:
         batch.drop_constraint("uq_users_auth_external_id", type_="unique")
         batch.drop_constraint("ck_users_auth_source", type_="check")
         for column in ("department_id", "manager_id", "reports_to_none", "external_id", "org_source", "auth_source",
-                       "auth_external_id", "auth_linked_at", "access_profile_id", "access_overrides"):
+                       "auth_external_id", "auth_linked_at", "access_profile_id", "access_overrides", "capabilities"):
             batch.drop_column(column)
         batch.alter_column("password_hash", existing_type=sa.String(255), nullable=False)
 

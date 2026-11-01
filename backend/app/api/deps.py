@@ -14,7 +14,7 @@ from ..core.errors import Forbidden, Unauthorized
 from ..core.security import constant_time_equals
 from ..models import User, UserSession
 from ..services import access
-from ..services.registry import ACCESS_LEVEL_LABELS, SERVICE_BY_KEY
+from ..services.registry import ACCESS_LEVEL_LABELS, CAPABILITIES, SERVICE_BY_KEY
 from ..services.sessions import resolve_session
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -70,6 +70,20 @@ async def require_admin(user: User = Depends(active_user)) -> User:
     if not user.is_admin:
         raise Forbidden("Действие доступно только администратору")
     return user
+
+
+def require_capability(capability: str) -> Callable[..., User]:
+    """Фабрика зависимостей: полномочие администрирования (org.manage, users.manage) или роль администратора."""
+    if capability not in CAPABILITIES:  # pragma: no cover - ошибка программиста
+        raise ValueError(capability)
+
+    async def checker(user: User = Depends(active_user)) -> User:
+        if not user.can(capability):
+            raise Forbidden("Недостаточно полномочий: " + CAPABILITIES[capability].split(":")[0].lower())
+        return user
+
+    checker.__name__ = f"require_{capability.replace('.', '_')}"
+    return checker
 
 
 def require_service(service_key: str, minimum: str = "viewer") -> Callable[..., User]:
