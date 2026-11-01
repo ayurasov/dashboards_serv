@@ -209,7 +209,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .summary { font-size: var(--fs-sm); }
 .group .card-head { padding-bottom: 6px; }
-.rules { display: flex; flex-direction: column; padding: 0 0 6px; }
+.rules { display: flex; flex-direction: column; padding: 0 0 6px; container-type: inline-size; }
 .rule {
   display: grid; align-items: center; column-gap: 12px; row-gap: 6px; padding: 10px 20px; border-top: 1px solid var(--border);
   grid-template-columns: minmax(180px, 1.2fr) 36px 248px 112px 112px minmax(150px, 1fr) 92px;
@@ -218,7 +218,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 .c-metric { grid-area: metric; } .c-on { grid-area: on; } .c-dir { grid-area: dir; } .c-green { grid-area: green; }
 .c-yellow { grid-area: yellow; } .c-scale { grid-area: scale; min-width: 0; } .c-save { grid-area: save; }
 .rule :deep(.seg) { flex-wrap: nowrap; }
-@media (max-width: 1360px) {
+/* Раскладка строки — по ширине списка правил (container query), а не окна */
+@container (max-width: 1060px) {
   .rule {
     grid-template-columns: minmax(170px, 1fr) 36px 248px 112px 112px 92px;
     grid-template-areas: "metric on dir green yellow save" "metric on . scale scale save";
@@ -226,6 +227,19 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
   .rule.head { grid-template-areas: "metric on dir green yellow save"; }
   .rule.head .c-scale { display: none; }
   .rule:not(.head) .c-scale { padding-top: 2px; }
+}
+@container (max-width: 880px) {
+  /* Узко (телефон, планшет): показатель сверху, переключатели и пороги — строками под ним */
+  .rule {
+    grid-template-columns: 36px minmax(0, 1fr) 36px minmax(0, 1fr);
+    grid-template-areas: "on metric metric metric" "dir dir dir dir" "green green yellow yellow" "scale scale scale scale" "save save save save";
+    padding: 12px 14px;
+  }
+  .rule.head { display: none; }
+  .rule:not(.head) .c-scale { padding-top: 0; }
+  .rule :deep(.seg) { width: 100%; }
+  .rule :deep(.seg button) { flex: 1; }
+  .c-save { justify-self: end; }
 }
 .rule.head { border-top: 0; padding-top: 4px; padding-bottom: 6px; font-size: var(--fs-xs); font-weight: 620; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .rule.head span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

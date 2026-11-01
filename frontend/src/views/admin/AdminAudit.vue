@@ -190,8 +190,8 @@ async function exportCsv() {
 .filters .select, .filters .input { height: 32px; width: auto; font-size: var(--fs-sm); }
 .filters .select { min-width: 150px; max-width: 210px; color: var(--text-2); }
 .filters .select.set { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong)); }
-.dates { display: inline-flex; align-items: center; gap: 8px; }
-.dates .input { width: 140px; }
+.dates { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.dates .input { width: 140px; min-width: 0; flex: 1 1 120px; }
 .lbl { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 620; }
 .reset { margin-left: auto; }
 .dash { color: var(--faint); }

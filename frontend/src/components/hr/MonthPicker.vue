@@ -50,7 +50,7 @@ function title(m) {
 </template>
 
 <style scoped>
-.picker { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.picker { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; container-type: inline-size; }
 .year { display: flex; align-items: center; gap: 14px; }
 .year-label { width: 40px; flex: 0 0 auto; font-size: var(--fs-sm); font-weight: 620; color: var(--text-2); }
 .cells { flex: 1; display: grid; grid-template-columns: repeat(12, minmax(52px, 1fr)); gap: 6px; }
@@ -67,7 +67,8 @@ button.cell.ghost:hover { color: var(--text-2); border-color: var(--border-stron
 .cell.active .fill.empty { box-shadow: inset 0 0 0 1.5px var(--bg-elevated); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-left: 54px; font-size: var(--fs-xs); color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-@media (max-width: 960px) {
+/* По ширине карточки, а не окна: при открытом меню на 1024 px двенадцать месяцев не помещаются */
+@container (max-width: 820px) {
   .year { align-items: flex-start; }
   .year-label { padding-top: 6px; }
   .cells { grid-template-columns: repeat(6, minmax(0, 1fr)); }

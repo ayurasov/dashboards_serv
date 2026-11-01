@@ -170,7 +170,7 @@ async function closeOthers() {
         <span class="spacer" />
         <button v-if="(sessions.data.value || []).length > 1" class="btn btn-sm" type="button" @click="closeOthers">Завершить другие</button>
       </header>
-      <div class="card-body">
+      <div class="card-body table-wrap">
         <table class="table table-compact">
           <thead><tr><th>Устройство</th><th>IP-адрес</th><th>Вход</th><th>Активность</th><th /></tr></thead>
           <tbody>

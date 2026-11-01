@@ -284,7 +284,7 @@ function onImported() {
 @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .toolbar { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border); }
-.toolbar-top { display: flex; align-items: center; gap: var(--sp-2); }
+.toolbar-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .toolbar-top h3 { font-size: var(--fs-md); font-weight: 620; }
 .toolbar-hint { font-size: var(--fs-sm); }
 .groups { gap: 6px; }
