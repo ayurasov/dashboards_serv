@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-filterwarnings = ["ignore::DeprecationWarning:reportlab.*", "ignore::DeprecationWarning:openpyxl.*"]
+filterwarnings = ["ignore::DeprecationWarning:reportlab.*", "ignore::DeprecationWarning:openpyxl.*", "ignore::DeprecationWarning:ldap3.*"]
 markers = ["postgres: проверки на PostgreSQL (нужен TEST_POSTGRES_URL)"]
 
 [tool.ruff]

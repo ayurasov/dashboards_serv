@@ -20,9 +20,9 @@ from sqlalchemy.orm import Session
 from ..core.db import utcnow
 from ..models import Department, DepartmentHead, OrgRevision, User
 
-# Поля пользователя, от которых зависит снимок структуры
+# Поля пользователя, от которых зависит снимок структуры (и то, что оргсхема показывает о сотруднике)
 USER_ORG_FIELDS = ("department_id", "manager_id", "reports_to_none", "is_active", "full_name", "position",
-                   "role", "email", "username")
+                   "role", "email", "username", "avatar", "external_id", "org_source")
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,7 @@ class Unit:
     sort_order: int
     code: str | None
     external_id: str | None
+    org_source: str = "manual"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,9 @@ class Person:
     reports_to_none: bool
     is_active: bool
     is_admin: bool
+    external_id: str | None = None
+    org_source: str | None = None
+    has_avatar: bool = False
 
 
 @dataclass
@@ -194,6 +198,140 @@ class OrgSnapshot:
             self._reports = cached
         return cached
 
+    # ------------------------------------------------------------ оргсхема, проверки, «что будет, если»
+
+    def path_text(self, unit_id: int | None) -> str:
+        """Путь подразделения через « / » («Компания / Дирекция / Отдел»)."""
+        return " / ".join(self.path_names(unit_id)) if unit_id in self.units else ""
+
+    def ordered_units(self) -> list[int]:
+        """Подразделения в порядке дерева: родители раньше детей, соседи — по порядку и названию."""
+        result: list[int] = []
+        seen: set[int] = set()
+        stack = list(reversed(self.roots()))
+        while stack:
+            unit = stack.pop()
+            if unit in seen:
+                continue
+            seen.add(unit)
+            result.append(unit)
+            stack.extend(reversed(self.children.get(unit, [])))
+        # Подразделения вне дерева (цикл в повреждённых данных) — в конце, чтобы не потерялись
+        rest = sorted((u for u in self.units if u not in seen), key=lambda u: self.units[u].name.casefold())
+        return result + rest
+
+    def structure_manager(self, user_id) -> int | None:
+        """Руководитель по структуре — без учёта явного руководителя и «первого лица»
+        (то же правило подъёма по дереву, что в direct_manager)."""
+        person = self.people.get(user_id)
+        if person is None:
+            return None
+        start = person.department_id if person.department_id in self.units else None
+        if start is None:
+            headed = self.headed.get(user_id, [])
+            start = self.units[headed[0]].parent_id if headed else None
+        seen: set = set()
+        unit = start
+        while unit is not None and unit in self.units and unit not in seen:
+            seen.add(unit)
+            heads = self.unit_heads(unit)
+            if user_id not in self.heads.get(unit, []) and heads:
+                return heads[0]
+            unit = self.units[unit].parent_id
+        return None
+
+    def manager_of(self, user_id):
+        """Непосредственный руководитель (кэш на снимок)."""
+        cached = getattr(self, "_managers", None)
+        if cached is None:
+            cached = self._managers = {}
+        if user_id not in cached:
+            cached[user_id] = self.direct_manager(user_id)[0]
+        return cached[user_id]
+
+    def cycles(self) -> set:
+        """Сотрудники, на которых замыкается цепочка руководителей (цикл подчинения)."""
+        state: dict = {}
+        cyclic: set = set()
+        for start in self.people:
+            if start in state:
+                continue
+            path: list = []
+            index: dict = {}
+            node = start
+            while node is not None and node not in state:
+                state[node] = 1
+                index[node] = len(path)
+                path.append(node)
+                node = self.manager_of(node)
+            if node is not None and node in index:
+                cyclic.update(path[index[node]:])
+            for item in path:
+                state[item] = 2
+        return cyclic
+
+    def branch_counts(self) -> dict:
+        """Размер ветки подчинения (все подчинённые, без самого руководителя) — за один проход."""
+        reports = self._reports_index()
+        cyclic = self.cycles()
+        sizes: dict = {}
+        for root in reports:
+            if root in sizes or root in cyclic:
+                continue
+            stack = [(root, False)]
+            while stack:
+                node, done = stack.pop()
+                if done:
+                    sizes[node] = sum(1 + sizes.get(child, 0) for child in reports.get(node, []))
+                    continue
+                if node in sizes:
+                    continue
+                stack.append((node, True))
+                stack.extend((child, False) for child in reports.get(node, []) if child not in sizes)
+        # Внутри цикла подчинения ветка — множество достижимых (ветки ниже цикла — обычные деревья)
+        for node in cyclic:
+            if node in reports:
+                sizes[node] = len(self.subordinates(node))
+        return sizes
+
+    def copy(self) -> OrgSnapshot:
+        """Копия для расчёта «что будет после изменения»: снимок в кэше остаётся прежним."""
+        return OrgSnapshot(
+            revision=self.revision, units=dict(self.units),
+            children={k: list(v) for k, v in self.children.items()},
+            heads={k: list(v) for k, v in self.heads.items()}, primary=dict(self.primary),
+            headed={k: list(v) for k, v in self.headed.items()}, people=dict(self.people),
+        )
+
+    def add_unit(self, unit: Unit) -> None:
+        """Подразделение в копию снимка (новое — с временным ключом вида «new:1»)."""
+        self.units[unit.id] = unit
+        self.children.setdefault(unit.parent_id if unit.parent_id in self.units else None, []).append(unit.id)
+
+    def set_heads(self, unit_id, user_ids: Iterable, primary=None) -> None:
+        """Руководители подразделения в копии снимка (основной первым, затем по имени)."""
+        for old in self.heads.get(unit_id, []):
+            self.headed[old] = [u for u in self.headed.get(old, []) if u != unit_id]
+        ids = list(dict.fromkeys(user_ids))
+        self.primary.pop(unit_id, None)
+        if primary is not None and primary in ids:
+            self.primary[unit_id] = primary
+
+        def name(uid) -> str:
+            person = self.people.get(uid)
+            return person.full_name.casefold() if person else ""
+
+        ids.sort(key=lambda uid: (uid != self.primary.get(unit_id), name(uid)))
+        self.heads[unit_id] = ids
+        for uid in ids:
+            self.headed.setdefault(uid, []).append(unit_id)
+        self.forget()
+
+    def forget(self) -> None:
+        """Сбросить вычисленное по копии (после её изменения)."""
+        self.__dict__.pop("_reports", None)
+        self.__dict__.pop("_managers", None)
+
 
 # ---------------------------------------------------------------- построение и кэш
 
@@ -202,14 +340,17 @@ def build_snapshot(db: Session, revision: int | None = None) -> OrgSnapshot:
         revision = current_revision(db)
     snap = OrgSnapshot(revision=revision)
     for d in db.scalars(select(Department)):
-        snap.units[d.id] = Unit(d.id, d.name, d.parent_id, d.kind, d.sort_order, d.code, d.external_id)
+        snap.units[d.id] = Unit(d.id, d.name, d.parent_id, d.kind, d.sort_order, d.code, d.external_id,
+                                d.org_source or "manual")
     for unit in sorted(snap.units.values(), key=lambda u: (u.sort_order, u.name.casefold())):
         snap.children.setdefault(unit.parent_id if unit.parent_id in snap.units else None, []).append(unit.id)
     rows = db.execute(select(User.id, User.username, User.full_name, User.email, User.position, User.department_id,
-                             User.manager_id, User.reports_to_none, User.is_active, User.role)).all()
+                             User.manager_id, User.reports_to_none, User.is_active, User.role, User.external_id,
+                             User.org_source, User.avatar.isnot(None).label("has_avatar"))).all()
     for r in rows:
         snap.people[r.id] = Person(r.id, r.username, r.full_name, r.email, r.position, r.department_id, r.manager_id,
-                                   bool(r.reports_to_none), bool(r.is_active), r.role == "admin")
+                                   bool(r.reports_to_none), bool(r.is_active), r.role == "admin", r.external_id,
+                                   r.org_source, bool(r.has_avatar))
     links = db.execute(select(DepartmentHead.department_id, DepartmentHead.user_id, DepartmentHead.is_primary)).all()
     for link in sorted(links, key=lambda h: (not h.is_primary, snap.people[h.user_id].full_name.casefold()
                                              if h.user_id in snap.people else "")):
@@ -249,6 +390,12 @@ def snapshot(db: Session) -> OrgSnapshot:
 
 def invalidate() -> None:
     _cache.update(snapshot=None, checked=0.0)
+
+
+def mark_changed(session: Session) -> None:
+    """Изменение структуры, которое не видят события сессии (настройки структуры): ревизия
+    увеличится при commit этой транзакции."""
+    session.info["org_changed"] = True
 
 
 # ---------------------------------------------------------------- ревизия структуры
