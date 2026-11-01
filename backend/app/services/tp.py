@@ -1,12 +1,25 @@
-"""Техническая поддержка: метаданные показателей, импорт и экспорт недельного отчёта."""
+"""Техническая поддержка: метаданные показателей, импорт и экспорт недельного отчёта.
+
+Загрузка в два шага (как у структуры и показателей): plan_import — план без записи в базу,
+apply_import — то же самое одной транзакцией с журналом. Ими пользуются страница службы
+и конвейер входящих данных (app/services/inbox.py).
+"""
 from __future__ import annotations
 
 import csv
 import io
 from collections.abc import Iterable
 
+from fastapi import Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from ..core.errors import ValidationFailed
-from ..models import TP_METRIC_COLUMNS, TpWeeklyReport
+from ..models import TP_METRIC_COLUMNS, DataImport, TpWeeklyReport, User
+from . import audit
+
+SERVICE = "tech"
+IMPORT_MODES = ("merge", "replace")
 
 TP_GROUPS = {
     "load": "Нагрузка",
@@ -250,3 +263,69 @@ def export_xlsx(rows: Iterable[TpWeeklyReport]) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------- загрузка: план и применение
+
+def _ordered(db: Session) -> list[TpWeeklyReport]:
+    return list(db.scalars(select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)))
+
+
+def plan_import(db: Session, records: list[dict], skipped: int = 0, mode: str = "merge") -> dict:
+    """merge — новые недели добавляются, совпадающие обновляются; replace — отчёт заменяется целиком."""
+    if mode not in IMPORT_MODES:
+        raise ValidationFailed("Режим загрузки: merge или replace")
+    existing = {} if mode == "replace" else {(r.year, r.week): r for r in _ordered(db)}
+    delete = len(_ordered(db)) if mode == "replace" else 0
+    rows = []
+    for rec in records:
+        row = existing.get((rec["year"], rec["week"]))
+        values = {k: rec.get(k) for k in TP_METRIC_COLUMNS}
+        changes = [] if row is None else [META_BY_KEY[k]["label"] for k, v in values.items() if getattr(row, k) != v]
+        if row is not None and rec.get("note") is not None and (row.note or "") != rec["note"]:
+            changes.append("Примечание")
+        action = "create" if row is None else ("update" if changes else "unchanged")
+        rows.append({"period": f"{rec['year']}-W{rec['week']:02d}", "year": rec["year"], "week": rec["week"],
+                     "action": action, "changes": changes, "errors": []})
+    actions = [r["action"] for r in rows]
+    summary = {"rows": len(records) + skipped, "create": actions.count("create"), "update": actions.count("update"),
+               "unchanged": actions.count("unchanged"), "delete": delete, "skipped": skipped, "errors": 0}
+    return {"dataset": "tp_weekly", "mode": mode, "summary": summary, "rows": rows, "errors": [], "can_apply": True}
+
+
+def apply_import(db: Session, actor: User | None, records: list[dict], skipped: int = 0, mode: str = "merge",
+                 filename: str = "", request: Request | None = None) -> tuple[dict, bool]:
+    """(план с итогом, применён ли). Пишет недели, журнал загрузок и журнал изменений; commit — у вызывающего."""
+    plan = plan_import(db, records, skipped, mode)
+    existing = {(r.year, r.week): r for r in _ordered(db)}
+    if mode == "replace":
+        for row in existing.values():
+            db.delete(row)
+        db.flush()
+        existing = {}
+    created = updated = 0
+    for rec in records:
+        row = existing.get((rec["year"], rec["week"]))
+        values = {k: rec.get(k) for k in TP_METRIC_COLUMNS}
+        if row is None:
+            db.add(TpWeeklyReport(year=rec["year"], week=rec["week"], note=rec.get("note") or "", **values))
+            created += 1
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+            if rec.get("note") is not None:
+                row.note = rec["note"]
+            updated += 1
+    total = len(records) + skipped
+    db.add(DataImport(service_key=SERVICE, dataset="tp_weekly", filename=(filename or "")[:300], mode=mode,
+                      rows_total=total, rows_created=created, rows_updated=updated, rows_skipped=skipped,
+                      user_id=actor.id if actor else None, username=actor.username if actor else "system"))
+    audit.record(db, actor, service_key=SERVICE, entity_type="tp_week", action="import",
+                 summary=f"Загружен отчёт ТП «{filename}»: новых {created}, обновлено {updated}",
+                 after={"mode": mode, "created": created, "updated": updated, "skipped": skipped}, request=request)
+    db.flush()
+    message = f"Новых недель: {created}, обновлено: {updated}"
+    if skipped:
+        message += f", пропущено строк: {skipped}"
+    return {**plan, "applied": True, "created": created, "updated": updated, "skipped": skipped,
+            "message": message}, True

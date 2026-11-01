@@ -149,3 +149,22 @@ def login(app):
 @pytest.fixture()
 def admin(login) -> ApiClient:
     return login("admin")
+
+
+def drop_pg_database(admin_engine, name: str, attempts: int = 20) -> None:
+    """Удаление временной базы PostgreSQL. DROP … WITH (FORCE) не может прервать служебные процессы
+    сервера (autovacuum) у роли без pg_signal_backend — тогда ждём их завершения и повторяем."""
+    import time
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    for attempt in range(attempts):
+        try:
+            with admin_engine.connect() as conn:
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+            return
+        except DBAPIError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)

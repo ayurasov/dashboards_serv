@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ...core.db import get_db
 from ...core.errors import Conflict, NotFound, ValidationFailed
-from ...models import TP_METRIC_COLUMNS, DataImport, ServiceSetting, TpWeeklyReport, User
+from ...models import ServiceSetting, TpWeeklyReport, User
 from ...schemas.common import ImportResult, Ok
 from ...schemas.settings import SettingValue
 from ...schemas.tp import TpColumnOut, TpReportIn, TpReportOut, TpReportPatch
@@ -120,37 +120,11 @@ async def import_reports(request: Request, file: UploadFile = File(...),
     """merge — добавить новые недели и обновить совпадающие; replace — заменить отчёт целиком."""
     raw = await read_upload(file)
     records, skipped = tp_service.parse_upload(file.filename or "", raw)
-    existing = {(r.year, r.week): r for r in _ordered(db)}
-    created = updated = 0
-    if mode == "replace":
-        for row in existing.values():
-            db.delete(row)
-        db.flush()
-        existing = {}
-    for rec in records:
-        row = existing.get((rec["year"], rec["week"]))
-        values = {k: rec.get(k) for k in TP_METRIC_COLUMNS}
-        if row is None:
-            db.add(TpWeeklyReport(year=rec["year"], week=rec["week"], note=rec.get("note") or "", **values))
-            created += 1
-        else:
-            for key, value in values.items():
-                setattr(row, key, value)
-            if rec.get("note") is not None:
-                row.note = rec["note"]
-            updated += 1
-    db.add(DataImport(service_key=SERVICE, dataset="tp_weekly", filename=(file.filename or "")[:300], mode=mode,
-                      rows_total=len(records) + skipped, rows_created=created, rows_updated=updated,
-                      rows_skipped=skipped, user_id=user.id, username=user.username))
-    audit.record(db, user, service_key=SERVICE, entity_type="tp_week", action="import",
-                 summary=f"Загружен отчёт ТП «{file.filename}»: новых {created}, обновлено {updated}",
-                 after={"mode": mode, "created": created, "updated": updated, "skipped": skipped}, request=request)
+    result, _ = tp_service.apply_import(db, user, records, skipped, mode, file.filename or "", request)
     db.commit()
-    message = f"Новых недель: {created}, обновлено: {updated}"
-    if skipped:
-        message += f", пропущено строк: {skipped}"
-    return ImportResult(dataset="tp_weekly", mode=mode, rows_total=len(records) + skipped, rows_created=created,
-                        rows_updated=updated, rows_skipped=skipped, message=message)
+    return ImportResult(dataset="tp_weekly", mode=mode, rows_total=len(records) + skipped,
+                        rows_created=result["created"], rows_updated=result["updated"], rows_skipped=skipped,
+                        message=result["message"])
 
 
 @router.get("/reports/export.csv", summary="Выгрузить отчёт в CSV")

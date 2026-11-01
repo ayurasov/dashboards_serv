@@ -11,6 +11,16 @@
                        отключать пропавших из каталога, --json полный план); --csv ФАЙЛ — загрузка списком.
                        Код выхода: 0 — готово, 1 — в плане ошибки (ничего не записано), 2 — каталог
                        или файл недоступны
+  worker [--once]      планировщик: папка «Входящие», запуски по расписанию, срок хранения (SIGTERM — мягкая
+                       остановка); --once — один такт
+  inbox scan           разобрать папку «Входящие» (INBOX_DIR) один раз — для cron без планировщика.
+                       Код выхода: 0 — готово, 1 — были ошибки, 2 — папка не настроена или не найдена
+  inbox cleanup        удалить исходные файлы старше INBOX_RETENTION_DAYS (в базе и в папке)
+  integrations list    подключения: номер, вид, название, состояние
+  integrations run ID|ВИД [--action ДЕЙСТВИЕ]
+                       запустить действие подключения (по номеру или все включённые подключения вида);
+                       по умолчанию — действия расписания или первое действие. Код выхода: 0 — успешно,
+                       1 — частично или ошибка, 2 — подключение не найдено или выключено
 """
 from __future__ import annotations
 
@@ -168,6 +178,76 @@ def cmd_org_sync(args) -> int:
     return 0
 
 
+def cmd_worker(args) -> int:
+    from .worker import Worker
+
+    worker = Worker()
+    worker.install_signals()
+    return worker.run(once=args.once)
+
+
+def cmd_inbox(args) -> int:
+    import json
+
+    from .services import inbox, inbox_folder
+
+    if args.inbox_command == "cleanup":
+        with session_scope() as db:
+            purged = inbox.purge(db)
+        print(f"Удалено исходных файлов: в базе {purged}, в папке {inbox_folder.cleanup()}")
+        return 0
+    result = inbox_folder.scan()
+    if not result.enabled:
+        print("Папка «Входящие» не настроена: задайте INBOX_DIR", file=sys.stderr)
+        return 2
+    print(json.dumps(result.as_dict(), ensure_ascii=False))
+    if result.notes and not result.taken and result.errors:
+        return 2
+    return 1 if result.errors else 0
+
+
+def cmd_integrations(args) -> int:
+    from .core.errors import AppError
+    from .integrations import base, runner
+    from .models import Integration
+
+    with session_scope() as db:
+        rows = list(db.scalars(select(Integration).order_by(Integration.id)))
+    if args.integrations_command == "list":
+        for row in rows:
+            state = "включено" if row.enabled else "выключено"
+            health = f"ошибка: {row.last_error[:80]}" if row.last_error_at and (
+                row.last_ok_at is None or row.last_error_at > row.last_ok_at) else "в порядке"
+            print(f"{row.id}\t{row.kind}\t{row.name}\t{state}\t{runner.schedule_label(row.schedule)}\t{health}")
+        return 0
+    target = args.target
+    chosen = [r for r in rows if str(r.id) == target] if target.isdigit() else \
+        [r for r in rows if r.kind == target and r.enabled]
+    if not chosen:
+        print(f"Подключение «{target}» не найдено" + ("" if target.isdigit() else " среди включённых"),
+              file=sys.stderr)
+        return 2
+    code = 0
+    for row in chosen:
+        if not row.enabled:
+            print(f"Подключение «{row.name}» выключено", file=sys.stderr)
+            return 2
+        cls = base.get(row.kind)
+        actions = [args.action] if args.action else ((row.schedule or {}).get("actions") or
+                                                     [a.key for a in cls.actions][:1])
+        for action in actions:
+            try:
+                run = runner.run_action(row.id, action, trigger="cli")
+            except AppError as exc:
+                print(f"{row.name}: {exc.detail}", file=sys.stderr)
+                code = 1
+                continue
+            print(f"{row.name} · {action}: {run['status_label']} — {run['message'] or run['error']}")
+            if run["status"] != "ok":
+                code = 1
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging()
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Обслуживание «Дашбордов компании»")
@@ -194,6 +274,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--actor", default=None, help="логин, от имени которого записывается журнал")
     p.add_argument("--json", action="store_true", help="вывести полный план в JSON")
     p.set_defaults(func=cmd_org_sync)
+    p = sub.add_parser("worker", help="планировщик: папка «Входящие», расписания, срок хранения")
+    p.add_argument("--once", action="store_true", help="выполнить один такт и выйти")
+    p.set_defaults(func=cmd_worker)
+    p = sub.add_parser("inbox", help="входящие данные: разбор папки, очистка")
+    inbox_sub = p.add_subparsers(dest="inbox_command", required=True)
+    inbox_sub.add_parser("scan", help="разобрать папку INBOX_DIR один раз")
+    inbox_sub.add_parser("cleanup", help="удалить исходные файлы старше INBOX_RETENTION_DAYS")
+    p.set_defaults(func=cmd_inbox)
+    p = sub.add_parser("integrations", help="подключения: список, запуск")
+    integrations_sub = p.add_subparsers(dest="integrations_command", required=True)
+    integrations_sub.add_parser("list", help="список подключений")
+    run = integrations_sub.add_parser("run", help="запустить действие подключения")
+    run.add_argument("target", metavar="ID|ВИД", help="номер подключения или вид (все включённые этого вида)")
+    run.add_argument("--action", default=None, help="действие (по умолчанию — действия расписания)")
+    p.set_defaults(func=cmd_integrations)
     args = parser.parse_args(argv)
     return args.func(args)
 

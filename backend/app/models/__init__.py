@@ -38,6 +38,19 @@ from .hr import (  # noqa: F401
     HrMonthNote,
     HrTarget,
 )
+from .integrations import (  # noqa: F401
+    INBOX_LIVE_STATUSES,
+    INBOX_SOURCES,
+    INBOX_STATUSES,
+    KEY_SCOPES,
+    RUN_STATUSES,
+    RUN_TRIGGERS,
+    InboundKey,
+    InboxItem,
+    InboxRule,
+    Integration,
+    IntegrationRun,
+)
 from .partnerships import (  # noqa: F401
     LIGHTS,
     PARTNERSHIP_STATUSES,

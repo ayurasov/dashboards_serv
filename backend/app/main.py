@@ -20,6 +20,9 @@ from .api.routers import (
     common,
     custom_dashboards,
     hr,
+    inbound,
+    inbox,
+    integrations,
     naumen,
     org,
     partnerships,
@@ -40,7 +43,8 @@ OPENAPI_TAGS = [
     {"name": "Вход и профиль"}, {"name": "Пользователи"}, {"name": "Подразделения"}, {"name": "Общее"},
     {"name": "Служба персонала"}, {"name": "Пользовательские дашборды"},
     {"name": "Техподдержка: недельный отчёт"}, {"name": "Техподдержка: заявки Naumen"},
-    {"name": "Партнёрства"}, {"name": "Сквозные отчёты"}, {"name": "PDF-отчёты"}, {"name": "Система"},
+    {"name": "Партнёрства"}, {"name": "Сквозные отчёты"}, {"name": "PDF-отчёты"}, {"name": "Входящие данные"},
+    {"name": "Интеграции"}, {"name": "Приём по API"}, {"name": "Система"},
 ]
 
 
@@ -97,13 +101,16 @@ def create_app() -> FastAPI:
         return response
 
     for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, reports, pdf,
-                   system):
+                   inbox, integrations, inbound, system):
         app.include_router(module.router)
     app.include_router(org.departments_router)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     async def api_not_found(path: str):
-        return JSONResponse({"detail": "Ресурс API не найден", "code": "not_found"}, status_code=404)
+        body = {"detail": "Ресурс API не найден", "code": "not_found"}
+        if path.startswith("inbound/"):
+            body.update(error="not_found", message=body["detail"])
+        return JSONResponse(body, status_code=404)
 
     _mount_frontend(app, settings.frontend_dist)
     return app

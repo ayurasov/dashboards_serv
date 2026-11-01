@@ -1,9 +1,10 @@
 """Служба персонала: месяцы, метрики, приёмы и увольнения, заметки, аналитика, цели."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from ...core.db import get_db, utcnow
 from ...core.errors import Conflict, NotFound, ValidationFailed
@@ -22,11 +23,12 @@ from ...schemas.hr import (
     TargetIn,
     TargetPatchIn,
 )
-from ...services import access, audit
+from ...services import access, audit, hr_import
 from ...services import hr as hr_service
 from ...services.cache import cached_json
 from ..deps import require_data_class, require_export, require_records, require_service
-from ..uploads import file_response
+from ..uploads import file_response, read_upload
+from .org import CONFLICT_RESPONSE, IMPORT_ERRORS, _conflict, _flag
 
 router = APIRouter(prefix="/api/hr", tags=["Служба персонала"])
 SERVICE = "hr"
@@ -37,6 +39,7 @@ manage = require_service(SERVICE, "manager")
 registry = require_records(SERVICE, "personal")
 registry_export = require_export(SERVICE, records=True, data_class="personal")
 registry_edit = require_data_class("personal", SERVICE, "editor")
+months_export = require_export(SERVICE)
 
 
 def _event_out(e: HrEmployeeEvent, month_key: str | None = None) -> EventOut:
@@ -110,6 +113,48 @@ def create_month(body: MonthCreateIn, request: Request, db: Session = Depends(ge
     return MonthListItem(key=month.key, label=month.label, year=month.year, month=month.month,
                          comment=month.comment, hired=0, fired=0, filled_metrics=0,
                          total_metrics=len(hr_service.definitions(db)), updated_at=month.updated_at)
+
+
+@router.get("/months/export.xlsx", summary="Выгрузить метрики месяцев в Excel (формат загрузки)")
+def export_months(db: Session = Depends(get_db), _: User = Depends(months_export)):
+    return file_response(hr_import.export_months_xlsx(db), "Метрики службы персонала.xlsx")
+
+
+def _import_job(db: Session, user: User, apply: bool, plan_fn, apply_fn, data: list, filename: str,
+                request: Request):
+    if not apply:
+        return {**plan_fn(db, data), "applied": False}
+    result, applied = apply_fn(db, user, data, filename, request)
+    if not applied:
+        db.rollback()
+        return _conflict(result, IMPORT_ERRORS)
+    db.commit()
+    return result
+
+
+@router.post("/months/import", responses=CONFLICT_RESPONSE,
+             summary="Загрузить метрики месяцев (Excel, CSV): проверка (apply=false) или применение",
+             description="Строки — метрики (столбец «Метрика» или «Ключ»), столбцы — месяцы (ГГГГ-ММ); или столбцы "
+                         "«Месяц», «Метрика», «Значение», «Примечание». Пустая ячейка не стирает сохранённое; "
+                         "месяцы, которых нет, создаются.")
+async def import_months(request: Request, file: UploadFile = File(...), apply: str = Form("false"),
+                        db: Session = Depends(get_db), user: User = Depends(edit)):
+    raw = await read_upload(file)
+    cells = await run_in_threadpool(hr_import.parse_months_upload, file.filename or "", raw)
+    return await run_in_threadpool(_import_job, db, user, _flag(apply), hr_import.plan_months, hr_import.apply_months,
+                                   cells, (file.filename or "")[:200], request)
+
+
+@router.post("/events/import", responses=CONFLICT_RESPONSE,
+             summary="Загрузить реестр приёмов и увольнений (Excel, CSV): проверка или применение",
+             description="Столбцы выгрузки реестра: Месяц, Событие (Приём / Увольнение), Дата, ФИО, Должность, "
+                         "Подразделение, Тип занятости, Причина. Запись сопоставляется по событию, дате и ФИО.")
+async def import_events(request: Request, file: UploadFile = File(...), apply: str = Form("false"),
+                        db: Session = Depends(get_db), user: User = Depends(registry_edit)):
+    raw = await read_upload(file)
+    rows = await run_in_threadpool(hr_import.parse_events_upload, file.filename or "", raw)
+    return await run_in_threadpool(_import_job, db, user, _flag(apply), hr_import.plan_events, hr_import.apply_events,
+                                   rows, (file.filename or "")[:200], request)
 
 
 @router.get("/months/{key}", summary="Месяц: метрики, приёмы и увольнения, заметки")

@@ -115,6 +115,21 @@ class Settings(BaseSettings):
 
     max_upload_mb: int = Field(default=20, ge=1, le=200)
 
+    # Входящие данные (ADR-0011). Папка «Входящие» на сервере (в Docker — том /data/inbox);
+    # пусто — папка не опрашивается. Файл берётся в работу, когда не меняется дольше INBOX_SETTLE_SECONDS.
+    inbox_dir: str = ""
+    inbox_settle_seconds: int = Field(default=10, ge=0, le=3600)
+    # Предел размера файла во входящих (папка, загрузка, приём по API)
+    inbox_max_mb: int = Field(default=20, ge=1, le=200)
+    # Сколько дней хранятся исходные файлы обработанных элементов (в базе и в processed/, rejected/ папки)
+    inbox_retention_days: int = Field(default=90, ge=1, le=3650)
+    # Планировщик (python -m app.cli worker): период опроса папки и расписаний, секунд
+    worker_tick_seconds: int = Field(default=30, ge=1, le=3600)
+    # Запусков в журнале каждого подключения (старые удаляются)
+    integration_runs_keep: int = Field(default=200, ge=10, le=10000)
+    # Приём по API (/api/inbound/v1): запросов в минуту на один ключ
+    inbound_rate_limit: int = Field(default=120, ge=1, le=10000)
+
     # Кэш готовых ответов аналитики (сбрасывается по ревизии данных службы)
     response_cache: bool = True
     response_cache_size: int = Field(default=512, ge=16, le=10000)
@@ -151,6 +166,10 @@ class Settings(BaseSettings):
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def inbox_path(self) -> Path | None:
+        return Path(self.inbox_dir).expanduser() if self.inbox_dir.strip() else None
 
 
 @lru_cache

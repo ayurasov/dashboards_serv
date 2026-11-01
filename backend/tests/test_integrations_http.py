@@ -1,0 +1,232 @@
+"""HTTP-клиент подключений против поддельного сервера: адрес и разрешённые узлы, перенаправления, повтор
+429/503, предел размера, неожиданный ответ, ошибки доступа, подробные и краткие тексты, Basic в UTF-8."""
+from __future__ import annotations
+
+import base64
+import time
+
+import pytest
+
+from app.integrations import http
+from app.integrations.http import HttpClient, IntegrationError, check_base_url
+from tests.fake_http import FakeServer
+
+
+@pytest.fixture()
+def server(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    monkeypatch.delenv("FAKE_ALLOWED_HOSTS", raising=False)
+    with FakeServer() as fake:
+        yield fake
+
+
+def client(server, **kwargs) -> HttpClient:
+    sleeps: list[float] = []
+    kwargs.setdefault("sleep", sleeps.append)
+    c = HttpClient(server.url, kind="fake", title="Система", **kwargs)
+    c.sleeps = sleeps
+    return c
+
+
+@pytest.mark.parametrize(("url", "code"), [
+    ("ftp://host", "bad_url"), ("host.ru", "bad_url"), ("https://user:pw@host.ru", "bad_url"),
+    ("https://host.ru/?a=1", "bad_url"), ("https://host.ru/#x", "bad_url"), ("https://ho st.ru", "bad_url"),
+    ("https://host.ru:99999", "bad_url"), ("https://", "bad_url"),
+])
+def test_bad_urls(url, code):
+    with pytest.raises(IntegrationError) as exc:
+        check_base_url(url)
+    assert exc.value.code == code
+
+
+def test_url_is_normalized_and_path_allowed():
+    assert check_base_url(" https://jira.company.ru/jira/ ") == "https://jira.company.ru/jira"
+
+
+def test_allowed_hosts(monkeypatch):
+    monkeypatch.setenv("JIRA_ALLOWED_HOSTS", "jira.company.ru, .corp.ru")
+    assert check_base_url("https://jira.company.ru", kind="jira")
+    assert check_base_url("https://a.b.corp.ru", kind="jira")
+    assert check_base_url("https://corp.ru", kind="jira")
+    with pytest.raises(IntegrationError) as exc:
+        check_base_url("https://evil.ru", kind="jira")
+    assert exc.value.code == "host_not_allowed" and "JIRA_ALLOWED_HOSTS" in exc.value.detail
+    with pytest.raises(IntegrationError):
+        check_base_url("https://notcorp.ru", kind="jira")
+    monkeypatch.delenv("JIRA_ALLOWED_HOSTS")
+    assert check_base_url("https://evil.ru", kind="jira")  # пусто — без ограничения
+    assert http.allowed_hosts_env("bitrix24") == "BITRIX24_ALLOWED_HOSTS"
+
+
+def test_json_request_and_headers(server):
+    server.route("GET", "/api/meta", lambda r: (200, {"name": "Пульс", "version": "1.2"}))
+    c = client(server, headers={"Authorization": "Bearer t"})
+    assert c.get_json("api/meta")["name"] == "Пульс"
+    request = server.requests[-1]
+    assert request.headers["authorization"] == "Bearer t" and request.headers["accept"] == "application/json"
+    assert c.calls == 1 and "запрос" in c.stats()
+
+
+def test_basic_auth_is_utf8(server):
+    server.route("GET", "/me", lambda r: (200, {"ok": True}))
+    client(server, auth=("служба", "пароль")).get_json("me")
+    raw = server.requests[-1].headers["authorization"].split()[1]
+    assert base64.b64decode(raw).decode("utf-8") == "служба:пароль"
+
+
+def test_redirect_is_an_error_with_target(server):
+    server.route("GET", "/old", lambda r: (302, b"", {"Location": "https://sso.company.ru/login?next=x"}))
+    with pytest.raises(IntegrationError) as exc:
+        client(server).get_json("old")
+    assert exc.value.code == "redirect" and "https://sso.company.ru/login" in exc.value.detail
+    assert "next=x" not in exc.value.detail
+    assert "перенаправляет" in exc.value.message(detailed=False) and server.url not in exc.value.message(False)
+    assert "администратору" in exc.value.message(False)
+    assert len(server.requests) == 1, "перенаправление не выполняется"
+
+
+def test_retry_on_429_with_retry_after(server):
+    answers = iter([(429, {"message": "slow"}, {"Retry-After": "2"}), (429, {}, {"Retry-After": "30"}),
+                    (200, {"ok": True})])
+    server.route("GET", "/x", lambda r: next(answers))
+    c = client(server)
+    assert c.get_json("x") == {"ok": True}
+    assert c.sleeps == [2.0, 10.0], "Retry-After не больше 10 с"
+    assert len(server.requests) == 3
+
+
+def test_503_retried_then_reported(server):
+    server.route("GET", "/x", lambda r: (503, {"message": "maintenance"}))
+    c = client(server)
+    with pytest.raises(IntegrationError) as exc:
+        c.get_json("x")
+    assert exc.value.code == "unavailable" and len(server.requests) == 3 and c.sleeps == [1.0, 2.0]
+
+
+def test_other_errors_are_not_retried(server):
+    server.route("GET", "/x", lambda r: (500, {"errorMessages": ["boom"], "errors": {"jql": "плохой"}}))
+    with pytest.raises(IntegrationError) as exc:
+        client(server).get_json("x")
+    assert exc.value.code == "http_error" and "boom" in exc.value.detail and "jql: плохой" in exc.value.detail
+    assert len(server.requests) == 1
+
+
+@pytest.mark.parametrize(("status", "code"), [(401, "auth"), (403, "forbidden"), (404, "not_found"),
+                                              (429, "rate_limited")])
+def test_access_errors(server, status, code):
+    server.route("GET", "/x", lambda r: (status, {"message": "nope"}))
+    with pytest.raises(IntegrationError) as exc:
+        client(server).get_json("x")
+    assert exc.value.code == code and exc.value.status == status
+
+
+def test_not_json_response(server):
+    server.route("GET", "/x", lambda r: (200, "<html>Вход в систему</html>"))
+    server.route("GET", "/list", lambda r: (200, {"not": "a list"}))
+    c = client(server)
+    with pytest.raises(IntegrationError) as exc:
+        c.get_json("x")
+    assert exc.value.code == "bad_response" and "страница входа" in exc.value.detail
+    with pytest.raises(IntegrationError) as exc:
+        c.get_json("list", kind=list)
+    assert exc.value.code == "bad_response"
+
+
+def test_size_limit_by_content_length(server):
+    server.route("GET", "/big", lambda r: (200, b"x" * 5000))
+    c = client(server, max_bytes=1000)
+    with pytest.raises(IntegrationError) as exc:
+        c.get_bytes("big")
+    assert exc.value.code == "too_large"
+    assert client(server, max_bytes=10_000).get_bytes("big") == b"x" * 5000
+
+
+def test_streamed_body_over_limit(monkeypatch):
+    """Ответ без Content-Length считается по мере чтения."""
+    import socket
+    import threading
+
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+
+    def serve():
+        conn, _ = sock.accept()
+        conn.recv(4096)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n" + b"1" * 3000)
+        conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    c = HttpClient(f"http://127.0.0.1:{sock.getsockname()[1]}", title="Система", max_bytes=1000)
+    with pytest.raises(IntegrationError) as exc:
+        c.get_bytes("x")
+    thread.join(2)
+    sock.close()
+    assert exc.value.code == "too_large"
+
+
+def test_connection_refused_and_short_message(server):
+    port = server.server.server_address[1]
+    server.stop()
+    c = HttpClient(f"http://127.0.0.1:{port}", title="Пульс", detailed=False)
+    with pytest.raises(IntegrationError) as exc:
+        c.get_json("x")
+    assert exc.value.code == "connect"
+    assert f"127.0.0.1:{port}" in exc.value.detail
+    short = exc.value.message(detailed=False)
+    assert "127.0.0.1" not in short and "Не удалось подключиться к «Пульс»" in short and "администратору" in short
+    server.start()  # фикстура остановит
+
+
+def test_read_timeout(server):
+    server.route("GET", "/slow", lambda r: (time.sleep(1.0), (200, {}))[1])
+    with pytest.raises(IntegrationError) as exc:
+        client(server, timeout=(1.0, 0.2)).get_json("slow")
+    assert exc.value.code == "read_timeout"
+
+
+def test_requests_stay_on_the_host(server):
+    c = client(server)
+    with pytest.raises(IntegrationError) as exc:
+        c.request("GET", "https://other.example.com/x")
+    assert exc.value.code == "bad_url"
+    server.route("GET", "/abs", lambda r: (200, {"ok": 1}))
+    assert c.get_json(f"{server.url}/abs") == {"ok": 1}
+
+
+def test_no_cookies_option(server):
+    server.route("GET", "/login", lambda r: (200, {"ok": True}, {"Set-Cookie": "sid=1; Path=/"}))
+    server.route("GET", "/me", lambda r: (200, {"cookie": r.headers.get("cookie", "")}))
+    with_cookies = client(server)
+    with_cookies.get_json("login")
+    assert with_cookies.get_json("me")["cookie"] == "sid=1"
+    without = client(server, cookies=False)
+    without.get_json("login")
+    assert without.get_json("me")["cookie"] == ""
+
+
+def test_record_health():
+    class Row:
+        last_ok_at = last_error_at = None
+        last_error = ""
+
+    row = Row()
+    http.record_health(row, ok=False, error="Нет связи")
+    assert row.last_error == "Нет связи" and row.last_error_at and row.last_ok_at is None
+    http.record_health(row, ok=True)
+    assert row.last_ok_at is not None
+
+
+def test_error_to_app_error():
+    assert IntegrationError("x", code="bad_url").to_app_error().status_code == 422
+    error = IntegrationError("подробно", code="connect", short="кратко").to_app_error(detailed=False)
+    assert error.status_code == 502 and error.detail.startswith("кратко") and error.code == "connect"
+
+
+def test_non_latin_header_is_a_config_error(server):
+    server.route("GET", "/x", lambda r: (200, {}))
+    with pytest.raises(IntegrationError) as exc:
+        client(server, headers={"Authorization": "Bearer токен"}).get_json("x")
+    assert exc.value.code == "config" and "латиница" in exc.value.detail

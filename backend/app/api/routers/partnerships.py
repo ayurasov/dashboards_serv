@@ -1,9 +1,10 @@
 """Проектный и продуктовый офис: технологические партнёрства."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from sqlalchemy import extract, func, or_, select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from ...core.db import get_db
 from ...core.errors import NotFound, ValidationFailed
@@ -16,7 +17,8 @@ from ...services import partnerships as p_service
 from ...services.cache import cached_json
 from ...services.registry import PARTNERSHIP_LIGHT_GROUPS
 from ..deps import require_export, require_records, require_service
-from ..uploads import file_response
+from ..uploads import file_response, read_upload
+from .org import CONFLICT_RESPONSE, IMPORT_ERRORS, _conflict, _flag
 
 router = APIRouter(prefix="/api/partnerships", tags=["Партнёрства"])
 SERVICE = "project_product"
@@ -104,6 +106,29 @@ def export(year: int | None = None, status: str = "", almi_product: str = "", di
         db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type, search=search,
         light=light)]
     return file_response(p_service.export_xlsx(rows), "Реестр технологических партнёрств.xlsx")
+
+
+def _import_job(db: Session, user: User, rows: list, apply: bool, filename: str, request: Request):
+    if not apply:
+        return {**p_service.plan_import(db, rows), "applied": False}
+    result, applied = p_service.apply_import(db, user, rows, filename, request)
+    if not applied:
+        db.rollback()
+        return _conflict(result, IMPORT_ERRORS)
+    db.commit()
+    return result
+
+
+@router.post("/import", responses=CONFLICT_RESPONSE,
+             summary="Загрузить реестр (Excel, CSV): проверка (apply=false) или применение",
+             description="Столбцы выгрузки реестра: №, Партнёр, Продукт партнёра, Направление, Продукт АЛМИ, Версия, "
+                         "Тип, Статус, Дата сертификата, NDA, Соглашение, Битрикс, Сайт, Комментарий. Запись "
+                         "сопоставляется по «№», иначе по партнёру, продукту и версии; пустая ячейка не стирает.")
+async def import_partnerships(request: Request, file: UploadFile = File(...), apply: str = Form("false"),
+                              db: Session = Depends(get_db), user: User = Depends(edit)):
+    raw = await read_upload(file)
+    rows = await run_in_threadpool(p_service.parse_upload, file.filename or "", raw)
+    return await run_in_threadpool(_import_job, db, user, rows, _flag(apply), (file.filename or "")[:200], request)
 
 
 @router.get("/analytics", summary="Аналитика партнёрств")

@@ -18,10 +18,11 @@ from sqlalchemy import create_engine, inspect, text
 
 from app.core.db import Base
 from app.core.migrate import LEGACY_HEAD, alembic_config, upgrade
+from tests.conftest import drop_pg_database
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
-HEAD = "0015_reports"
+HEAD = "0016_integrations"
 
 
 def _diff(url: str) -> list:
@@ -42,8 +43,7 @@ def pg_url():
         conn.execute(text(f'CREATE DATABASE "{name}"'))
     url = PG_URL.rsplit("/", 1)[0] + f"/{name}"
     yield url
-    with admin.connect() as conn:
-        conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    drop_pg_database(admin, name)
     admin.dispose()
 
 
@@ -394,3 +394,63 @@ def test_first_start_seeds_computed_indicators(tmp_path, monkeypatch):
         db.commit()
         assert {i.key for i in db.query(Indicator).all()} == keys
     engine.dispose()
+
+
+def _check_0016_roundtrip(url: str) -> None:
+    """0016: таблицы интеграций и входящих; частичный уникальный индекс повтора; откат удаляет таблицы и снимает
+    полномочия data.manage и integrations.manage, не трогая остальные; повторное применение совпадает с моделями."""
+    from sqlalchemy.exc import IntegrityError
+
+    assert upgrade(url) == HEAD
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, full_name, role, is_active, must_change_password, "
+                          "reports_to_none, auth_source, access_overrides, capabilities, created_at, updated_at) "
+                          "VALUES (301, 'ops', 'Оператор данных', 'user', true, false, false, 'local', '{}', "
+                          "'[\"org.manage\", \"data.manage\", \"integrations.manage\"]', CURRENT_TIMESTAMP, "
+                          "CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO integrations (id, kind, name, enabled, config, schedule, state, last_error, "
+                          "created_at, updated_at) VALUES (1, 'jira', 'Jira', false, '{}', '{}', '{}', '', "
+                          "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO integration_runs (integration_id, action, trigger, status, started_at, summary, "
+                          "message, error, username) VALUES (1, 'sync', 'manual', 'ok', CURRENT_TIMESTAMP, '{}', '', "
+                          "'', 'ops')"))
+        conn.execute(text("INSERT INTO inbound_keys (id, name, sha256, prefix, scopes, issued_at, issued_by, "
+                          "created_at) VALUES (1, '1С', 'abc', 'dash_abcdefg', '[\"files\"]', CURRENT_TIMESTAMP, "
+                          "'ops', CURRENT_TIMESTAMP)"))
+        insert = ("INSERT INTO inbox_items (source, source_ref, integration_id, inbound_key_id, filename, "
+                  "content_type, size, sha256, dataset, status, options, error, message, received_at, received_by, "
+                  "applied_by, content) VALUES ('api', '', 1, 1, 'a.xlsx', '', 3, 'f00', 'naumen', :status, '{}', "
+                  "'', '', CURRENT_TIMESTAMP, '', '', :content)")
+        conn.execute(text(insert), {"status": "applied", "content": b"abc"})
+        conn.execute(text(insert), {"status": "duplicate", "content": None})
+        conn.execute(text(insert), {"status": "rejected", "content": b"abc"})
+        conn.execute(text("INSERT INTO inbox_rules (source, dataset, auto_apply, updated_at) VALUES "
+                          "('folder', 'naumen', true, CURRENT_TIMESTAMP)"))
+    with engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(text(insert), {"status": "pending", "content": b"abc"})
+    with engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(text(insert), {"status": "unknown", "content": None})
+    engine.dispose()
+
+    command.downgrade(alembic_config(url), "0015_reports")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        tables = set(inspect(conn).get_table_names())
+        assert {"integrations", "integration_runs", "inbound_keys", "inbox_items", "inbox_rules"}.isdisjoint(tables)
+        caps = conn.execute(text("SELECT capabilities FROM users WHERE id = 301")).scalar()
+        caps = caps if isinstance(caps, list) else __import__("json").loads(caps)
+        assert caps == ["org.manage"]
+    engine.dispose()
+
+    assert upgrade(url) == HEAD
+    assert _diff(url) == []
+
+
+def test_0016_downgrade_and_upgrade(tmp_path):
+    _check_0016_roundtrip(f"sqlite:///{tmp_path / 'integrations.db'}")
+
+
+@pytest.mark.postgres
+def test_0016_downgrade_and_upgrade_on_postgres(pg_url):
+    _check_0016_roundtrip(pg_url)

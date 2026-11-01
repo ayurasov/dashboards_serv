@@ -1,17 +1,24 @@
-"""Технологические партнёрства: светофор записей, аналитика, сводка по годам."""
+"""Технологические партнёрства: светофор записей, аналитика, сводка по годам, загрузка реестра.
+
+Загрузка реестра (Excel, CSV в формате выгрузки export_xlsx) — в два шага: plan_import без записи
+в базу и apply_import одной транзакцией. Запись сопоставляется по «№» (id), иначе по партнёру,
+продукту партнёра и версии продукта АЛМИ; пустая ячейка ничего не стирает.
+"""
 from __future__ import annotations
 
 import io
+import re
 from collections import Counter
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 
+from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.timeutil import local_today
-from ..models import Partnership, PartnershipLightRule
-from . import traffic_light
+from ..models import PARTNERSHIP_STATUSES, DataImport, Partnership, PartnershipLightRule, User, name_key
+from . import audit, traffic_light
 from .registry import PARTNERSHIP_LIGHT_GROUPS
 
 CERT_AGE_KEYS = ("cert_age:fresh", "cert_age:aging", "cert_age:stale")
@@ -141,3 +148,206 @@ def export_xlsx(rows: Sequence[dict]) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------- загрузка реестра
+
+SERVICE = "project_product"
+MAX_IMPORT_ROWS = 5000
+IMPORT_ALIASES = {
+    "id": ("№", "id", "номер", "n"),
+    "partner": ("партнёр", "партнер", "partner"),
+    "product": ("продукт партнёра", "продукт партнера", "product"),
+    "direction": ("направление", "direction"),
+    "almi_product": ("продукт алми", "almi_product"),
+    "almi_version": ("версия", "версия алми", "almi_version"),
+    "type": ("тип", "type"),
+    "status": ("статус", "status"),
+    "cert_date": ("дата сертификата", "дата сертификации", "cert_date"),
+    "nda": ("nda",),
+    "agreement": ("соглашение", "agreement"),
+    "bitrix": ("битрикс", "bitrix"),
+    "website": ("сайт", "website"),
+    "comment": ("комментарий", "comment"),
+    "last_modified": ("дата изменения", "изменено", "last_modified"),
+}
+TEXT_LIMITS = {"partner": 300, "product": 2000, "direction": 300, "almi_product": 200, "almi_version": 200,
+               "status": 60, "type": 30, "bitrix": 500, "website": 500, "comment": 5000}
+FIELD_LABELS = {"partner": "Партнёр", "product": "Продукт партнёра", "direction": "Направление",
+                "almi_product": "Продукт АЛМИ", "almi_version": "Версия", "type": "Тип", "status": "Статус",
+                "cert_date": "Дата сертификата", "nda": "NDA", "agreement": "Соглашение", "bitrix": "Битрикс",
+                "website": "Сайт", "comment": "Комментарий", "last_modified": "Дата изменения"}
+TRUE_TEXT = {"да", "yes", "true", "1", "+", "подписан", "подписано"}
+FALSE_TEXT = {"нет", "no", "false", "0", "-", "—"}
+
+
+def parse_upload(filename: str, raw: bytes) -> list[dict]:
+    """Строки файла: {"line", поле → текст ячейки или None (столбца нет)}."""
+    from .org_import import ImportFormatError, header_map, read_table
+
+    table = read_table(filename, raw)
+    while table and not any(table[0]):
+        table = table[1:]
+    if not table:
+        raise ImportFormatError("Файл пустой")
+    mapping = header_map(table[0], IMPORT_ALIASES)
+    if "partner" not in mapping:
+        raise ImportFormatError("Нужен столбец «Партнёр» (формат выгрузки реестра партнёрств)")
+    rows = []
+    for line, values in enumerate(table[1:], start=2):
+        if not any((v or "").strip() for v in values):
+            continue
+        if len(rows) >= MAX_IMPORT_ROWS:
+            raise ImportFormatError(f"Не больше {MAX_IMPORT_ROWS} строк за одну загрузку")
+        rows.append({"line": line, **{k: (values[i].strip() if i < len(values) else "") for k, i in mapping.items()}})
+    if not rows:
+        raise ImportFormatError("В файле нет ни одной строки с партнёрствами")
+    return rows
+
+
+def _date(text: str) -> date:
+    raw = text.strip()
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if match:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    return datetime.strptime(raw, "%d.%m.%Y").date()
+
+
+def _values(row: dict) -> tuple[dict, list[str]]:
+    """Значения непустых ячеек строки и ошибки разбора."""
+    values: dict = {}
+    errors: list[str] = []
+    for key, limit in TEXT_LIMITS.items():
+        text = " ".join((row.get(key) or "").split()) if key != "comment" else (row.get(key) or "").strip()
+        if text:
+            if len(text) > limit:
+                errors.append(f"«{FIELD_LABELS[key]}» длиннее {limit} символов")
+            values[key] = text[:limit]
+    for key in ("cert_date", "last_modified"):
+        text = row.get(key) or ""
+        if text.strip():
+            try:
+                values[key] = _date(text)
+            except ValueError:
+                errors.append(f"«{FIELD_LABELS[key]}» — дата ГГГГ-ММ-ДД или ДД.ММ.ГГГГ: {text}")
+    for key in ("nda", "agreement"):
+        text = (row.get(key) or "").strip().lower()
+        if text in TRUE_TEXT:
+            values[key] = True
+        elif text in FALSE_TEXT:
+            values[key] = False
+        elif text:
+            errors.append(f"«{FIELD_LABELS[key]}» — да или нет: {row.get(key)}")
+    return values, errors
+
+
+def _match_key(partner: str, product: str, version: str) -> tuple:
+    return name_key(partner), name_key(product), name_key(version)
+
+
+def _snapshot(p: Partnership) -> dict:
+    return {k: getattr(p, k) for k in FIELD_LABELS}
+
+
+def plan_import(db: Session, rows: list[dict]) -> dict:
+    """План загрузки без записи в базу: что создастся, изменится, ошибки строк."""
+    return _plan(db, rows)[0]
+
+
+def _plan(db: Session, rows: list[dict]) -> tuple[dict, list[dict]]:
+    current = list(db.scalars(select(Partnership).order_by(Partnership.id)))
+    by_id = {p.id: p for p in current}
+    by_key: dict[tuple, list[Partnership]] = {}
+    for p in current:
+        by_key.setdefault(_match_key(p.partner, p.product, p.almi_version), []).append(p)
+    seen: dict = {}
+    out = []
+    for row in rows:
+        values, errors = _values(row)
+        warnings: list[str] = []
+        target: Partnership | None = None
+        ref = (row.get("id") or "").strip()
+        if ref:
+            try:
+                target = by_id.get(int(float(ref)))
+            except ValueError:
+                errors.append(f"«№» — число: {ref}")
+            if target is None and not errors:
+                warnings.append(f"записи №{ref} нет — будет создана новая")
+        partner = values.get("partner") or (target.partner if target else "")
+        if target is None and not errors:
+            matches = by_key.get(_match_key(partner, values.get("product", ""), values.get("almi_version", "")), [])
+            if len(matches) > 1:
+                errors.append("несколько записей с этим партнёром, продуктом и версией — укажите «№»")
+            elif matches:
+                target = matches[0]
+        if not partner:
+            errors.append("не указан партнёр")
+        status = values.get("status")
+        if status and status not in PARTNERSHIP_STATUSES:
+            warnings.append(f"статус «{status}» не из справочника — светофор статуса будет серым")
+        identity = ("id", target.id) if target is not None else ("key", _match_key(
+            partner, values.get("product", ""), values.get("almi_version", "")))
+        if not errors and identity in seen:
+            errors.append(f"повтор: эта запись уже есть в строке {seen[identity]}")
+        elif not errors:
+            seen[identity] = row["line"]
+        changes = []
+        if target is not None:
+            changes = [{"field": FIELD_LABELS[k], "before": getattr(target, k), "after": v}
+                       for k, v in values.items() if getattr(target, k) != v]
+        action = "error" if errors else ("create" if target is None else ("update" if changes else "unchanged"))
+        out.append({"line": row["line"], "id": target.id if target else None, "partner": partner,
+                    "product": values.get("product", target.product if target else ""), "action": action,
+                    "changes": changes, "errors": errors, "warnings": warnings, "_values": values})
+    actions = [r["action"] for r in out]
+    errors = actions.count("error")
+    summary = {"rows": len(out), "create": actions.count("create"), "update": actions.count("update"),
+               "unchanged": actions.count("unchanged"), "errors": errors}
+    public = [{k: v for k, v in r.items() if k != "_values"} for r in out]
+    return {"dataset": "partnerships", "summary": summary, "rows": public, "can_apply": errors == 0}, out
+
+
+def apply_import(db: Session, actor: User | None, rows: list[dict], filename: str = "",
+                 request: Request | None = None) -> tuple[dict, bool]:
+    plan, internal = _plan(db, rows)
+    if not plan["can_apply"]:
+        return {**plan, "applied": False}, False
+    created = updated = 0
+    for item in internal:
+        values = item["_values"]
+        if item["action"] == "create":
+            p = Partnership(partner=values.get("partner") or item["partner"], product=values.get("product", ""),
+                            direction=values.get("direction", ""), almi_product=values.get("almi_product", ""),
+                            almi_version=values.get("almi_version", ""), status=values.get("status", "В работе"),
+                            cert_date=values.get("cert_date"), nda=values.get("nda", False),
+                            agreement=values.get("agreement", False), bitrix=values.get("bitrix", ""),
+                            website=values.get("website", ""), comment=values.get("comment", ""),
+                            type=values.get("type", "ПО"), last_modified=values.get("last_modified"))
+            db.add(p)
+            db.flush()
+            created += 1
+            audit.record(db, actor, service_key=SERVICE, entity_type="partnership", entity_id=p.id, action="create",
+                         summary=f"Добавлено партнёрство: {p.partner} (загрузка реестра)", after=_snapshot(p),
+                         request=request)
+        elif item["action"] == "update":
+            p = db.get(Partnership, item["id"])
+            before = _snapshot(p)
+            for key, value in values.items():
+                setattr(p, key, value)
+            b, a = audit.diff(before, _snapshot(p))
+            updated += 1
+            audit.record(db, actor, service_key=SERVICE, entity_type="partnership", entity_id=p.id, action="update",
+                         summary=f"Изменено партнёрство: {p.partner} (загрузка реестра)", before=b, after=a,
+                         request=request)
+    summary = plan["summary"]
+    db.add(DataImport(service_key=SERVICE, dataset="partnerships", filename=(filename or "")[:300], mode="merge",
+                      rows_total=summary["rows"], rows_created=created, rows_updated=updated,
+                      rows_skipped=summary["unchanged"], user_id=actor.id if actor else None,
+                      username=actor.username if actor else "system"))
+    audit.record(db, actor, service_key=SERVICE, entity_type="partnership", action="import",
+                 summary=f"Загружен реестр партнёрств «{filename}»: новых {created}, изменено {updated}",
+                 after=summary, request=request)
+    db.flush()
+    return {**plan, "applied": True, "created": created, "updated": updated,
+            "message": f"Новых записей: {created}, изменено: {updated}"}, True
