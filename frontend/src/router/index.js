@@ -3,11 +3,13 @@ import { useAuthStore } from '@/stores/auth'
 
 /**
  * meta: title — заголовок вкладки и хлебных крошек; service — служба страницы; level — минимальный
- * уровень доступа; admin — только администратор; public — без входа; guide — раздел руководства.
+ * уровень доступа; admin — только администратор; capability — полномочие администрирования
+ * (org.manage, users.manage); public — без входа; guide — раздел руководства.
  */
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true, title: 'Вход', bare: true } },
   { path: '/', name: 'home', component: () => import('@/views/HomeView.vue'), meta: { title: 'Обзор', guide: 'обзор' } },
+  { path: '/org', name: 'org', component: () => import('@/views/org/OrgView.vue'), meta: { title: 'Структура компании', guide: 'структура-компании' } },
 
   // Служба персонала
   { path: '/hr', name: 'hr-dashboard', component: () => import('@/views/hr/HrDashboard.vue'), meta: { service: 'hr', title: 'Дашборд', guide: 'дашборд-службы-персонала' } },
@@ -35,8 +37,11 @@ const routes = [
   { path: '/settings/partnership-lights', name: 'partnership-lights', component: () => import('@/views/settings/PartnershipLightSettings.vue'), meta: { service: 'project_product', title: 'Светофор партнёрств', guide: 'настройка-светофора' } },
 
   // Администрирование
-  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { admin: true, title: 'Пользователи' } },
-  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { admin: true, title: 'Подразделения' } },
+  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { capability: 'users.manage', title: 'Пользователи' } },
+  { path: '/admin/access-profiles', name: 'admin-access-profiles', component: () => import('@/views/admin/AccessProfiles.vue'), meta: { capability: 'users.manage', title: 'Профили доступа' } },
+  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { capability: 'org.manage', title: 'Подразделения' } },
+  { path: '/admin/org-transfer', name: 'admin-org-transfer', component: () => import('@/views/admin/OrgTransfer.vue'), meta: { capability: 'org.manage', title: 'Импорт и экспорт' } },
+  { path: '/admin/integrations', name: 'admin-integrations', component: () => import('@/views/admin/AdminIntegrations.vue'), meta: { admin: true, title: 'Вход по домену' } },
   { path: '/admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { admin: true, title: 'Журнал изменений' } },
   { path: '/admin/palettes', name: 'admin-palettes', component: () => import('@/views/admin/AdminPalettes.vue'), meta: { admin: true, title: 'Палитры' } },
   { path: '/admin/system', name: 'admin-system', component: () => import('@/views/admin/AdminSystem.vue'), meta: { admin: true, title: 'О системе' } },
@@ -60,6 +65,7 @@ const routes = [
   { path: '/tp/traffic-light', redirect: '/settings/traffic-light/tech' },
   { path: '/product/traffic-light', redirect: '/settings/partnership-lights' },
   { path: '/users', redirect: '/admin/users' },
+  { path: '/structure', redirect: '/org' },
   { path: '/audit', redirect: '/admin/audit' },
   { path: '/palette', redirect: '/admin/palettes' },
 
@@ -90,6 +96,7 @@ router.beforeEach(async (to) => {
   if (!auth.isLoggedIn) return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
   if (auth.mustChangePassword && !to.meta.allowPasswordChange) return { name: 'profile', query: { password: 'required' } }
   if (to.meta.admin && !auth.isAdmin) return { name: 'no-access' }
+  if (to.meta.capability && !auth.hasCapability(to.meta.capability)) return { name: 'no-access' }
   const service = routeService(to)
   if (service && !auth.can(service, to.meta.level || 'viewer')) return { name: 'no-access', query: { service } }
   return true

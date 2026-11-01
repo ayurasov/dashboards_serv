@@ -26,6 +26,7 @@ const groups = computed(() => app.dashboards
   })))
 
 const helpItems = computed(() => HELP_NAV.filter((i) => !i.admin || auth.isAdmin))
+const adminItems = computed(() => ADMIN_NAV.filter((i) => (i.admin ? auth.isAdmin : auth.hasCapability(i.capability))))
 
 function isActive(item) {
   return item.exact ? route.path === item.to : route.path === item.to || route.path.startsWith(`${item.to}/`)
@@ -66,6 +67,9 @@ async function logout() {
       <router-link to="/" class="item" :class="{ active: route.path === '/' }" title="Обзор">
         <AppIcon name="home" :size="17" /><span class="label">Обзор</span>
       </router-link>
+      <router-link to="/org" class="item" :class="{ active: route.path === '/org' }" title="Структура компании">
+        <AppIcon name="org" :size="17" /><span class="label">Структура компании</span>
+      </router-link>
 
       <div class="section-label">Службы</div>
       <div v-for="g in groups" :key="g.key" class="group" :class="{ current: groupActive(g) }">
@@ -83,9 +87,9 @@ async function logout() {
       </div>
       <p v-if="!groups.length && !app.sidebarCollapsed" class="empty">Нет доступных служб. Обратитесь к администратору.</p>
 
-      <template v-if="auth.isAdmin">
+      <template v-if="adminItems.length">
         <div class="section-label">Администрирование</div>
-        <router-link v-for="item in ADMIN_NAV" :key="item.to" :to="item.to" class="item" :class="{ active: isActive(item) }" :title="item.label">
+        <router-link v-for="item in adminItems" :key="item.to" :to="item.to" class="item" :class="{ active: isActive(item) }" :title="item.label">
           <AppIcon :name="item.icon" :size="17" /><span class="label">{{ item.label }}</span>
         </router-link>
       </template>

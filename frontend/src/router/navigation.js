@@ -29,12 +29,16 @@ export const SERVICE_NAV = {
   ],
 }
 
+/** Пункты администрирования: admin — только администратор, capability — полномочие (или администратор). */
 export const ADMIN_NAV = [
-  { to: '/admin/users', label: 'Пользователи', icon: 'users' },
-  { to: '/admin/departments', label: 'Подразделения', icon: 'building' },
-  { to: '/admin/audit', label: 'Журнал изменений', icon: 'history' },
-  { to: '/admin/palettes', label: 'Палитры', icon: 'palette' },
-  { to: '/admin/system', label: 'О системе', icon: 'server' },
+  { to: '/admin/users', label: 'Пользователи', icon: 'users', capability: 'users.manage' },
+  { to: '/admin/access-profiles', label: 'Профили доступа', icon: 'shield', capability: 'users.manage' },
+  { to: '/admin/departments', label: 'Подразделения', icon: 'building', capability: 'org.manage' },
+  { to: '/admin/org-transfer', label: 'Импорт и экспорт', icon: 'upload', capability: 'org.manage' },
+  { to: '/admin/integrations', label: 'Вход по домену', icon: 'key', admin: true },
+  { to: '/admin/audit', label: 'Журнал изменений', icon: 'history', admin: true },
+  { to: '/admin/palettes', label: 'Палитры', icon: 'palette', admin: true },
+  { to: '/admin/system', label: 'О системе', icon: 'server', admin: true },
 ]
 
 export const HELP_NAV = [

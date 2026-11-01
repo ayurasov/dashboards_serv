@@ -57,6 +57,10 @@ export const useAuthStore = defineStore('auth', {
       const level = this.level(serviceKey)
       return !!level && LEVEL_RANK[level] >= LEVEL_RANK[minimum]
     },
+    /** Полномочие администрирования (org.manage, users.manage); администратору доступны все. */
+    hasCapability(capability) {
+      return this.isAdmin || !!this.user?.capabilities?.includes(capability)
+    },
     departmentScoped(serviceKey = 'hr') {
       return !this.isAdmin && !!this.user?.access?.find((a) => a.service_key === serviceKey && a.department_scope)
     },
