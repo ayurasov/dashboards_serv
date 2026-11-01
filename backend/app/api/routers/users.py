@@ -83,7 +83,7 @@ def create_user(body: UserCreateIn, request: Request, db: Session = Depends(get_
     _check_email(db, email)
     temporary = None
     if body.password:
-        validate_password(body.password)
+        validate_password(body.password, field="password")
         password = body.password
     else:
         password = temporary = generate_password()

@@ -27,12 +27,34 @@ async def read_upload(file: UploadFile) -> bytes:
     return raw
 
 
+_TRANSLIT = dict(zip(
+    "абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+    ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
+     "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya"], strict=True))
+
+
+def ascii_filename(name: str) -> str:
+    """Имя файла латиницей — для старых клиентов, которые не понимают filename* (RFC 5987)."""
+    out = []
+    for ch in name:
+        low = ch.lower()
+        if low in _TRANSLIT:
+            t = _TRANSLIT[low]
+            out.append(t.capitalize() if ch != low else t)
+        elif ch.isascii() and (ch.isalnum() or ch in "._-"):
+            out.append(ch)
+        else:
+            out.append("-" if ch.isspace() else "")
+    text = "-".join(part for part in "".join(out).split("-") if part)
+    return text.replace("-.", ".")
+
+
 def file_response(content: bytes, filename: str) -> Response:
     """Ответ-файл. Имя — по-русски с датой; заголовок по RFC 5987 для любых браузеров."""
     ext = filename.rsplit(".", 1)[-1].lower()
     stem = filename.rsplit(".", 1)[0]
     full = f"{stem} {date.today().isoformat()}.{ext}"
-    ascii_name = full.encode("ascii", "ignore").decode() or f"report.{ext}"
+    ascii_name = ascii_filename(full) or f"report.{ext}"
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(full)}"
     return Response(content=content, media_type=MIME.get(ext, "application/octet-stream"),
                     headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})

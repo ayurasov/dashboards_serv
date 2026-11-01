@@ -7,10 +7,12 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable
+from contextvars import ContextVar
 from datetime import date, datetime
 
 from fastapi.encoders import jsonable_encoder
@@ -21,6 +23,10 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..core.db import utcnow
 from ..models import DataRevision
+
+# Клиент принимает gzip — выставляется middleware для каждого запроса
+accepts_gzip: ContextVar[bool] = ContextVar("accepts_gzip", default=False)
+GZIP_MIN_SIZE = 2048
 
 
 def bump(db: Session, service_key: str) -> None:
@@ -62,7 +68,7 @@ class ResponseCache:
                 self.misses += 1
             return body
 
-    def put(self, key, body: bytes) -> None:
+    def put(self, key, body) -> None:
         with self._lock:
             self._data[key] = body
             self._data.move_to_end(key)
@@ -81,13 +87,30 @@ def serialize(data) -> bytes:
     return json.dumps(jsonable_encoder(data), ensure_ascii=False, separators=(",", ":"), default=_default).encode()
 
 
+class _Entry:
+    """Тело ответа и (для крупных) его gzip-версия — сжимается один раз, а не на каждый запрос."""
+
+    __slots__ = ("body", "gz")
+
+    def __init__(self, body: bytes):
+        self.body = body
+        self.gz = gzip.compress(body, compresslevel=6) if len(body) >= GZIP_MIN_SIZE else None
+
+
+def _response(entry: _Entry) -> Response:
+    if entry.gz is not None and accepts_gzip.get():
+        return Response(entry.gz, media_type="application/json",
+                        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+    return Response(entry.body, media_type="application/json")
+
+
 def cached_json(db: Session, services: Iterable[str], key: Hashable, compute: Callable[[], object]) -> Response:
     """Ответ из кэша, если данные служб не менялись; иначе вычисляет, сериализует и запоминает."""
     if not settings.response_cache:
         return Response(serialize(compute()), media_type="application/json")
     full_key = (key, revisions(db, services))
-    body = cache.get(full_key)
-    if body is None:
-        body = serialize(compute())
-        cache.put(full_key, body)
-    return Response(body, media_type="application/json")
+    entry = cache.get(full_key)
+    if entry is None:
+        entry = _Entry(serialize(compute()))
+        cache.put(full_key, entry)
+    return _response(entry)

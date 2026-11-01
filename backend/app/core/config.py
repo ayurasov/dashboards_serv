@@ -28,7 +28,20 @@ class Settings(BaseSettings):
     # PostgreSQL (рекомендуется): postgresql+psycopg://user:pass@host:5432/db
     # SQLite (разработка, небольшие установки): sqlite:///./dashboards.db
     database_url: str = "sqlite:///./dashboards.db"
-    db_pool_size: int = Field(default=10, ge=1, le=100)
+    # Соединений на процесс: постоянных и дополнительных при пике. Сумма по всем процессам
+    # WEB_CONCURRENCY × (DB_POOL_SIZE + DB_MAX_OVERFLOW) должна быть меньше max_connections
+    # PostgreSQL (по умолчанию 100) с запасом; при нехватке запрос ждёт до DB_POOL_TIMEOUT.
+    db_pool_size: int = Field(default=5, ge=1, le=100)
+    db_max_overflow: int = Field(default=4, ge=0, le=100)
+    db_pool_timeout: int = Field(default=30, ge=1, le=300)
+    # Запросов к базе одновременно в процессе (0 — по числу соединений DB_POOL_SIZE + DB_MAX_OVERFLOW).
+    # Остальные ждут очереди без потока и соединения; дольше DB_QUEUE_TIMEOUT — ответ 503.
+    db_concurrency: int = Field(default=0, ge=0, le=200)
+    db_queue_timeout: int = Field(default=30, ge=1, le=300)
+    # Потоков для обработчиков в процессе (0 — по числу соединений с базой плюс 8)
+    threadpool_size: int = Field(default=0, ge=0, le=200)
+    # Одновременных PDF-отчётов в процессе (построение графиков нагружает процессор)
+    pdf_concurrency: int = Field(default=2, ge=1, le=16)
     db_echo: bool = False
 
     secret_key: str = PLACEHOLDER_SECRET

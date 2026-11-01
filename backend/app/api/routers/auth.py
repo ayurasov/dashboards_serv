@@ -40,17 +40,17 @@ def _clear_cookies(response: Response) -> None:
     response.delete_cookie(settings.csrf_cookie_name, path="/")
 
 
-def validate_password(password: str, user: User | None = None) -> None:
+def validate_password(password: str, user: User | None = None, field: str = "new_password") -> None:
     if len(password) < settings.password_min_length:
         raise ValidationFailed(f"Пароль должен быть не короче {settings.password_min_length} символов",
-                               fields={"new_password": "Слишком короткий пароль"})
+                               fields={field: "Слишком короткий пароль"})
     if len(password.encode("utf-8")) > 72:
-        raise ValidationFailed("Пароль слишком длинный", fields={"new_password": "Не больше 72 байт"})
+        raise ValidationFailed("Пароль слишком длинный", fields={field: "Не больше 72 байт"})
     if password.isdigit() or password.isalpha():
         raise ValidationFailed("Пароль должен содержать и буквы, и цифры или другие символы",
-                               fields={"new_password": "Добавьте цифры или символы"})
+                               fields={field: "Добавьте цифры или символы"})
     if user and password.lower() in (user.username.lower(), (user.email or "").lower()):
-        raise ValidationFailed("Пароль не должен совпадать с логином", fields={"new_password": "Совпадает с логином"})
+        raise ValidationFailed("Пароль не должен совпадать с логином", fields={field: "Совпадает с логином"})
 
 
 @router.post("/login", response_model=MeOut, summary="Вход по логину и паролю")
@@ -60,6 +60,8 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     if wait := login_limiter.blocked_for(limiter_key):
         raise TooManyRequests(f"Слишком много неудачных попыток. Повторите через {wait} с")
     user = db.scalar(select(User).where(func.lower(User.username) == body.username.lower()))
+    # Проверка bcrypt занимает ~0,3 с процессора: соединение с базой на это время возвращается в пул
+    db.commit()
     if user is None:
         burn_password_check()
     if user is None or not verify_password(body.password, user.password_hash):

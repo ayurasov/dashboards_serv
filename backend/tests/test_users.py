@@ -122,3 +122,9 @@ def test_departments_crud(admin):
     assert admin.put(f"/api/departments/{dept_id}", json={"name": "Отдел контроля качества", "code": "QC"}).json()[
         "name"] == "Отдел контроля качества"
     assert admin.delete(f"/api/departments/{dept_id}").status_code == 200
+
+
+def test_weak_password_error_points_to_password_field(admin):
+    response = admin.post("/api/users", json={"username": "weak", "full_name": "Слабый пароль", "password": "short"})
+    assert response.status_code == 422
+    assert "password" in response.json()["fields"]

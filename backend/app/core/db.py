@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+import weakref
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -39,8 +41,8 @@ def make_engine(url: str | None = None, **kwargs) -> Engine:
     if url.startswith("sqlite"):
         options["connect_args"] = {"check_same_thread": False}
     else:
-        options.update(pool_size=settings.db_pool_size, max_overflow=settings.db_pool_size,
-                       pool_pre_ping=True, pool_recycle=1800)
+        options.update(pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow,
+                       pool_timeout=settings.db_pool_timeout, pool_pre_ping=True, pool_recycle=1800)
     options.update(kwargs)
     engine = create_engine(url, **options)
     if url.startswith("sqlite"):
@@ -72,16 +74,60 @@ engine = make_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-def get_db() -> Iterator[Session]:
-    """Зависимость FastAPI: сессия на запрос; незакоммиченное откатывается."""
-    db = SessionLocal()
+def db_concurrency() -> int:
+    return settings.db_concurrency or settings.db_pool_size + settings.db_max_overflow
+
+
+# Очередь запросов к базе — своя для каждого цикла событий (в тестах их несколько).
+_admission: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+_cleanup_limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, object] = weakref.WeakKeyDictionary()
+
+
+def _admission_slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _admission.get(loop)
+    if slots is None:
+        slots = _admission[loop] = asyncio.Semaphore(db_concurrency())
+    return slots
+
+
+def _cleanup():
+    """Отдельный небольшой пул потоков для закрытия сессий: закрытие не ждёт общий пул потоков."""
+    import anyio
+
+    loop = asyncio.get_running_loop()
+    limiter = _cleanup_limiters.get(loop)
+    if limiter is None:
+        limiter = _cleanup_limiters[loop] = anyio.CapacityLimiter(8)
+    return limiter
+
+
+async def get_db() -> AsyncIterator[Session]:
+    """Зависимость FastAPI: сессия на запрос; незакоммиченное откатывается при закрытии.
+
+    Запрос получает сессию, только когда в процессе меньше db_concurrency() запросов, работающих
+    с базой. Без этой очереди под нагрузкой возникала взаимная блокировка: запросы занимали все
+    потоки, ожидая соединение, а запросы с соединением ждали поток — FastAPI выполняет в пуле
+    потоков не только обработчик, но и сериализацию ответа, и соединение всё это время занято.
+    Число таких запросов не больше числа соединений, поэтому ни соединений, ни потоков им хватает.
+    """
+    import anyio
+
+    from .errors import Overloaded
+
+    slots = _admission_slots()
     try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
+        await asyncio.wait_for(slots.acquire(), settings.db_queue_timeout)
+    except TimeoutError:
+        raise Overloaded("Сервер перегружен, повторите запрос через несколько секунд") from None
+    try:
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            await anyio.to_thread.run_sync(db.close, limiter=_cleanup())
     finally:
-        db.close()
+        slots.release()
 
 
 @contextmanager

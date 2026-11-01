@@ -197,3 +197,90 @@ def test_revision_bumps_only_for_changed_service(admin, db):
     db.expire_all()
     after = {k: rev for k, rev, _ts in revisions(db, ["hr", "tech"])}
     assert after["tech"] == before["tech"] + 1 and after["hr"] == before["hr"]
+
+
+def test_cached_responses_are_gzipped_once(login):
+    from app.services.cache import cache
+
+    cache.clear()
+    c = login("viewer")
+    r1 = c.get("/api/tp/reports", headers={"Accept-Encoding": "gzip"})
+    r2 = c.get("/api/tp/reports", headers={"Accept-Encoding": "gzip"})
+    assert r1.headers["content-encoding"] == r2.headers["content-encoding"] == "gzip"
+    assert r1.json() == r2.json() and len(r1.json()) == 109
+    plain = c.get("/api/tp/reports", headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in plain.headers and plain.json() == r1.json()
+
+
+def test_ascii_filename_is_transliterated():
+    from app.api.uploads import ascii_filename
+
+    assert ascii_filename("Реестр партнёрств 2026-11-01.xlsx") == "Reestr-partnerstv-2026-11-01.xlsx"
+    assert ascii_filename("Недельный отчёт ТП 2026-11-01.pdf") == "Nedelnyy-otchet-TP-2026-11-01.pdf"
+
+
+def test_export_has_readable_ascii_fallback(login):
+    client = login("admin", "admin123")
+    response = client.get("/api/partnerships/export.xlsx")
+    assert response.status_code == 200, response.text
+    disposition = response.headers["content-disposition"]
+    assert 'filename="' in disposition and "filename*=UTF-8''" in disposition
+    ascii_part = disposition.split('filename="')[1].split('"')[0]
+    assert ascii_part.endswith(".xlsx") and any(ch.isalpha() for ch in ascii_part)
+
+
+def test_db_queue_bounds_concurrent_requests(monkeypatch):
+    """Запросов с сессией базы в процессе не больше db_concurrency(); дольше очереди — 503."""
+    import asyncio
+
+    from app.core import db as db_module
+    from app.core.errors import Overloaded
+
+    monkeypatch.setattr(db_module.settings, "db_concurrency", 2)
+    monkeypatch.setattr(db_module.settings, "db_queue_timeout", 1)
+
+    async def scenario():
+        active = 0
+        peak = 0
+
+        async def request(hold: float):
+            nonlocal active, peak
+            gen = db_module.get_db()
+            await gen.__anext__()
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(hold)
+            active -= 1
+            await gen.aclose()
+
+        await asyncio.gather(*(request(0.05) for _ in range(6)))
+        assert peak == 2
+
+        holders = [db_module.get_db() for _ in range(2)]
+        for gen in holders:
+            await gen.__anext__()
+        try:
+            with pytest.raises(Overloaded):
+                await db_module.get_db().__anext__()
+        finally:
+            for gen in holders:
+                await gen.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_overloaded_error_has_retry_after(app, client):
+    from app.api.deps import auth_context
+    from app.core.errors import Overloaded
+
+    def boom():
+        raise Overloaded("Сервер перегружен")
+
+    app.dependency_overrides[auth_context] = boom
+    try:
+        response = client.get("/api/auth/me")
+    finally:
+        app.dependency_overrides.pop(auth_context, None)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["code"] == "overloaded"

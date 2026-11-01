@@ -47,6 +47,13 @@ class Conflict(AppError):
     code = "conflict"
 
 
+class Overloaded(AppError):
+    """Сервер не успел принять запрос в работу: очередь к базе данных переполнена."""
+
+    status_code = 503
+    code = "overloaded"
+
+
 class ValidationFailed(AppError):
     status_code = 422
     code = "validation_error"
@@ -66,6 +73,10 @@ VALIDATION_MESSAGES = {
     "missing": "Обязательное поле",
     "string_too_short": "Слишком короткое значение",
     "string_too_long": "Слишком длинное значение",
+    "string_pattern_mismatch": "Недопустимый формат значения",
+    "string_type": "Нужна строка",
+    "too_short": "Слишком мало значений",
+    "too_long": "Слишком много значений",
     "value_error": "Недопустимое значение",
     "int_parsing": "Нужно целое число",
     "float_parsing": "Нужно число",
@@ -90,7 +101,8 @@ def _body(detail: str, code: str, fields: dict | None = None) -> dict:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_request: Request, exc: AppError):
-        return JSONResponse(_body(exc.detail, exc.code, exc.fields), status_code=exc.status_code)
+        headers = {"Retry-After": "5"} if exc.status_code == 503 else None
+        return JSONResponse(_body(exc.detail, exc.code, exc.fields), status_code=exc.status_code, headers=headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_request: Request, exc: StarletteHTTPException):

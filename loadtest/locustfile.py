@@ -16,8 +16,10 @@ import random
 
 from locust import HttpUser, between, events, task
 
-USERS = [("admin", "admin123"), ("hr_head", "hr123456"), ("tp_lead", "tp123456"), ("product", "pp123456"),
-         ("viewer", "view1234")]
+# логин, пароль, службы с доступом (как у демо-пользователей)
+ALL = {"hr", "tech", "project_product"}
+USERS = [("admin", "admin123", ALL), ("hr_head", "hr123456", ALL), ("viewer", "view1234", ALL),
+         ("tp_lead", "tp123456", {"tech"}), ("product", "pp123456", {"project_product"})]
 MONTHS = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"]
 
 
@@ -25,7 +27,8 @@ class Employee(HttpUser):
     wait_time = between(5, 20)
 
     def on_start(self):
-        self.username, password = random.choice(USERS)
+        self.username, password, self.services = random.choice(USERS)
+        self.csrf = ""
         with self.client.post("/api/auth/login", json={"username": self.username, "password": password},
                               name="POST /api/auth/login", catch_response=True) as r:
             if r.status_code != 200:
@@ -37,6 +40,9 @@ class Employee(HttpUser):
         self.client.get("/api/palette/active", name="GET /api/palette/active")
 
     def page(self, *paths):
+        service = {"hr": "hr", "tp": "tech", "partnerships": "project_product"}.get(paths[0].split("?")[0].split("/")[2])
+        if service and service not in self.services:
+            return  # страницы чужих служб пользователь не открывает (у него их нет в меню)
         for path in paths:
             name = path.split("?")[0]
             self.client.get(path, name=f"GET {name}")
@@ -70,8 +76,8 @@ class Employee(HttpUser):
 
     @task(5)
     def naumen(self):
-        year = random.choice(["", "2024", "2025", "2026"])
-        self.page("/api/tp/naumen/filters", f"/api/tp/naumen/summary?year={year}")
+        query = random.choice(["", "?year=2024", "?year=2025", "?year=2026", "?months=12"])
+        self.page("/api/tp/naumen/filters", f"/api/tp/naumen/summary{query}")
 
     @task(2)
     def cross_analytics(self):
@@ -84,8 +90,8 @@ class Employee(HttpUser):
 
     @task(4)
     def partnerships_registry(self):
-        status = random.choice(["", "Завершено", "В работе"])
-        self.page(f"/api/partnerships?status={status}")
+        query = random.choice(["", "?status=Завершено", "?status=В работе", "?light=red"])
+        self.page(f"/api/partnerships{query}")
 
     @task(2)
     def partnerships_summary(self):
@@ -95,6 +101,9 @@ class Employee(HttpUser):
     @task(1)
     def pdf(self):
         report = random.choice(["hr/dashboard", "tp/dashboard?weeks=13", "partnerships/summary", "tp/naumen"])
+        service = {"hr": "hr", "tp": "tech", "partnerships": "project_product"}[report.split("/")[0]]
+        if service not in self.services:
+            return
         self.client.get(f"/api/pdf/{report}", name=f"GET /api/pdf/{report.split('?')[0]}")
 
     @task(1)

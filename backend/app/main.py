@@ -29,6 +29,7 @@ from .api.routers import (
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging
+from .services.cache import accepts_gzip
 
 log = logging.getLogger("app.http")
 
@@ -42,6 +43,10 @@ OPENAPI_TAGS = [
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from anyio import to_thread
+
+    to_thread.current_default_thread_limiter().total_tokens = (
+        settings.threadpool_size or settings.db_pool_size + settings.db_max_overflow + 8)
     if settings.migrate_on_start:
         from .cli import cmd_migrate
 
@@ -72,6 +77,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        accepts_gzip.set("gzip" in request.headers.get("accept-encoding", ""))
         started = time.perf_counter()
         response = await call_next(request)
         duration = round((time.perf_counter() - started) * 1000, 1)

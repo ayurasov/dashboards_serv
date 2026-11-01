@@ -18,8 +18,12 @@ LIGHT_TEXT = traffic_light.LIGHT_LABELS
 
 
 def _palette(db: Session) -> dict | None:
+    """Активная палитра. Вызывается последним обращением к базе: дальше отчёт только рисует,
+    поэтому соединение сразу возвращается в пул (построение графиков занимает процессор)."""
     p = db.scalar(select(ColorPalette).where(ColorPalette.is_active.is_(True)).limit(1))
-    return p.colors if p else None
+    colors = p.colors if p else None
+    db.commit()
+    return colors
 
 
 def _filters_line(parts: dict[str, str | None]) -> str:
@@ -82,11 +86,11 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
 def hr_summary(db: Session, period_type: str, scope: set[str] | None) -> bytes:
     periods = hr_service.period_summary(db, period_type, scope)
     names = {"month": "месяцам", "quarter": "кварталам", "half": "полугодиям", "year": "годам"}
+    defs = hr_service.definitions(db)
     rep = Report("Служба персонала — сводка", f"Сводка по {names.get(period_type, period_type)}", wide=True,
                  palette=_palette(db))
     if not periods:
         return rep.build()
-    defs = hr_service.definitions(db)
     header = ["Показатель", *[p["label"] for p in periods]]
     rows = [["Принято", *[fmt(p["hired"]) for p in periods]], ["Уволено", *[fmt(p["fired"]) for p in periods]],
             ["Прирост", *[fmt(p["net"]) for p in periods]]]
@@ -155,11 +159,11 @@ def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: in
                  week_to: int | None = None) -> bytes:
     rows = _tp_rows(db, year, weeks, week_from, week_to)
     period = f"{rows[0].period} — {rows[-1].period}" if rows else "нет данных"
+    rules = traffic_light.rules_for(db, "tech")
     rep = Report("Техническая поддержка — недельный отчёт", f"Период: {period} · недель: {len(rows)}", wide=True,
                  palette=_palette(db))
     if not rows:
         return rep.build()
-    rules = traffic_light.rules_for(db, "tech")
     last = rows[-1]
     kpis = []
     for key, rule in rules.items():
