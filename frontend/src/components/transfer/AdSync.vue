@@ -23,7 +23,7 @@ const plan = ref(null)
 const result = ref(null)
 const busy = ref('')
 const error = ref('')
-const CLI = 'python -m app.cli org-sync --ad --apply'
+const CLI = 'docker compose exec app python -m app.cli org-sync --ad --apply'
 
 async function run(apply) {
   busy.value = apply ? 'apply' : 'check'

@@ -278,3 +278,11 @@ test('статус и удаление: отключение с подтверж
   await expect(userRow(page)).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+test('«Нет доступа» называет недоступную службу (сотрудник открывает дашборд персонала)', async ({ page }) => {
+  await login(page, 'engineer')
+  await page.goto('/hr')
+  await expect(page.getByRole('heading', { name: 'Нет доступа' })).toBeVisible()
+  await expect(page.getByText('«Служба персонала»')).toBeVisible()
+  await expect(page.getByText('доступна только администратору')).toHaveCount(0)
+})

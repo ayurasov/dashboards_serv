@@ -28,6 +28,8 @@ COPY --from=frontend /build/frontend/dist frontend/dist/
 RUN sed -i 's/\r$//' backend/docker-entrypoint.sh && chmod 755 backend/docker-entrypoint.sh \
     && mkdir -p /data && chown -R app:app /data /app
 USER app
+# Рабочий каталог — сервер: «docker compose exec app python -m app.cli …» работает без -w
+WORKDIR /app/backend
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"

@@ -5,13 +5,18 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { CAPABILITIES } from '@/domain/access'
+import { accessApi } from '@/api/access'
+import { useAsync } from '@/composables/useAsync'
 
 /** Нет доступа: причина приходит из охраны маршрутов (reason, service, page, capability). */
 const route = useRoute()
 const app = useAppStore()
 const auth = useAuthStore()
 
-const service = computed(() => app.service(route.query.service)?.title || '')
+// /api/services отдаёт только доступные службы — название недоступной берём из справочника доступа
+const meta = useAsync(() => (route.query.service && !app.service(route.query.service) ? accessApi.meta() : null))
+const service = computed(() => app.service(route.query.service)?.title
+  || meta.data.value?.services?.find((s) => s.key === route.query.service)?.title || '')
 const page = computed(() => String(route.query.page || ''))
 const what = computed(() => (page.value ? `Раздел «${page.value}»` : 'Этот раздел'))
 const capability = computed(() => CAPABILITIES.find((c) => c.key === route.query.capability)?.label || '')
