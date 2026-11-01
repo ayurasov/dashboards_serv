@@ -33,8 +33,9 @@
 
 ### Производительность
 
-- кэш ответов аналитики (`RESPONSE_CACHE`, `RESPONSE_CACHE_SIZE`), пул соединений (`DB_POOL_SIZE`), процессы (`WEB_CONCURRENCY`), `GUNICORN_TIMEOUT`, `GUNICORN_MAX_REQUESTS`;
-- нагрузочная проверка 500 и 1000 пользователей: `docs/performance/load-test-0.1.0.md`.
+- кэш ответов аналитики (`RESPONSE_CACHE`, `RESPONSE_CACHE_SIZE`), пул соединений (`DB_POOL_SIZE` = 5, `DB_MAX_OVERFLOW` = 4), очередь к базе (`DB_CONCURRENCY`, `DB_QUEUE_TIMEOUT`), потоки (`THREADPOOL_SIZE`), PDF (`PDF_CONCURRENCY`), процессы (`WEB_CONCURRENCY`), `GUNICORN_TIMEOUT`, `GUNICORN_MAX_REQUESTS`;
+- при перегрузке — ответ 503 «Сервер перегружен» с `Retry-After`, а не зависание;
+- нагрузочная проверка: 1000 одновременных пользователей на 4 ядрах — p95 46 мс без ошибок сервера (`docs/performance/load-test-0.1.0.md`).
 
 ### Обслуживание
 

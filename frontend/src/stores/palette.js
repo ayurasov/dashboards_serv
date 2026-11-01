@@ -24,10 +24,13 @@ export function applyPalette(colors) {
   root.setProperty('--light-red', tl.red)
   root.setProperty('--light-gray', tl.neutral)
   const charts = c.charts?.length ? c.charts : FALLBACK.charts
-  charts.slice(0, 7).forEach((color, i) => root.setProperty(`--chart-${i + 1}`, color))
+  // Семь переменных заполняются всегда: короткая палитра повторяется по кругу
+  for (let i = 0; i < 7; i++) root.setProperty(`--chart-${i + 1}`, charts[i % charts.length])
   const brand = c.brand?.primary || FALLBACK.brand.primary
   root.setProperty('--brand', brand)
   root.setProperty('--brand-hover', shade(brand, -0.12))
+  root.setProperty('--brand-soft', `color-mix(in srgb, ${brand} 11%, transparent)`)
+  root.setProperty('--brand-muted', c.brand?.muted || FALLBACK.brand.muted)
 }
 
 export const usePaletteStore = defineStore('palette', {

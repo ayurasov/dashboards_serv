@@ -83,7 +83,9 @@ export async function request(method, path, { body, params, silent = false, raw 
       onPasswordChangeRequired()
       throw error
     }
-    if (!silent) toastError(error.message)
+    // Ошибки полей формы (422 с fields) форма показывает рядом с полями — без второго уведомления
+    const formErrors = response.status === 422 && method !== 'GET' && Object.keys(error.fields).length > 0
+    if (!silent && !formErrors) toastError(error.message)
     throw error
   }
   if (raw) return response
@@ -108,10 +110,12 @@ export async function download(path, params, fallback = 'file') {
   const a = document.createElement('a')
   a.href = url
   a.download = filenameFrom(response, fallback)
+  a.style.display = 'none'
   document.body.appendChild(a)
   a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  // Ссылка и адрес живут, пока браузер не начнёт загрузку: при мгновенном удалении
+  // часть браузеров сохраняет файл под именем «download»
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url) }, 1500)
 }
 
 export function upload(path, file, fields = {}) {
