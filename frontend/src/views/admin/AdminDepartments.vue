@@ -1,191 +1,289 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import AppModal from '@/components/ui/AppModal.vue'
-import PageHeader from '@/components/ui/PageHeader.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import UserAvatar from '@/components/admin/UserAvatar.vue'
-import { adminApi } from '@/api/services'
+import PageHeader from '@/components/ui/PageHeader.vue'
+import DepartmentDialog from '@/components/org/DepartmentDialog.vue'
+import DepartmentHeadsDialog from '@/components/org/DepartmentHeadsDialog.vue'
+import OrgIcon from '@/components/org/OrgIcon.vue'
+import OrgSettingsDialog from '@/components/org/OrgSettingsDialog.vue'
+import { orgApi } from '@/api/org'
 import { useAsync } from '@/composables/useAsync'
 import { confirm } from '@/composables/useConfirm'
 import { toastOk } from '@/composables/useToast'
-import { formFieldErrors } from '@/domain/admin'
 import { plural } from '@/utils/format'
+import {
+  LEVEL_FORMS, PEOPLE_FORMS, UNIT_FORMS, canAddChild, countText, deleteMessage, departmentRows, kindInfo,
+} from '@/domain/org'
 
-/** Подразделения: справочник для пользователей (ограничение «только свои подразделения» в службе персонала). */
-const { data, loading, reload } = useAsync(() => adminApi.departments())
-const users = useAsync(() => adminApi.users())
+/**
+ * Подразделения (ADR-0007): дерево с численностью и руководителями; добавление вложенного уровня,
+ * изменение (название, «входит в», тип, код, порядок), руководители с основным, удаление;
+ * «Типы уровней и вложенность». Ведут администратор и ведущие структуру (org.manage).
+ */
+const route = useRoute()
+const router = useRouter()
+const deps = useAsync(() => orgApi.departments())
+const tree = useAsync(() => orgApi.tree())
+const settings = useAsync(() => orgApi.settings())
 
-const members = computed(() => {
-  const map = {}
-  for (const u of users.data.value || []) {
-    for (const d of u.departments) (map[d.id] ||= []).push(u)
-  }
-  return map
-})
-const rows = computed(() => (data.value || []).map((d) => ({ ...d, users: members.value[d.id] || [] })))
-const withoutDepartment = computed(() => (users.data.value || []).filter((u) => !u.departments.length).length)
-const summary = computed(() => {
-  const n = rows.value.length
-  return `${n} ${plural(n, ['подразделение', 'подразделения', 'подразделений'])}`
-})
-const MAX_AVATARS = 4
+const departments = computed(() => deps.data.value || [])
+const people = computed(() => tree.data.value?.people || [])
+const kinds = computed(() => settings.data.value?.unit_kinds || tree.data.value?.settings?.unit_kinds || [])
+const maxDepth = computed(() => settings.data.value?.max_depth || tree.data.value?.settings?.max_depth || 15)
+const currentDepth = computed(() => departments.value.reduce((max, d) => Math.max(max, d.level || 1), 0))
+const unitsById = computed(() => new Map((tree.data.value?.units || []).map((u) => [u.id, u])))
+const kindOf = (value) => kindInfo(kinds.value, value)
+const unassigned = computed(() => people.value.filter((p) => p.is_active !== false && p.home_unit_id == null).length)
+const noHeads = computed(() => departments.value.filter((d) => !(d.heads || []).length).length)
 
-// ---------- форма ----------
-const editing = ref(null)
-const form = reactive({ name: '', code: '' })
-const saving = ref(false)
-const formError = ref('')
-const fieldErrors = ref({})
-
-function open(row = null) {
-  editing.value = row || {}
-  Object.assign(form, { name: row?.name || '', code: row?.code || '' })
-  formError.value = ''
-  fieldErrors.value = {}
+function reloadAll() {
+  return Promise.all([deps.reload(), tree.reload(), settings.reload()])
 }
-async function save() {
-  formError.value = ''
-  fieldErrors.value = {}
-  const body = { name: form.name.trim(), code: form.code.trim().toUpperCase() }
-  if (!body.name) fieldErrors.value.name = 'Укажите название'
-  if (!body.code) fieldErrors.value.code = 'Укажите код'
-  if (Object.keys(fieldErrors.value).length) return
-  saving.value = true
+
+// ---------------------------------------------------------------- дерево
+const collapsed = ref(new Set())
+const query = ref('')
+const rows = computed(() => departmentRows(departments.value, collapsed.value, query.value))
+const expandable = computed(() => departments.value.filter((d) => d.child_count))
+function toggle(id) {
+  const next = new Set(collapsed.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  collapsed.value = next
+}
+const expandAll = () => { collapsed.value = new Set() }
+const collapseAll = () => { collapsed.value = new Set(expandable.value.map((d) => d.id)) }
+function revealRow(id) {
+  const byId = new Map(departments.value.map((d) => [d.id, d]))
+  const next = new Set(collapsed.value)
+  for (let d = byId.get(byId.get(id)?.parent_id); d; d = byId.get(d.parent_id)) next.delete(d.id)
+  collapsed.value = next
+}
+
+const highlight = ref(null)
+let highlightTimer = null
+async function flashRow(id) {
+  revealRow(id)
+  await nextTick()
+  document.querySelector(`tr[data-department-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  highlight.value = id
+  clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => { highlight.value = null }, 1800)
+}
+
+// ---------------------------------------------------------------- диалоги
+const editing = ref(null)            // { department } | { parentId } — новое
+const heads = ref(null)
+const settingsOpen = ref(false)
+
+function openCreate(parentId = null) { editing.value = { department: null, parentId } }
+function openEdit(department) { editing.value = { department, parentId: null } }
+async function onSaved(saved) {
+  const isNew = !editing.value?.department
+  editing.value = null
+  toastOk(isNew ? `Подразделение «${saved.name}» добавлено` : 'Подразделение сохранено')
+  await reloadAll()
+  flashRow(saved.id)
+}
+async function onHeadsSaved(saved) {
+  heads.value = null
+  toastOk(`Руководители «${saved.name}» сохранены`)
+  await reloadAll()
+  flashRow(saved.id)
+}
+async function onSettingsSaved() {
+  settingsOpen.value = false
+  toastOk('Настройки структуры сохранены')
+  await reloadAll()
+}
+async function remove(department) {
+  if (department.child_count) return
+  const ok = await confirm({
+    title: `Удалить «${department.name}»?`, message: deleteMessage(department, people.value), confirmText: 'Удалить', danger: true,
+  })
+  if (!ok) return
   try {
-    if (editing.value.id) await adminApi.updateDepartment(editing.value.id, body)
-    else await adminApi.createDepartment(body)
-    toastOk(editing.value.id ? 'Подразделение изменено' : 'Подразделение добавлено')
-    editing.value = null
-    reload()
-    users.reload()
-  } catch (e) {
-    formError.value = e.message
-    fieldErrors.value = formFieldErrors(e.fields)
-    if (/^Название/.test(e.message)) fieldErrors.value.name ||= 'Уже используется'
-    if (/^Код/.test(e.message)) fieldErrors.value.code ||= 'Уже используется'
-  } finally {
-    saving.value = false
-  }
+    const result = await orgApi.deleteDepartment(department.id)
+    toastOk(result?.message || 'Подразделение удалено')
+    await reloadAll()
+  } catch {}
 }
-async function remove(row) {
-  const count = row.users.length
-  const message = count
-    ? `Подразделение указано у ${count} ${plural(count, ['пользователя', 'пользователей', 'пользователей'])} — у них оно будет снято. Ограничение «только свои подразделения» перестанет показывать его данные.`
-    : 'Пользователей в подразделении нет.'
-  if (!await confirm({ title: `Удалить «${row.name}»?`, message, confirmText: 'Удалить', danger: true })) return false
-  const result = await adminApi.deleteDepartment(row.id)
-  toastOk(result?.message || 'Подразделение удалено')
-  reload()
-  users.reload()
-  return true
-}
-async function removeEditing() {
-  const row = rows.value.find((r) => r.id === editing.value?.id)
-  if (row && await remove(row)) editing.value = null
-}
-function names(list) {
-  return list.map((u) => u.full_name).join('\n')
-}
+
+// Переход из оргсхемы («Изменить подразделение»): ?dep=ID открывает его
+watch(() => [route.query.dep, departments.value.length], ([dep]) => {
+  const id = Number(dep)
+  const department = id && departments.value.find((d) => d.id === id)
+  if (!department) return
+  router.replace({ query: { ...route.query, dep: undefined } })
+  flashRow(id)
+  openEdit(department)
+}, { immediate: true })
+
+const addTitle = (d) => (canAddChild(d, maxDepth.value)
+  ? `Добавить подразделение в «${d.name}»`
+  : `Достигнут предел вложенности (${maxDepth.value}) — увеличьте его в «Типы уровней и вложенность»`)
+const deleteTitle = (d) => (d.child_count ? 'Сначала перенесите или удалите вложенные подразделения' : `Удалить «${d.name}»`)
+const heads0 = (d) => [...(d.heads || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.full_name.localeCompare(b.full_name, 'ru'))
 </script>
 
 <template>
-  <div class="page narrow">
-    <PageHeader title="Подразделения" description="Справочник подразделений компании: привязка пользователей и ограничение доступа к данным службы персонала">
-      <button class="btn btn-primary" type="button" @click="open()"><AppIcon name="plus" :size="15" />Добавить подразделение</button>
+  <div class="page">
+    <PageHeader title="Подразделения" description="Дерево структуры: уровни, руководители и численность">
+      <button class="btn" type="button" :disabled="!settings.data.value" data-testid="org-settings-open" @click="settingsOpen = true">
+        <AppIcon name="settings" :size="15" />Типы уровней и вложенность
+      </button>
+      <button class="btn btn-primary" type="button" :disabled="!deps.data.value" data-testid="department-add" @click="openCreate()">
+        <AppIcon name="plus" :size="15" />Добавить подразделение
+      </button>
     </PageHeader>
 
+    <p v-if="deps.data.value" class="summary">
+      <span><b>{{ countText(departments.length, UNIT_FORMS) }}</b></span>
+      <span>вложенность <b>{{ currentDepth }}</b> из {{ maxDepth }} {{ plural(maxDepth, LEVEL_FORMS) }}</span>
+      <span v-if="noHeads" class="warn-text">без руководителя: {{ noHeads }}</span>
+      <router-link v-if="unassigned" :to="{ path: '/org', query: { view: 'tree' } }">{{ countText(unassigned, PEOPLE_FORMS) }} без подразделения</router-link>
+      <router-link to="/org"><OrgIcon name="org" :size="13" />Оргсхема</router-link>
+      <router-link to="/admin/org-transfer"><OrgIcon name="upload" :size="13" />Импорт и экспорт</router-link>
+    </p>
+
     <section class="card">
-      <header class="card-head">
-        <h3>Все подразделения</h3>
-        <span class="hint">{{ data ? summary : '' }}<template v-if="users.data.value && withoutDepartment"> · без подразделения: {{ withoutDepartment }} {{ plural(withoutDepartment, ['пользователь', 'пользователя', 'пользователей']) }}</template></span>
-      </header>
-      <div class="card-body table-wrap">
-        <table v-if="data && rows.length" class="table">
+      <div class="tools">
+        <label class="search">
+          <OrgIcon name="search" :size="14" />
+          <input v-model="query" type="search" placeholder="Название или код" aria-label="Поиск подразделения" />
+        </label>
+        <span class="spacer" />
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="!!query" @click="expandAll"><OrgIcon name="expand-all" :size="14" />Развернуть всё</button>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="!!query || !expandable.length" @click="collapseAll"><OrgIcon name="collapse-all" :size="14" />Свернуть всё</button>
+      </div>
+
+      <div class="table-wrap">
+        <table v-if="rows.length" class="table deps" role="treegrid" aria-label="Подразделения">
           <thead>
-            <tr><th>Название</th><th>Код</th><th>Пользователи</th><th class="actions-col" /></tr>
+            <tr><th>Подразделение</th><th class="num">Сотрудники</th><th>Руководители</th><th class="actions-col"><span class="sr-only">Действия</span></th></tr>
           </thead>
           <tbody>
-            <tr v-for="d in rows" :key="d.id" class="clickable" @click="open(d)">
-              <td class="name">{{ d.name }}</td>
-              <td><span class="code">{{ d.code }}</span></td>
-              <td>
-                <div v-if="d.users.length" class="members" :title="names(d.users)">
-                  <span class="stack-avatars">
-                    <UserAvatar v-for="u in d.users.slice(0, MAX_AVATARS)" :key="u.id" :name="u.full_name" :seed="u.username" :size="26" />
-                  </span>
-                  <span class="num count">{{ d.users.length }}</span>
-                  <span class="muted">{{ plural(d.users.length, ['пользователь', 'пользователя', 'пользователей']) }}</span>
+            <tr v-for="row in rows" :key="row.dep.id" :data-department-id="row.dep.id" :aria-level="row.depth + 1"
+                :aria-expanded="row.dep.child_count && !query ? !collapsed.has(row.dep.id) : undefined"
+                :class="{ flash: highlight === row.dep.id, dim: query && !row.match }" :style="{ '--depth': row.depth, '--kind': kindOf(row.dep.kind).color }">
+              <td class="name-cell">
+                <span class="guides" aria-hidden="true" />
+                <div class="name-line">
+                  <button v-if="row.dep.child_count && !query" type="button" class="chev" :class="{ open: !collapsed.has(row.dep.id) }"
+                          :aria-label="collapsed.has(row.dep.id) ? `Развернуть «${row.dep.name}»` : `Свернуть «${row.dep.name}»`" @click="toggle(row.dep.id)">
+                    <OrgIcon name="chevron-right" :size="14" :stroke="2.2" />
+                  </button>
+                  <span v-else class="chev-space" />
+                  <span class="dep-name">{{ row.dep.name }}</span>
+                  <span class="kind"><i />{{ kindOf(row.dep.kind).label }}</span>
+                  <span v-if="row.dep.code" class="code">{{ row.dep.code }}</span>
                 </div>
-                <span v-else-if="users.data.value" class="faint">Нет пользователей</span>
-                <span v-else class="skeleton count-skel" />
               </td>
-              <td class="actions-col" @click.stop>
-                <button class="btn btn-icon btn-sm btn-ghost" type="button" title="Изменить" @click="open(d)"><AppIcon name="edit" :size="14" /></button>
-                <button class="btn btn-icon btn-sm btn-ghost" type="button" title="Удалить" @click="remove(d)"><AppIcon name="trash" :size="14" /></button>
+              <td class="num staff" :title="row.dep.child_count ? 'Сотрудники подразделения (с руководителем) / вся ветка' : 'Сотрудники подразделения (с руководителем)'">
+                <b>{{ row.dep.employee_count }}</b><span v-if="row.dep.child_count" class="branch"> / {{ row.dep.branch_employee_count }} в ветке</span>
+              </td>
+              <td class="heads-cell">
+                <span v-for="h in heads0(row.dep)" :key="h.user_id" class="head-chip" :class="{ primary: h.is_primary && row.dep.heads.length > 1, off: !h.is_active }"
+                      :title="`${h.full_name}${h.position ? ` — ${h.position}` : ''}${h.is_primary ? ' · основной' : ''}${h.is_active ? '' : ' · отключён'}`">
+                  <OrgIcon v-if="h.is_primary && row.dep.heads.length > 1" name="star" :size="11" :stroke="2" />{{ h.full_name }}
+                </span>
+                <span v-if="!row.dep.heads.length" class="no-head" :title="row.dep.parent_id ? 'Сотрудники подчиняются руководителю вышестоящего подразделения' : ''">
+                  <OrgIcon name="alert" :size="12" />Руководитель не назначен
+                </span>
+              </td>
+              <td class="actions-col">
+                <button type="button" class="btn btn-ghost btn-icon btn-sm" :disabled="!canAddChild(row.dep, maxDepth)" :title="addTitle(row.dep)"
+                        :aria-label="`Добавить вложенное в «${row.dep.name}»`" @click="openCreate(row.dep.id)"><OrgIcon name="plus" :size="15" /></button>
+                <button type="button" class="btn btn-ghost btn-sm" :aria-label="`Руководители «${row.dep.name}»`" @click="heads = row.dep">
+                  <OrgIcon name="users" :size="14" /><span class="lbl">Руководители</span>
+                </button>
+                <button type="button" class="btn btn-ghost btn-icon btn-sm" title="Изменить" :aria-label="`Изменить «${row.dep.name}»`" @click="openEdit(row.dep)"><OrgIcon name="edit" :size="14" /></button>
+                <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger" :disabled="row.dep.child_count > 0" :title="deleteTitle(row.dep)"
+                        :aria-label="`Удалить «${row.dep.name}»`" @click="remove(row.dep)"><OrgIcon name="trash" :size="14" /></button>
               </td>
             </tr>
           </tbody>
         </table>
-        <div v-else-if="loading" class="skeleton-rows"><div v-for="i in 5" :key="i" class="skeleton" /></div>
-        <EmptyState v-else icon="building" title="Подразделений пока нет" text="Добавьте подразделения, чтобы привязывать к ним пользователей.">
-          <button class="btn btn-primary btn-sm" type="button" @click="open()">Добавить подразделение</button>
+        <div v-else-if="deps.loading.value && !deps.data.value" class="skeleton-rows"><div v-for="i in 6" :key="i" class="skeleton" /></div>
+        <EmptyState v-else-if="query" compact icon="search" title="Ничего не найдено" text="Измените запрос." />
+        <EmptyState v-else icon="building" title="Подразделений пока нет" text="Добавьте верхний уровень — компанию — и вкладывайте в него подразделения. Или загрузите структуру из файла.">
+          <button class="btn btn-primary btn-sm" type="button" @click="openCreate()">Добавить подразделение</button>
+          <router-link to="/admin/org-transfer" class="btn btn-sm">Загрузить из файла</router-link>
         </EmptyState>
       </div>
     </section>
 
-    <p class="note muted"><AppIcon name="info" :size="14" />Подразделения пользователя задаются в его карточке в разделе «Пользователи».</p>
+    <p class="note muted"><AppIcon name="info" :size="14" />Сотрудника в подразделение и явного руководителя назначают в карточке сотрудника на странице «Структура компании».</p>
 
-    <AppModal v-if="editing" :title="editing.id ? 'Подразделение' : 'Новое подразделение'" :subtitle="editing.id ? editing.name : ''" :width="480" @close="editing = null">
-      <form id="dept-form" class="stack" novalidate @submit.prevent="save">
-        <label class="field"><span>Название</span>
-          <input v-model="form.name" class="input" :class="{ invalid: fieldErrors.name }" maxlength="200" placeholder="Например, Финансовая служба" />
-          <span v-if="fieldErrors.name" class="error">{{ fieldErrors.name }}</span>
-        </label>
-        <label class="field"><span>Код</span>
-          <input v-model="form.code" class="input code-input" :class="{ invalid: fieldErrors.code }" maxlength="50" placeholder="FIN"
-                 @input="form.code = form.code.toUpperCase()" />
-          <span v-if="fieldErrors.code" class="error">{{ fieldErrors.code }}</span>
-          <span v-else class="help">Короткое обозначение латиницей; хранится заглавными буквами</span>
-        </label>
-        <p v-if="editing.id && members[editing.id]?.length" class="muted small">
-          Подразделение указано у {{ members[editing.id].length }} {{ plural(members[editing.id].length, ['пользователя', 'пользователей', 'пользователей']) }}.
-        </p>
-      </form>
-      <p v-if="formError" class="form-error"><AppIcon name="alert" :size="14" />{{ formError }}</p>
-      <template #footer>
-        <button v-if="editing.id" class="btn btn-ghost btn-danger" type="button" @click="removeEditing">
-          <AppIcon name="trash" :size="14" />Удалить
-        </button>
-        <span class="spacer" />
-        <button class="btn" type="button" @click="editing = null">Отмена</button>
-        <button class="btn btn-primary" type="submit" form="dept-form" :disabled="saving">{{ saving ? 'Сохранение…' : 'Сохранить' }}</button>
-      </template>
-    </AppModal>
+    <DepartmentDialog v-if="editing" :department="editing.department" :parent-id="editing.parentId" :departments="departments"
+                      :kinds="kinds" :max-depth="maxDepth" @close="editing = null" @saved="onSaved" />
+    <DepartmentHeadsDialog v-if="heads" :department="heads" :people="people" :units-by-id="unitsById" @close="heads = null" @saved="onHeadsSaved" />
+    <OrgSettingsDialog v-if="settingsOpen" :settings="settings.data.value" @close="settingsOpen = false" @saved="onSettingsSaved" />
   </div>
 </template>
 
 <style scoped>
-.narrow { max-width: 1100px; }
-.card-body.table-wrap { padding: 8px 0 4px; }
-.name { font-weight: 560; }
-.code { display: inline-block; padding: 1px 7px; border-radius: 6px; background: var(--surface-3); font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); letter-spacing: .03em; }
-.members { display: inline-flex; align-items: center; gap: 8px; }
-.stack-avatars { display: inline-flex; }
-.stack-avatars > * { margin-left: -7px; box-shadow: 0 0 0 2px var(--surface); }
-.stack-avatars > *:first-child { margin-left: 0; }
-.count { font-weight: 620; }
-.count-skel { display: inline-block; width: 90px; height: 18px; }
-.actions-col { width: 90px; text-align: right; white-space: nowrap; }
-.actions-col .btn { opacity: .6; }
-tr:hover .actions-col .btn { opacity: 1; }
-.skeleton-rows { display: flex; flex-direction: column; gap: 10px; padding: 8px 16px 16px; }
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin-top: -8px; font-size: var(--fs-sm); color: var(--muted); }
+.summary b { color: var(--text); font-weight: 650; }
+.summary a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); }
+.summary a:hover { text-decoration: underline; }
+.warn-text { color: color-mix(in srgb, var(--light-yellow) 75%, var(--text)); }
+.tools { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.search { display: flex; align-items: center; gap: 8px; height: 32px; width: 280px; max-width: 100%; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--muted); background: var(--surface); }
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+.search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--fs-sm); }
+.tools .btn-ghost { color: var(--text-2); }
+.table-wrap { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.deps th { background: var(--surface-2); }
+.deps td { padding-top: 8px; padding-bottom: 8px; }
+.deps tbody tr.flash { animation: row-flash 1.7s var(--ease); }
+@keyframes row-flash { 15%, 55% { background: color-mix(in srgb, var(--accent) 16%, transparent); } }
+.deps tbody tr.dim .dep-name { color: var(--muted); font-weight: 500; }
+.name-cell { position: relative; min-width: 320px; padding-left: calc(10px + var(--depth) * 24px) !important; }
+.name-line { display: flex; align-items: center; gap: 8px; }
+.guides { position: absolute; left: 10px; top: 0; bottom: 0; width: calc(var(--depth) * 24px); pointer-events: none;
+  background: repeating-linear-gradient(to right, transparent 0 11px, var(--border) 11px 12px, transparent 12px 24px); }
+.chev, .chev-space { width: 24px; height: 24px; flex: 0 0 24px; }
+.chev { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transition: transform var(--t-fast), background var(--t-fast); }
+.chev:hover { background: var(--surface-3); color: var(--text); }
+.chev.open { transform: rotate(90deg); }
+.dep-name { min-width: 0; font-weight: 620; overflow-wrap: anywhere; }
+.kind { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; height: 21px; padding: 0 8px; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--kind) 12%, transparent); color: color-mix(in srgb, var(--kind) 78%, var(--text)); font-size: var(--fs-xs); font-weight: 600; }
+.kind i { width: 6px; height: 6px; border-radius: 50%; background: var(--kind); }
+.code { flex: 0 0 auto; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }
+.staff { white-space: nowrap; }
+.staff b { font-weight: 650; }
+.branch { color: var(--muted); font-size: var(--fs-sm); }
+.heads-cell { min-width: 220px; }
+.head-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 280px; height: 24px; margin: 2px 4px 2px 0; padding: 0 9px; border-radius: var(--radius-pill);
+  background: var(--surface-3); color: var(--text); font-size: var(--fs-sm); font-weight: 520; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.head-chip.primary { background: color-mix(in srgb, var(--light-yellow) 15%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-yellow) 40%, transparent); }
+.head-chip.primary :deep(svg) { color: color-mix(in srgb, var(--light-yellow) 85%, var(--text)); }
+.head-chip.off { color: var(--muted); text-decoration: line-through; }
+.no-head { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--light-yellow) 13%, transparent); color: color-mix(in srgb, var(--light-yellow) 78%, var(--text)); font-size: var(--fs-xs); font-weight: 600; }
+.actions-col { width: 1%; white-space: nowrap; text-align: right; }
+.actions-col .btn { color: var(--text-2); }
+.actions-col .btn-danger { color: var(--light-red); }
+.deps tbody tr .actions-col .btn:not(:disabled) { opacity: .7; }
+.deps tbody tr:hover .actions-col .btn:not(:disabled), .deps tbody tr:focus-within .actions-col .btn:not(:disabled) { opacity: 1; }
+.skeleton-rows { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
 .skeleton-rows .skeleton { height: 40px; }
 .note { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); margin-top: -8px; }
-.code-input { font-family: var(--font-mono); letter-spacing: .04em; }
-.code-input::placeholder { font-family: var(--font-sans); letter-spacing: 0; }
-.help { font-size: var(--fs-xs); color: var(--muted); }
-.error { font-size: var(--fs-xs); color: var(--light-red); }
-.small { font-size: var(--fs-sm); }
-.form-error { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: var(--fs-sm); color: var(--light-red); }
+@media (max-width: 900px) {
+  .deps thead { display: none; }
+  .deps, .deps tbody, .deps tr, .deps td { display: block; }
+  .deps tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .deps td { border: 0; padding: 4px 12px !important; }
+  .name-cell { grid-column: 1 / -1; min-width: 0; padding-left: calc(8px + var(--depth) * 14px) !important; }
+  .guides { display: none; }
+  .staff { grid-column: 2; grid-row: 2; text-align: right; }
+  .heads-cell { grid-column: 1; grid-row: 2; min-width: 0; padding-left: calc(40px + var(--depth) * 14px) !important; }
+  .actions-col { grid-column: 1 / -1; width: auto; text-align: left; padding-left: calc(36px + var(--depth) * 14px) !important; }
+  .deps tbody tr .actions-col .btn:not(:disabled) { opacity: 1; }
+  .search { width: 100%; }
+}
 </style>
