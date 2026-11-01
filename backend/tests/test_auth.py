@@ -56,7 +56,7 @@ def test_logout_invalidates_session(admin):
 
 
 def test_disabled_user_cannot_login(admin, client):
-    user = next(u for u in admin.get("/api/users").json() if u["username"] == "viewer")
+    user = next(u for u in admin.get("/api/users").json()["items"] if u["username"] == "viewer")
     admin.patch(f"/api/users/{user['id']}", json={"is_active": False})
     response = client.post("/api/auth/login", json={"username": "viewer", "password": "view1234"})
     assert response.status_code == 403
@@ -139,3 +139,27 @@ def test_expired_session_is_rejected(admin, db):
         s.expires_at = s.expires_at - timedelta(days=30)
     db.commit()
     assert admin.get("/api/auth/me").status_code == 401
+
+
+def test_login_by_email_for_local_account(admin, client):
+    admin.put("/api/auth/profile", json={"email": "Boss@Example.com"})
+    response = client.post("/api/auth/login", json={"username": "boss@example.com", "password": "admin123"})
+    assert response.status_code == 200 and response.json()["username"] == "admin"
+
+
+def test_login_config_without_domain(client):
+    assert client.get("/api/auth/config").json() == {"ldap": {"enabled": False, "hint": ""}}
+
+
+def test_me_includes_access_and_account(admin):
+    me = admin.get("/api/auth/me").json()
+    assert me["effective_access"]["is_admin"] and me["effective_access"]["can_export"]
+    assert me["auth_source"] == "local" and me["has_password"] and me["status"] == "active"
+    assert me["capabilities"] == [] and me["department"] is None and me["profile"] is None
+    assert me["csrf_token"]
+
+
+def test_user_without_password_cannot_login(admin, client):
+    admin.post("/api/users", json={"username": "nopass", "full_name": "Без пароля", "access_method": "none"})
+    response = client.post("/api/auth/login", json={"username": "nopass", "password": "anything-1"})
+    assert response.status_code == 401 and response.json()["code"] == "invalid_credentials"

@@ -131,7 +131,7 @@ async function remove(row) {
     danger: true,
   })
   if (!ok) return
-  await tpApi.deleteReport(row.id)
+  try { await tpApi.deleteReport(row.id) } catch { return } // ошибку показал клиент API
   toastOk(`Неделя ${row.period} удалена`)
   editing.value = null
   reports.reload()
@@ -145,8 +145,10 @@ function onImported() {
 <template>
   <div class="page">
     <PageHeader title="Недельный отчёт" :description="description" :updatedAt="app.service('tech')?.data_updated_at">
-      <button class="btn" type="button" title="Все недели в формате исходного отчёта" @click="tpApi.exportXlsx()"><AppIcon name="sheet" :size="15" />Excel</button>
-      <button class="btn" type="button" title="Все недели, разделитель — точка с запятой" @click="tpApi.exportCsv()"><AppIcon name="file" :size="15" />CSV</button>
+      <template v-if="auth.canExport && auth.canRecords">
+        <button class="btn" type="button" title="Все недели в формате исходного отчёта" @click="tpApi.exportXlsx()"><AppIcon name="sheet" :size="15" />Excel</button>
+        <button class="btn" type="button" title="Все недели, разделитель — точка с запятой" @click="tpApi.exportCsv()"><AppIcon name="file" :size="15" />CSV</button>
+      </template>
       <PdfButton report="tp/dashboard" :params="{ year: f.year || undefined }" />
       <button v-if="canManage" class="btn" type="button" @click="importOpen = true"><AppIcon name="upload" :size="15" />Загрузить файл</button>
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="editing = { row: null }"><AppIcon name="plus" :size="15" />Добавить неделю</button>
@@ -221,7 +223,7 @@ function onImported() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" @click="openRow(r)">
+                  <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" :tabindex="canEdit ? 0 : undefined" @click="openRow(r)" @keydown.enter.self="openRow(r)">
                     <td class="sticky-col">
                       <div class="period">
                         <span class="period-code num">{{ r.period }}</span>
@@ -284,7 +286,7 @@ function onImported() {
 @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .toolbar { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border); }
-.toolbar-top { display: flex; align-items: center; gap: var(--sp-2); }
+.toolbar-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .toolbar-top h3 { font-size: var(--fs-md); font-weight: 620; }
 .toolbar-hint { font-size: var(--fs-sm); }
 .groups { gap: 6px; }

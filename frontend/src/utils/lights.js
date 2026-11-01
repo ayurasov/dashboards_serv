@@ -1,6 +1,13 @@
 /** Светофор: подписи, цвета и оценка значения по правилу (та же логика, что на сервере). */
 
 export const LIGHT_LABELS = { green: 'Норма', yellow: 'Внимание', red: 'Критично', gray: 'Нет оценки' }
+/** Показатель со включённым правилом не заполнен: светофор — «Нет данных», а пропуск — критичное нарушение. */
+export const MISSING_LABEL = 'Нет данных'
+export const MISSING_HINT = 'Показатель со светофором не заполнен — критичное нарушение полноты данных'
+
+export function lightLabel(light, missing = false) {
+  return missing ? MISSING_LABEL : LIGHT_LABELS[light || 'gray']
+}
 export const LIGHT_ORDER = { red: 0, yellow: 1, green: 2, gray: 3 }
 export const DIRECTION_LABELS = { lower_is_better: 'Меньше — лучше', higher_is_better: 'Больше — лучше', neutral: 'Без оценки' }
 

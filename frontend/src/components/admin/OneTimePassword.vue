@@ -44,7 +44,7 @@ async function copy(kind) {
 </script>
 
 <template>
-  <AppModal :title="title" :subtitle="user.full_name ? `${user.full_name} · ${user.username}` : user.username" :width="480" @close="emit('close')">
+  <AppModal :title="title" :subtitle="user.full_name ? `${user.full_name} · ${user.username}` : user.username" :width="'min(480px, calc(100vw - 48px))'" @close="emit('close')">
     <div class="secret">
       <code class="value" data-testid="temporary-password">{{ password }}</code>
       <button class="btn btn-sm" type="button" @click="copy('password')">

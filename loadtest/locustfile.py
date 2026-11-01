@@ -16,10 +16,12 @@ import random
 
 from locust import HttpUser, between, events, task
 
-# логин, пароль, службы с доступом (как у демо-пользователей)
+# логин, пароль, службы с доступом, право на исходные записи (как у демо-пользователей 0.2.0)
 ALL = {"hr", "tech", "project_product"}
-USERS = [("admin", "admin123", ALL), ("hr_head", "hr123456", ALL), ("viewer", "view1234", ALL),
-         ("tp_lead", "tp123456", {"tech"}), ("product", "pp123456", {"project_product"})]
+USERS = [("admin", "admin123", ALL, True), ("hr_head", "hr123456", ALL, True), ("viewer", "view1234", ALL, True),
+         ("tp_lead", "tp123456", {"tech"}, True), ("product", "pp123456", {"project_product"}, True),
+         # уровни сотрудников: высшее руководство (без исходных записей), руководитель направления, сотрудник
+         ("ceo", "ceo12345", ALL, False), ("tech_dir", "td123456", ALL, True), ("engineer", "en123456", set(), False)]
 MONTHS = ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"]
 
 
@@ -27,7 +29,7 @@ class Employee(HttpUser):
     wait_time = between(5, 20)
 
     def on_start(self):
-        self.username, password, self.services = random.choice(USERS)
+        self.username, password, self.services, self.records = random.choice(USERS)
         self.csrf = ""
         with self.client.post("/api/auth/login", json={"username": self.username, "password": password},
                               name="POST /api/auth/login", catch_response=True) as r:
@@ -59,6 +61,8 @@ class Employee(HttpUser):
 
     @task(4)
     def hr_registry(self):
+        if not self.records:
+            return  # реестров нет в меню у тех, кому они недоступны
         self.page("/api/hr/months", "/api/hr/departments", f"/api/hr/events?month={random.choice(MONTHS)}")
 
     @task(2)
@@ -90,12 +94,25 @@ class Employee(HttpUser):
 
     @task(4)
     def partnerships_registry(self):
+        if not self.records:
+            return
         query = random.choice(["", "?status=Завершено", "?status=В работе", "?light=red"])
         self.page(f"/api/partnerships{query}")
 
     @task(2)
     def partnerships_summary(self):
-        self.page("/api/partnerships/summary", "/api/partnerships/timeline")
+        self.page("/api/partnerships/summary")
+        if self.records:
+            self.page("/api/partnerships/timeline")
+
+    # --- структура компании (доступна всем)
+    @task(4)
+    def org_chart(self):
+        self.client.get("/api/org/tree", name="GET /api/org/tree")
+
+    @task(1)
+    def org_person(self):
+        self.client.get(f"/api/org/people/{random.randint(1, 9)}", name="GET /api/org/people/{id}")
 
     # --- редкие тяжёлые операции
     @task(1)

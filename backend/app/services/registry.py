@@ -46,6 +46,98 @@ ACCESS_LEVEL_LABELS = {
     "manager": "Управление",
 }
 ACCESS_LEVEL_RANK = {"viewer": 1, "editor": 2, "manager": 3}
+# Службы, у которых есть данные и дашборды (остальные — справочник на будущее)
+DATA_SERVICE_KEYS: tuple[str, ...] = tuple(s.key for s in SERVICES if s.has_dashboard)
+
+# ---------------------------------------------------------------- модель доступа 2.0 (ADR-0009)
+
+DATA_CLASSES: dict[str, str] = {
+    "operational": "Операционные",   # объёмы, сроки, статусы — доступны всем, у кого есть доступ к данным
+    "personal": "Персональные",      # ФИО, должности, причины увольнения в реестрах
+    "financial": "Финансовые",       # денежные показатели: выручка, затраты, ФОТ, бюджеты
+}
+DATA_CLASS_HINTS: dict[str, str] = {
+    "operational": "Объёмы, сроки, статусы, количество — доступны всегда",
+    "personal": "ФИО, должности, причины увольнения в реестрах",
+    "financial": "Денежные показатели: выручка, затраты, ФОТ, бюджеты",
+}
+ORG_SCOPE_LABELS: dict[str, str] = {
+    "company": "Вся компания",
+    "branch": "Своя ветка структуры",
+    "unit": "Своё подразделение",
+}
+MAX_DRILL_DEPTH = 9
+# Измерения, которые пользователь может переопределить поверх профиля (users.access_overrides)
+ACCESS_DIMENSIONS: tuple[str, ...] = ("org_scope", "data_classes", "drill_depth", "can_view_records", "can_export")
+
+
+@dataclass(frozen=True)
+class ProfileDef:
+    key: str
+    name: str
+    description: str
+    org_scope: str
+    data_classes: tuple[str, ...]
+    drill_depth: int | None
+    can_view_records: bool
+    can_export: bool
+    service_levels: tuple[tuple[str, str], ...]
+    sort_order: int
+
+
+_VIEW_ALL = tuple((key, "viewer") for key in DATA_SERVICE_KEYS)
+
+# Встроенные профили — уровни сотрудников. Создаются один раз; администратор может их изменить.
+ACCESS_PROFILES: tuple[ProfileDef, ...] = (
+    ProfileDef("executive", "Высшее руководство",
+               "Верхнеуровневая картина всей компании, все классы данных, без исходных записей. "
+               "Глубину детализации расширяйте лично.",
+               "company", ("operational", "personal", "financial"), 1, False, True, _VIEW_ALL, 10),
+    ProfileDef("director", "Руководитель направления",
+               "Своё направление до уровня отделов, все классы данных и исходные записи.",
+               "branch", ("operational", "personal", "financial"), 2, True, True, _VIEW_ALL, 20),
+    ProfileDef("head", "Руководитель подразделения",
+               "Своя ветка структуры целиком, без финансовых показателей.",
+               "branch", ("operational", "personal"), None, True, True, (), 30),
+    ProfileDef("specialist", "Специалист",
+               "Своё подразделение, операционные данные; доступ к службам выдаётся лично.",
+               "unit", ("operational",), None, True, True, (), 40),
+    ProfileDef("employee", "Сотрудник",
+               "Только просмотр статуса своего подразделения, без денежных показателей, детализации и выгрузок.",
+               "unit", ("operational",), 0, False, False, (), 50),
+)
+ACCESS_PROFILE_BY_KEY = {p.key: p for p in ACCESS_PROFILES}
+
+# Без профиля («индивидуальная настройка») — как в 0.1.0: ограничивают только уровни служб
+INDIVIDUAL_DEFAULTS: dict = {
+    "org_scope": "company", "data_classes": list(DATA_CLASSES), "drill_depth": None,
+    "can_view_records": True, "can_export": True,
+}
+
+# Полномочия администрирования без роли администратора (как в todo-planner)
+CAPABILITIES: dict[str, str] = {
+    "org.manage": "Структура компании: подразделения, руководители, загрузка и выгрузка",
+    "users.manage": "Пользователи и доступ (кроме администраторов)",
+}
+
+# ---------------------------------------------------------------- структура компании (ADR-0007)
+
+ORG_UNIT_KINDS: tuple[dict, ...] = (
+    {"value": "company", "label": "Компания", "color": "#7c3aed"},
+    {"value": "division", "label": "Дирекция", "color": "#0369a1"},
+    {"value": "direction", "label": "Направление", "color": "#0f766e"},
+    {"value": "service", "label": "Служба", "color": "#b45309"},
+    {"value": "department", "label": "Отдел", "color": "#4f7cff"},
+    {"value": "sector", "label": "Сектор", "color": "#be185d"},
+    {"value": "group", "label": "Группа", "color": "#15803d"},
+    {"value": "position", "label": "Позиция", "color": "#64748b"},
+)
+ORG_SETTINGS_DEFAULTS: dict = {
+    "org_unit_kinds": list(ORG_UNIT_KINDS),
+    "org_max_depth": 15,
+    "org_default_view": "chart",
+}
+ORG_VIEWS = ("chart", "people", "tree", "table")
 
 DEPARTMENTS: tuple[tuple[str, str], ...] = (
     ("Аппарат генерального директора", "ADMIN"),

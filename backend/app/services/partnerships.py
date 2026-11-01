@@ -9,6 +9,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.timeutil import local_today
 from ..models import Partnership, PartnershipLightRule
 from . import traffic_light
 from .registry import PARTNERSHIP_LIGHT_GROUPS
@@ -26,7 +27,7 @@ def status_light(status: str | None, rules: dict[str, PartnershipLightRule]) -> 
 
 
 def cert_age_key(cert_date: date, rules: dict[str, PartnershipLightRule], today: date | None = None) -> str:
-    today = today or date.today()
+    today = today or local_today()
     years = (today - cert_date).days / 365.25
     for key in CERT_AGE_KEYS[:-1]:
         rule = rules.get(key)

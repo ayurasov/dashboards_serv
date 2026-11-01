@@ -9,6 +9,14 @@ from sqlalchemy.orm import Session
 from ..models import TrafficLightRule
 
 LIGHT_LABELS = {"green": "Норма", "yellow": "Внимание", "red": "Критично", "gray": "Нет оценки"}
+MISSING_LABEL = "Нет данных"
+
+
+def is_missing(value: float | None, rule: TrafficLightRule | None) -> bool:
+    """Значение не заполнено, а правило светофора включено — критичное нарушение полноты данных.
+    Сам показатель при этом оценивается как «Нет данных» (серый), а не «Критично»: цвет
+    говорит о значении, а не о его отсутствии."""
+    return value is None and rule is not None and rule.enabled
 LIGHT_ORDER = {"red": 0, "yellow": 1, "green": 2, "gray": 3}
 
 

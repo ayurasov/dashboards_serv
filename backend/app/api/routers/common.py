@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, or_, select
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ...core.db import get_db
 from ...core.errors import Forbidden, NotFound, ValidationFailed
+from ...core.timeutil import day_end_utc, day_start_utc, local_today
 from ...models import (
     AuditEntry,
     ColorPalette,
@@ -82,7 +83,7 @@ def _services(db: Session, user: User, all: bool) -> list[ServiceOut]:
 
 
 def _hr_overview(db: Session, user: User) -> dict:
-    data = hr_service.dashboard(db, [], access.department_scope(user))
+    data = hr_service.dashboard(db, [], access.department_scope(db, user))
     latest = data["latest"]
     if not latest:
         return {"empty": True}
@@ -90,6 +91,7 @@ def _hr_overview(db: Session, user: User) -> dict:
     pick = [k for k in ("turnover", "avg_time_to_fill", "offers_accepted_pct", "probation_pass_rate") if k in metric]
     return {
         "empty": False, "period": latest["label"], "light_counts": latest["light_counts"],
+        "missing": latest.get("missing", []),
         "kpis": [{"label": "Принято", "value": latest["hired"], "unit": "чел."},
                  {"label": "Уволено", "value": latest["fired"], "unit": "чел."}]
         + [{"label": metric[k]["label"], "value": metric[k]["value"], "unit": metric[k]["unit"],
@@ -116,9 +118,12 @@ def _tp_overview(db: Session) -> dict:
                      "delta": None if value is None or prev_value is None else round(value - prev_value, 4),
                      "direction": rule.direction if rule else "higher_is_better"})
     lights = [traffic_light.evaluate(getattr(last, k), r) for k, r in rules.items() if hasattr(last, k)]
+    missing = [tp_service.META_BY_KEY[k]["label"] for k, r in rules.items()
+               if hasattr(last, k) and k in tp_service.META_BY_KEY and traffic_light.is_missing(getattr(last, k), r)]
     open_tickets = db.scalar(select(func.count()).select_from(NaumenTicket)
                              .where(NaumenTicket.status.not_in(("Закрыта", "Выполнена")))) or 0
-    return {"empty": False, "period": f"Неделя {last.period}", "light_counts": traffic_light.counts(lights),
+    return {"empty": False, "period": f"{last.week}-я неделя {last.year}", "missing": missing,
+            "light_counts": traffic_light.counts(lights),
             "kpis": kpis + [{"label": "Заявок Naumen в работе", "value": open_tickets, "unit": "шт."}]}
 
 
@@ -129,7 +134,7 @@ def _pp_overview(db: Session) -> dict:
     rules = p_service.rule_map(db)
     lights = [p_service.record_light(r, rules)["light"] for r in rows]
     stats = p_service.analytics(rows)
-    year = date.today().year
+    year = local_today().year
     return {"empty": False, "period": "Все партнёрства", "light_counts": traffic_light.counts(lights),
             "kpis": [{"label": "Всего партнёрств", "value": stats["total"], "unit": ""},
                      {"label": "Завершено", "value": stats["by_status"].get("Завершено", 0), "unit": ""},
@@ -139,8 +144,10 @@ def _pp_overview(db: Session) -> dict:
 
 @router.get("/overview", summary="Стартовая страница: главное по каждой доступной службе")
 def overview(db: Session = Depends(get_db), user: User = Depends(active_user)):
-    scope = access.department_scope(user)
-    key = ("overview", tuple(sorted(access.accessible_services(user))), None if scope is None else tuple(sorted(scope)))
+    # Ключ — службы и уровни, область, классы данных и записи пользователя (ADR-0009)
+    # и дата: «сертификатов в этом году» и сроки сертификатов зависят от сегодняшнего дня
+    key = ("overview", tuple(sorted(access.accessible_services(user))), access.cache_scope(db, user, "hr"),
+           local_today().isoformat())
     return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user))
 
 
@@ -262,9 +269,9 @@ def _audit_query(entity_type: str, action: str, username: str, service_key: str,
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(or_(func.lower(AuditEntry.summary).like(like), func.lower(AuditEntry.entity_id).like(like)))
     if date_from:
-        stmt = stmt.where(AuditEntry.occurred_at >= datetime.combine(date_from, datetime.min.time()))
+        stmt = stmt.where(AuditEntry.occurred_at >= day_start_utc(date_from))
     if date_to:
-        stmt = stmt.where(AuditEntry.occurred_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        stmt = stmt.where(AuditEntry.occurred_at < day_end_utc(date_to))
     return stmt
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ...core.db import get_db, utcnow
 from ...models import DataImport, NaumenTicket, TpWeeklyReport, User
 from ...schemas.common import ImportResult
-from ...services import audit
+from ...services import access, audit
 from ...services import naumen as naumen_service
 from ...services.cache import cached_json
 from ..deps import require_service
@@ -47,11 +47,14 @@ def _filters(db: Session) -> dict:
 @router.get("/summary", summary="Сводная аналитика заявок")
 def summary(year: int | None = Query(None, ge=2000, le=2100), org: str | None = None,
             months: int | None = Query(None, ge=1, le=120),
-            db: Session = Depends(get_db), _: User = Depends(read)):
-    return cached_json(db, [SERVICE], ("naumen.summary", year, org, months), lambda: _summary(db, year, org, months))
+            db: Session = Depends(get_db), user: User = Depends(read)):
+    """Без права на персональные данные — без разбивки по ответственным сотрудникам (ФИО)."""
+    personal = access.effective(user).allows("personal")
+    return cached_json(db, [SERVICE], ("naumen.summary", year, org, months, personal),
+                       lambda: _summary(db, year, org, months, personal))
 
 
-def _summary(db: Session, year: int | None, org: str | None, months: int | None) -> dict:
+def _summary(db: Session, year: int | None, org: str | None, months: int | None, personal: bool = True) -> dict:
     stmt = select(NaumenTicket).order_by(NaumenTicket.registered_at)
     if year:
         stmt = stmt.where(extract("year", NaumenTicket.registered_at) == year)
@@ -60,7 +63,11 @@ def _summary(db: Session, year: int | None, org: str | None, months: int | None)
     tickets = list(db.scalars(stmt))
     if months:
         tickets = naumen_service.last_months_filter(tickets, months)
-    return naumen_service.summary(tickets)
+    data = naumen_service.summary(tickets)
+    if not personal and not data.get("empty"):
+        data["responsibles"] = []
+        data["responsibles_hidden"] = True
+    return data
 
 
 @router.get("/match", summary="Отчёт ТП в сравнении с заявками Naumen")

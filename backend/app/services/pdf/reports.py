@@ -41,7 +41,8 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
     rep = Report("Служба персонала — дашборд", f"Период: {period}", palette=_palette(db))
     if not series:
         return rep.build()
-    latest = series[-1]
+    # Как на экране: «последний» — последний месяц выборки с данными (пустой новый месяц не обнуляет отчёт)
+    latest = data["latest"] or series[-1]
     totals = data["totals"]
     kpis = [("Принято за период", fmt(totals["hired"]), None), ("Уволено за период", fmt(totals["fired"]), None),
             ("Чистый прирост", fmt(totals["net"]), None)]
@@ -49,26 +50,30 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
         if m["light"] != "gray" and m["value"] is not None:
             kpis.append((m["label"], fmt(m["value"], m["unit"]), m["light"]))
     rep.kpis(kpis[:12])
+    if latest.get("missing"):
+        rep.text(f"<font color='{rep.light_hex('red')}'><b>Не заполнены показатели со светофором</b></font> "
+                 f"за {latest['label'].lower()}: {', '.join(latest['missing'])}.")
 
     colors = rep.series_colors()
     fig, ax = rep.figure()
     labels = [s["label"] for s in series]
     x = range(len(labels))
-    ax.bar([i - 0.2 for i in x], [s["hired"] for s in series], 0.4, label="Принято", color=colors[2])
-    ax.bar([i + 0.2 for i in x], [s["fired"] for s in series], 0.4, label="Уволено", color=colors[0])
+    ax.bar([i - 0.2 for i in x], [s["hired"] for s in series], 0.4, label="Принято", color=rep.light_hex("green"))
+    ax.bar([i + 0.2 for i in x], [s["fired"] for s in series], 0.4, label="Уволено", color=rep.light_hex("red"))
     ax.set_xticks(list(x), labels, rotation=0 if len(labels) < 8 else 45, ha="center" if len(labels) < 8 else "right")
-    ax.legend(frameon=False, fontsize=8)
+    rep.legend(ax)
     ax.set_title("Приём и увольнение", fontsize=10, loc="left")
     rep.chart(fig, 62)
 
     turnover = [next((m["value"] for m in s["metrics"] if m["key"] == "turnover"), None) for s in series]
     if any(v is not None for v in turnover):
         fig, ax = rep.figure(height=3)
-        ax.plot(labels, turnover, marker="o", color=colors[1], linewidth=2)
+        ax.plot(labels, turnover, marker="o", color=colors[0], linewidth=2)
         target = next((m["target"] for m in latest["metrics"] if m["key"] == "turnover"), None)
         if target is not None:
-            ax.axhline(target, color=colors[0], linestyle="--", linewidth=1, label=f"Цель {fmt(target, '%')}")
-            ax.legend(frameon=False, fontsize=8)
+            ax.axhline(target, color=rep.light_hex("red"), linestyle="--", linewidth=1,
+                       label=f"Цель {fmt(target, '%')}")
+            rep.legend(ax)
         ax.set_title("Текучесть кадров, %", fontsize=10, loc="left")
         rep.chart(fig, 55)
 
@@ -83,8 +88,16 @@ def hr_dashboard(db: Session, months: list[str], scope: set[str] | None) -> byte
     return rep.build()
 
 
-def hr_summary(db: Session, period_type: str, scope: set[str] | None) -> bytes:
-    periods = hr_service.period_summary(db, period_type, scope)
+def _period_range(periods: list[dict], from_key: str = "", to_key: str = "") -> list[dict]:
+    """Периоды от from_key до to_key включительно (как выбрано на странице сводки)."""
+    keys = [p["key"] for p in periods]
+    start = keys.index(from_key) if from_key in keys else 0
+    end = keys.index(to_key) + 1 if to_key in keys else len(periods)
+    return periods[start:end] if start < end else periods[end - 1:start + 1]
+
+
+def hr_summary(db: Session, period_type: str, scope: set[str] | None, from_key: str = "", to_key: str = "") -> bytes:
+    periods = _period_range(hr_service.period_summary(db, period_type, scope), from_key, to_key)
     names = {"month": "месяцам", "quarter": "кварталам", "half": "полугодиям", "year": "годам"}
     defs = hr_service.definitions(db)
     rep = Report("Служба персонала — сводка", f"Сводка по {names.get(period_type, period_type)}", wide=True,
@@ -97,16 +110,16 @@ def hr_summary(db: Session, period_type: str, scope: set[str] | None) -> bytes:
     for d in defs:
         rows.append([d.label, *[fmt(p["metrics"].get(d.key), d.unit) for p in periods]])
     rep.table(header, rows, [30] + [12] * len(periods), align_right_from=1)
-    colors = rep.series_colors()
     fig, ax = rep.figure(width=12)
     labels = [p["label"] for p in periods]
-    ax.bar(labels, [p["light_counts"]["green"] for p in periods], color=colors[2], label="Норма")
+    # Светофор — цветами светофора палитры, как на экране (а не цветами рядов графиков)
+    ax.bar(labels, [p["light_counts"]["green"] for p in periods], color=rep.light_hex("green"), label="Норма")
     ax.bar(labels, [p["light_counts"]["yellow"] for p in periods],
-           bottom=[p["light_counts"]["green"] for p in periods], color=colors[3], label="Внимание")
+           bottom=[p["light_counts"]["green"] for p in periods], color=rep.light_hex("yellow"), label="Внимание")
     ax.bar(labels, [p["light_counts"]["red"] for p in periods],
-           bottom=[p["light_counts"]["green"] + p["light_counts"]["yellow"] for p in periods], color=colors[0],
-           label="Критично")
-    ax.legend(frameon=False, fontsize=8)
+           bottom=[p["light_counts"]["green"] + p["light_counts"]["yellow"] for p in periods],
+           color=rep.light_hex("red"), label="Критично")
+    rep.legend(ax)
     ax.set_title("Светофор метрик по периодам", fontsize=10, loc="left")
     rep.spacer()
     rep.chart(fig, 60)
@@ -143,8 +156,12 @@ def hr_targets(db: Session) -> bytes:
 # ---------------------------------------------------------------- техподдержка
 
 def _tp_rows(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
-             week_to: int | None = None) -> list[TpWeeklyReport]:
+             week_to: int | None = None, years: list[int] | None = None) -> list[TpWeeklyReport]:
     stmt = select(TpWeeklyReport).order_by(TpWeeklyReport.year, TpWeeklyReport.week)
+    if years and not year and len(years) > 1:
+        stmt = stmt.where(TpWeeklyReport.year.in_(years))
+    elif years and not year:
+        year = years[0]
     if year:
         stmt = stmt.where(TpWeeklyReport.year == year)
         if week_from:
@@ -156,8 +173,8 @@ def _tp_rows(db: Session, year: int | None, weeks: int | None, week_from: int | 
 
 
 def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: int | None = None,
-                 week_to: int | None = None) -> bytes:
-    rows = _tp_rows(db, year, weeks, week_from, week_to)
+                 week_to: int | None = None, years: list[int] | None = None) -> bytes:
+    rows = _tp_rows(db, year, weeks, week_from, week_to, years)
     period = f"{rows[0].period} — {rows[-1].period}" if rows else "нет данных"
     rules = traffic_light.rules_for(db, "tech")
     rep = Report("Техническая поддержка — недельный отчёт", f"Период: {period} · недель: {len(rows)}", wide=True,
@@ -183,7 +200,7 @@ def tp_dashboard(db: Session, year: int | None, weeks: int | None, week_from: in
     ax.plot(labels, [r.total_in_work for r in rows], color=colors[0], linewidth=1.4, linestyle="--",
             label="В работе")
     ax.set_xticks(range(0, len(labels), step), labels[::step], rotation=45, ha="right")
-    ax.legend(frameon=False, fontsize=8, ncol=3)
+    rep.legend(ax, ncol=3)
     ax.set_title("Поток заявок по неделям", fontsize=10, loc="left")
     rep.chart(fig, 62)
 
@@ -233,7 +250,7 @@ def naumen_report(db: Session, year: int | None, org: str | None, months: int | 
     ax.bar([i - 0.2 for i in x], [m["registered"] for m in months_data], 0.4, color=colors[1], label="Принято")
     ax.bar([i + 0.2 for i in x], [m["solved"] for m in months_data], 0.4, color=colors[2], label="Решено")
     ax.set_xticks(list(x)[::step], labels[::step], rotation=45, ha="right")
-    ax.legend(frameon=False, fontsize=8)
+    rep.legend(ax)
     ax.set_title("Принято и решено по месяцам", fontsize=10, loc="left")
     rep.chart(fig, 62)
     rep.h2("Организации")
@@ -260,12 +277,15 @@ def partnerships_registry(db: Session, rows: Sequence[dict], filters: dict[str, 
     return rep.build()
 
 
-def partnerships_summary(db: Session) -> bytes:
+def partnerships_summary(db: Session, rows: list | None = None, filters: dict | None = None) -> bytes:
     rules = p_service.rule_map(db)
     from ...models import Partnership
 
-    all_rows = list(db.scalars(select(Partnership)))
-    rep = Report("Технологические партнёрства — сводка", "Сертификации по годам и светофор", palette=_palette(db))
+    all_rows = rows if rows is not None else list(db.scalars(select(Partnership)))
+    subtitle = _filters_line(filters or {})
+    rep = Report("Технологические партнёрства — сводка",
+                 "Сертификации по годам и светофор" + (f" · {subtitle}" if subtitle != "Все данные" else ""),
+                 palette=_palette(db))
     stats = p_service.analytics(all_rows)
     rep.kpis([("Всего", fmt(stats["total"]), None), ("NDA подписано", fmt(stats["nda_count"]), None),
               ("Соглашений", fmt(stats["agreement_count"]), None),

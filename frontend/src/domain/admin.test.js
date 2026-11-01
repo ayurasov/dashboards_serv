@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ACCESS_COLUMNS,
-  accessSummary,
   actionLabel,
   auditDiff,
   avatarTone,
-  buildAccessRows,
+  createUserBody,
+  departmentParts,
   entityLabel,
   formatAuditValue,
   formatMinutes,
@@ -13,23 +12,29 @@ import {
   groupRules,
   initials,
   isValidUsername,
+  managerLabel,
+  needsAccess,
+  newUserForm,
   normalizePalette,
   pageRange,
   paletteProblem,
   parseThreshold,
+  personalServices,
   profileForm,
   profilePatch,
+  resetAction,
   ruleBody,
   ruleDirty,
   ruleProblem,
   ruleZones,
-  sameAccess,
-  serializeAccess,
-  setRowLevel,
-  setRowScope,
   sortServices,
+  summaryParts,
+  USER_FILTERS,
+  userBadges,
+  userHistory,
   USERNAME_PATTERN,
   userFormErrors,
+  usersParams,
 } from './admin'
 
 const SERVICES = [
@@ -39,79 +44,90 @@ const SERVICES = [
   { key: 'it', title: 'ИТ-служба', short_title: 'ИТ', has_dashboard: false },
 ]
 
-describe('матрица доступа', () => {
+describe('службы', () => {
   it('службы с дашбордом идут первыми, порядок внутри групп сохраняется', () => {
     expect(sortServices(SERVICES).map((s) => s.key)).toEqual(['hr', 'tech', 'apparat_gd', 'it'])
   })
+})
 
-  it('строки строятся из служб и текущего доступа', () => {
-    const rows = buildAccessRows(SERVICES, [
-      { service_key: 'hr', level: 'viewer', department_scope: true },
-      { service_key: 'it', level: 'manager', department_scope: false },
+describe('список пользователей', () => {
+  it('фильтры страницы → параметры запроса', () => {
+    expect(usersParams(USER_FILTERS)).toEqual({ search: '', role: '', status: '', department_id: '', profile_id: '', auth_source: '' })
+    expect(usersParams({ ...USER_FILTERS, search: '  иван ', department: 'none', profile: '3', auth: 'ldap', status: 'no_access' }))
+      .toEqual({ search: 'иван', role: '', status: 'no_access', department_id: 'none', profile_id: '3', auth_source: 'ldap' })
+  })
+
+  it('сводка в шапке: шесть частей со склонениями и фильтром по щелчку', () => {
+    const parts = summaryParts({ total: 12, active: 11, disabled: 1, no_access: 2, ldap: 3, admins: 1 })
+    expect(parts.map((p) => `${p.count} ${p.label}`)).toEqual([
+      '12 всего', '11 активных', '1 отключено', '2 без доступа', '3 по домену', '1 администратор',
     ])
-    expect(rows.map((r) => [r.key, r.level, r.department_scope, r.scopeAvailable])).toEqual([
-      ['hr', 'viewer', true, true],
-      ['tech', '', false, false],
-      ['apparat_gd', '', false, false],
-      ['it', 'manager', false, false],
-    ])
-    expect(rows[2].has_dashboard).toBe(false)
+    expect(parts.find((p) => p.key === 'no_access').filter).toEqual({ status: 'no_access' })
+    expect(parts.find((p) => p.key === 'ldap').filter).toEqual({ auth: 'ldap' })
+    expect(summaryParts({ total: 2, active: 1, admins: 2 }).at(-1).label).toBe('администратора')
+    expect(summaryParts(null)).toEqual([])
   })
 
-  it('ограничение подразделениями не переносится на другие службы и уровни', () => {
-    const rows = buildAccessRows(SERVICES, [
-      { service_key: 'tech', level: 'viewer', department_scope: true },
-      { service_key: 'hr', level: 'editor', department_scope: true },
-    ])
-    expect(rows.find((r) => r.key === 'tech').department_scope).toBe(false)
-    expect(rows.find((r) => r.key === 'hr').department_scope).toBe(false)
+  it('метки строки: «Вы», администратор, домен, без пароля, временный пароль', () => {
+    const keys = (u, me) => userBadges(u, me).map((b) => b.key)
+    expect(keys({ id: 1, role: 'admin', auth_source: 'local', has_password: true }, 1)).toEqual(['self', 'admin'])
+    expect(keys({ id: 2, role: 'user', auth_source: 'ldap', has_password: false }, 1)).toEqual(['ldap'])
+    expect(keys({ id: 3, role: 'user', auth_source: 'local', has_password: false }, 1)).toEqual(['no_password'])
+    expect(keys({ id: 4, role: 'user', auth_source: 'local', has_password: true, must_change_password: true }, 1)).toEqual(['temporary'])
+    expect(userBadges(null)).toEqual([])
   })
 
-  it('смена уровня снимает ограничение, если уровень не «Просмотр»', () => {
-    let rows = buildAccessRows(SERVICES, [{ service_key: 'hr', level: 'viewer', department_scope: true }])
-    rows = setRowLevel(rows, 'hr', 'editor')
-    expect(rows[0]).toMatchObject({ level: 'editor', department_scope: false })
-    rows = setRowScope(rows, 'hr', true)
-    expect(rows[0].department_scope).toBe(false)
-    rows = setRowScope(setRowLevel(rows, 'hr', 'viewer'), 'hr', true)
-    expect(rows[0].department_scope).toBe(true)
-    // Для служб без ограничения флажок не ставится
-    expect(setRowScope(setRowLevel(rows, 'tech', 'viewer'), 'tech', true)[1].department_scope).toBe(false)
+  it('«Выдать доступ» — только тем, кто не может войти', () => {
+    expect(needsAccess({ status: 'no_access' })).toBe(true)
+    expect(needsAccess({ status: 'active' })).toBe(false)
+    expect(needsAccess({ status: 'disabled' })).toBe(false)
   })
 
-  it('сериализуются только выданные службы', () => {
-    let rows = buildAccessRows(SERVICES, [])
-    rows = setRowScope(setRowLevel(rows, 'hr', 'viewer'), 'hr', true)
-    rows = setRowLevel(rows, 'it', 'editor')
-    expect(serializeAccess(rows)).toEqual([
-      { service_key: 'hr', level: 'viewer', department_scope: true },
-      { service_key: 'it', level: 'editor', department_scope: false },
-    ])
-    expect(serializeAccess(setRowLevel(rows, 'hr', ''))).toEqual([{ service_key: 'it', level: 'editor', department_scope: false }])
+  it('подразделение: название и путь до него; руководитель', () => {
+    expect(departmentParts({ id: 3, name: 'Техническая служба', path: 'АЛМИ Партнер / Техническая дирекция / Техническая служба' }))
+      .toEqual({ name: 'Техническая служба', parent: 'АЛМИ Партнер / Техническая дирекция', path: 'АЛМИ Партнер / Техническая дирекция / Техническая служба' })
+    expect(departmentParts({ id: 8, name: 'АЛМИ Партнер', path: 'АЛМИ Партнер' }).parent).toBe('')
+    expect(departmentParts(null)).toEqual({ name: '', parent: '', path: '' })
+    expect(managerLabel({ full_name: 'Соколова Мария Игоревна', source: 'structure' })).toBe('Соколова Мария Игоревна')
+    expect(managerLabel({ full_name: 'Громов Андрей', source: 'explicit' })).toBe('Громов Андрей · назначен явно')
+    expect(managerLabel(null)).toBe('')
   })
 
-  it('сравнение доступа не зависит от порядка и учитывает ограничение', () => {
-    const a = [{ service_key: 'hr', level: 'viewer', department_scope: true }, { service_key: 'it', level: 'editor' }]
-    const b = [{ service_key: 'it', level: 'editor', department_scope: false }, { service_key: 'hr', level: 'viewer', department_scope: true }]
-    expect(sameAccess(a, b)).toBe(true)
-    expect(sameAccess(a, [b[0], { ...b[1], department_scope: false }])).toBe(false)
-    expect(sameAccess([], null)).toBe(true)
+  it('сброс пароля: у доменной учётной записи — перевод на пароль системы', () => {
+    expect(resetAction({ full_name: 'Иванов', username: 'ivanov', auth_source: 'local' }).label).toBe('Сбросить пароль')
+    const ldap = resetAction({ full_name: 'Иванов', username: 'ivanov', auth_source: 'ldap' })
+    expect(ldap.label).toBe('Перевести на пароль системы')
+    expect(ldap.message).toContain('учётной записи домена')
   })
 
-  it('столбцы матрицы: «Нет» и три уровня', () => {
-    expect(ACCESS_COLUMNS.map((c) => c.label)).toEqual(['Нет', 'Просмотр', 'Ввод данных', 'Управление'])
+  it('личные уровни служб из строк доступа; у администратора — пусто', () => {
+    const user = { role: 'user', access: [{ service_key: 'tech', level: 'manager' }, { service_key: 'hr', level: 'none' }] }
+    expect(personalServices(user, SERVICES).map((r) => `${r.title}: ${r.label}`)).toEqual(['Техподдержка: управление', 'Персонал: нет доступа'])
+    expect(personalServices({ ...user, role: 'admin' }, SERVICES)).toEqual([])
   })
 
-  it('сводка доступа для таблицы в порядке служб; у администратора пусто', () => {
-    const user = { role: 'user', access: [
-      { service_key: 'it', level: 'viewer', department_scope: false },
-      { service_key: 'hr', level: 'viewer', department_scope: true },
-    ] }
-    expect(accessSummary(user, SERVICES).map((c) => [c.short, c.label, c.scoped])).toEqual([
-      ['Персонал', 'Просмотр', true],
-      ['ИТ', 'Просмотр', false],
-    ])
-    expect(accessSummary({ role: 'admin', access: user.access }, SERVICES)).toEqual([])
+  it('тело создания: способ входа, профиль, личные службы; роль и полномочия — только администратор', () => {
+    const form = { ...newUserForm(), username: ' i.ivanov ', full_name: ' Иванов Иван ', profile_id: 5, department_id: 12,
+      capabilities: ['org.manage'], services: { tech: 'viewer', hr: '' }, password: 'secret12' }
+    expect(createUserBody(form)).toEqual({
+      username: 'i.ivanov', full_name: 'Иванов Иван', email: '', position: null, phone: null, role: 'user',
+      access_method: 'password', password: 'secret12', department_id: 12, profile_id: 5, capabilities: ['org.manage'],
+      access: [{ service_key: 'tech', level: 'viewer' }],
+    })
+    expect(createUserBody({ ...form, access_method: 'none' }).password).toBeNull()
+    const manager = createUserBody({ ...form, role: 'admin' }, { isAdmin: false })
+    expect(manager.role).toBe('user')
+    expect(manager.capabilities).toEqual([])
+    expect(createUserBody({ ...form, role: 'admin' }).access).toEqual([])
+  })
+
+  it('журнал пользователя: свои записи и входы, без повторов, новые сверху', () => {
+    const lists = [
+      [{ id: 1, entity_type: 'user', entity_id: '7', occurred_at: '2026-11-01T10:00:00' }, { id: 2, entity_type: 'user', entity_id: '17', occurred_at: '2026-11-01T11:00:00' }],
+      [{ id: 3, entity_type: 'user_access', entity_id: '7', occurred_at: '2026-11-01T12:00:00' }, { id: 1, entity_type: 'user', entity_id: '7', occurred_at: '2026-11-01T10:00:00' }],
+      [{ id: 4, entity_type: 'session', entity_id: null, occurred_at: '2026-11-01T09:00:00' }],
+    ]
+    expect(userHistory(lists, 7).map((e) => e.id)).toEqual([3, 1, 4])
   })
 })
 
@@ -137,13 +153,15 @@ describe('пользователь', () => {
 
   it('PATCH содержит только изменённые поля', () => {
     const user = { full_name: 'Иванов', email: null, position: 'Аналитик', phone: null, role: 'user', is_active: true,
-      departments: [{ id: 2 }, { id: 5 }] }
+      department: { id: 2, name: 'ИТ', path: 'АЛМИ / ИТ' }, capabilities: ['users.manage'] }
     const form = profileForm(user)
+    expect(form.department_id).toBe(2)
     expect(profilePatch(user, form)).toEqual({})
-    expect(profilePatch(user, { ...form, department_ids: [5, 2] })).toEqual({})
-    expect(profilePatch(user, { ...form, email: ' a@b.ru ', is_active: false, department_ids: [2] }))
-      .toEqual({ email: 'a@b.ru', is_active: false, department_ids: [2] })
+    expect(profilePatch(user, { ...form, email: ' a@b.ru ', is_active: false, department_id: 5 }))
+      .toEqual({ email: 'a@b.ru', is_active: false, department_id: 5 })
+    expect(profilePatch(user, { ...form, department_id: null })).toEqual({ department_id: null })
     expect(profilePatch(user, { ...form, position: '' })).toEqual({ position: '' })
+    expect(profilePatch(user, { ...form, capabilities: ['users.manage', 'org.manage'] })).toEqual({ capabilities: ['org.manage', 'users.manage'] })
   })
 
   it('проверка формы до отправки', () => {
@@ -151,6 +169,8 @@ describe('пользователь', () => {
     expect(userFormErrors({ username: 'иван', full_name: ' ', email: 'not-an-email' }, { isNew: true }))
       .toEqual({ username: expect.any(String), full_name: 'Укажите ФИО', email: 'Некорректный e-mail' })
     expect(userFormErrors({ full_name: 'Иванов', email: 'a@b.ru' })).toEqual({})
+    expect(userFormErrors({ username: 'ivanov', full_name: 'Иванов', email: '', access_method: 'ldap' }, { isNew: true }).email)
+      .toContain('входа по домену')
   })
 
   it('ошибки полей сервера сопоставляются с формой', () => {
@@ -162,9 +182,10 @@ describe('пользователь', () => {
 
 describe('журнал изменений', () => {
   it('подписи действий и объектов', () => {
-    expect(['create', 'update', 'delete', 'login', 'password', 'import'].map(actionLabel))
-      .toEqual(['Создание', 'Изменение', 'Удаление', 'Вход', 'Пароль', 'Загрузка'])
+    expect(['create', 'update', 'delete', 'login', 'password', 'import', 'grant'].map(actionLabel))
+      .toEqual(['Создание', 'Изменение', 'Удаление', 'Вход', 'Пароль', 'Загрузка', 'Выдача доступа'])
     expect(entityLabel('user_access')).toBe('Доступ пользователя')
+    expect(entityLabel('access_profile')).toBe('Профиль доступа')
     expect(entityLabel('traffic_light_rule')).toBe('Правило светофора')
     expect(entityLabel('unknown_thing')).toBe('unknown_thing')
   })
@@ -177,6 +198,8 @@ describe('журнал изменений', () => {
     expect(formatAuditValue('admin', 'role')).toBe('Администратор')
     expect(formatAuditValue('lower_is_better', 'direction')).toBe('Меньше — лучше')
     expect(formatAuditValue('viewer (свои подразделения)')).toBe('Просмотр (свои подразделения)')
+    expect(formatAuditValue('none')).toBe('Нет доступа')
+    expect(formatAuditValue('branch', 'org_scope')).toBe('Своя ветка структуры')
     expect(formatAuditValue('2026-11-01T08:18:11.095298')).toBe('2026-11-01 08:18')
   })
 

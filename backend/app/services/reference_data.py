@@ -5,18 +5,21 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
 from ..core.db import utcnow
 from ..core.security import generate_password, hash_password
 from ..models import (
+    AccessProfile,
+    AppSetting,
     ColorPalette,
     DataRevision,
     Department,
     HrMetricDefinition,
     HrTarget,
+    OrgRevision,
     PartnershipLightRule,
     Service,
     ServiceAccess,
@@ -49,11 +52,36 @@ def sync_services(db: Session) -> None:
 
 
 def sync_departments(db: Session) -> None:
-    existing_codes = set(db.scalars(select(Department.code)))
-    existing_names = set(db.scalars(select(Department.name)))
-    for name, code in registry.DEPARTMENTS:
-        if code not in existing_codes and name not in existing_names:
-            db.add(Department(name=name, code=code))
+    """Начальный список подразделений — только при первом запуске: дальше структурой
+    управляет администратор (ADR-0007), и удалённые подразделения не должны возвращаться."""
+    if db.scalar(select(func.count()).select_from(Department)):
+        return
+    for order, (name, code) in enumerate(registry.DEPARTMENTS):
+        db.add(Department(name=name, code=code, kind="service", sort_order=order))
+    db.flush()
+
+
+def ensure_access_profiles(db: Session) -> None:
+    """Встроенные профили доступа создаются один раз; изменения администратора сохраняются."""
+    existing = set(db.scalars(select(AccessProfile.key)))
+    for item in registry.ACCESS_PROFILES:
+        if item.key in existing:
+            continue
+        db.add(AccessProfile(key=item.key, name=item.name, description=item.description, is_system=True,
+                             sort_order=item.sort_order, service_levels=dict(item.service_levels),
+                             org_scope=item.org_scope, data_classes=list(item.data_classes),
+                             drill_depth=item.drill_depth, can_view_records=item.can_view_records,
+                             can_export=item.can_export))
+    db.flush()
+
+
+def ensure_org_settings(db: Session) -> None:
+    existing = set(db.scalars(select(AppSetting.key)))
+    for key, value in registry.ORG_SETTINGS_DEFAULTS.items():
+        if key not in existing:
+            db.add(AppSetting(key=key, value=value))
+    if db.get(OrgRevision, 1) is None:
+        db.add(OrgRevision(id=1, revision=0))
     db.flush()
 
 
@@ -148,6 +176,8 @@ def ensure_admin_access(db: Session) -> None:
 def sync_reference_data(db: Session) -> None:
     sync_services(db)
     sync_departments(db)
+    ensure_access_profiles(db)
+    ensure_org_settings(db)
     sync_hr_metrics(db)
     _ensure_rules(db, "hr", registry.HR_DEFAULT_RULES)
     _ensure_rules(db, "tech", registry.TP_DEFAULT_RULES)

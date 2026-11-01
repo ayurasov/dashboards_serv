@@ -71,6 +71,9 @@ def engine(db_url, monkeypatch):
     from app.api.routers import system
 
     monkeypatch.setattr(system, "engine", engine)
+    from app.services import org
+
+    org.invalidate()  # снимок структуры процесса — от другой копии базы
     yield engine
     engine.dispose()
 

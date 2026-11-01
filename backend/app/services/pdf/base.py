@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 from collections.abc import Sequence
-from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -16,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 from reportlab.lib import colors  # noqa: E402
-from reportlab.lib.enums import TA_LEFT  # noqa: E402
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT  # noqa: E402
 from reportlab.lib.pagesizes import A4, landscape  # noqa: E402
 from reportlab.lib.styles import ParagraphStyle  # noqa: E402
 from reportlab.lib.units import mm  # noqa: E402
@@ -33,6 +32,7 @@ from reportlab.platypus import (  # noqa: E402
 )
 
 from ... import APP_NAME, __version__  # noqa: E402
+from ...core.timeutil import local_now
 
 FONT_DIR = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
 FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
@@ -54,11 +54,16 @@ DEFAULT_COLORS = {
 STYLES = {
     "title": ParagraphStyle("title", fontName=FONT_BOLD, fontSize=17, leading=21, textColor=INK, spaceAfter=2),
     "subtitle": ParagraphStyle("subtitle", fontName=FONT, fontSize=9, leading=12, textColor=MUTED, spaceAfter=10),
+    # keepWithNext: заголовок раздела не остаётся внизу страницы без таблицы или графика под ним
     "h2": ParagraphStyle("h2", fontName=FONT_BOLD, fontSize=12, leading=15, textColor=INK, spaceBefore=10,
-                         spaceAfter=6),
+                         spaceAfter=6, keepWithNext=1),
     "body": ParagraphStyle("body", fontName=FONT, fontSize=8.5, leading=11.5, textColor=INK, alignment=TA_LEFT),
     "cell": ParagraphStyle("cell", fontName=FONT, fontSize=7.5, leading=9.5, textColor=INK),
     "cell_bold": ParagraphStyle("cell_bold", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=INK),
+    "cell_right": ParagraphStyle("cell_right", fontName=FONT, fontSize=7.5, leading=9.5, textColor=INK,
+                                 alignment=TA_RIGHT),
+    "cell_bold_right": ParagraphStyle("cell_bold_right", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=INK,
+                                      alignment=TA_RIGHT),
     "kpi_value": ParagraphStyle("kpi_value", fontName=FONT_BOLD, fontSize=15, leading=18, textColor=INK),
     "kpi_label": ParagraphStyle("kpi_label", fontName=FONT, fontSize=7, leading=9, textColor=MUTED),
     "small": ParagraphStyle("small", fontName=FONT, fontSize=7, leading=9, textColor=MUTED),
@@ -74,7 +79,8 @@ def fmt(value, unit: str = "", digits: int = 2) -> str:
         text = f"{value:,}"
     else:
         return str(value)
-    text = text.replace(",", " ").replace(".", ",")
+    # Как в интерфейсе: неразрывный пробел между разрядами, запятая, типографский минус
+    text = text.replace(",", " ").replace(".", ",").replace("-", "−")
     if unit == "%":
         return f"{text}%"
     return f"{text} {unit}" if unit else text
@@ -90,9 +96,13 @@ class Report:
         self.width = self.pagesize[0] - 30 * mm
 
     # --- цвета
+    def light_hex(self, light: str) -> str:
+        """Цвет светофора активной палитры (#rrggbb) — для графиков matplotlib."""
+        tl = {**DEFAULT_COLORS["traffic_light"], **(self.colors.get("traffic_light") or {})}
+        return tl.get("neutral" if light == "gray" else light, DEFAULT_COLORS["traffic_light"]["neutral"])
+
     def light_color(self, light: str):
-        tl = self.colors.get("traffic_light", DEFAULT_COLORS["traffic_light"])
-        return colors.HexColor(tl.get("neutral" if light == "gray" else light, "#a3acb9"))
+        return colors.HexColor(self.light_hex(light))
 
     def series_colors(self) -> list[str]:
         return list(self.colors.get("charts") or DEFAULT_COLORS["charts"])
@@ -136,9 +146,16 @@ class Report:
               lights: Sequence[str | None] | None = None, align_right_from: int | None = None,
               bold_last: bool = False) -> None:
         """Таблица с шапкой, «зеброй» и необязательной цветной меткой светофора в первой колонке."""
-        data = [[Paragraph(str(h), STYLES["cell_bold"]) for h in header]]
+        # Числовые столбцы выравниваются по правому краю. Выравнивание задаётся стилем абзаца:
+        # ALIGN из TableStyle на Paragraph в ячейке не действует.
+        def right(i: int) -> bool:
+            return align_right_from is not None and i >= align_right_from
+
+        data = [[Paragraph(str(h), STYLES["cell_bold_right" if right(i) else "cell_bold"])
+                 for i, h in enumerate(header)]]
         for r in rows:
-            data.append([Paragraph("" if v is None else str(v), STYLES["cell"]) for v in r])
+            data.append([Paragraph("" if v is None else str(v), STYLES["cell_right" if right(i) else "cell"])
+                         for i, v in enumerate(r)])
         if widths is None:
             widths = [self.width / len(header)] * len(header)
         else:
@@ -176,6 +193,11 @@ class Report:
         height = min(height_mm * mm, width * ratio)
         self.story.append(KeepTogether([Image(buf, width=height / ratio, height=height)]))
 
+    @staticmethod
+    def legend(ax, ncol: int = 3) -> None:
+        """Легенда над областью графика справа — на одной строке с заголовком и не закрывает данные."""
+        ax.legend(frameon=False, fontsize=8, ncol=ncol, loc="lower right", bbox_to_anchor=(1, 1), borderaxespad=0.3)
+
     def figure(self, width: float = 10, height: float = 3.6):
         fig, ax = plt.subplots(figsize=(width, height))
         for side in ("top", "right"):
@@ -196,7 +218,7 @@ class Report:
         canvas.setFont(FONT, 7)
         canvas.setFillColor(MUTED)
         canvas.drawString(15 * mm, 9 * mm, f"{APP_NAME} {__version__} · сформировано "
-                                           f"{datetime.now().strftime('%d.%m.%Y %H:%M')}")
+                                           f"{local_now().strftime('%d.%m.%Y %H:%M')}")
         canvas.drawRightString(w - 15 * mm, 9 * mm, f"стр. {doc.page}")
         canvas.restoreState()
 

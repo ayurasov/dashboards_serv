@@ -1,0 +1,42 @@
+/* Общие стили вкладок «Импорт и экспорт» (подключаются как scoped). */
+.transfer { display: flex; flex-direction: column; gap: var(--sp-4); }
+.block { padding: 18px 20px; }
+.block-head { display: flex; align-items: flex-start; gap: 14px; }
+.b-icon { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border-radius: 12px; background: var(--surface-3); color: var(--text-2); }
+.b-text { flex: 1; min-width: 0; }
+.b-text h2 { font-size: var(--fs-md); font-weight: 650; }
+.b-text p { margin-top: 3px; max-width: 760px; font-size: var(--fs-sm); color: var(--muted); line-height: 1.5; }
+.block-body { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; padding-left: 54px; }
+.check { display: flex; align-items: flex-start; gap: 9px; font-size: var(--fs-base); color: var(--text); cursor: pointer; line-height: 1.4; }
+.check input { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--brand); }
+.check small { display: block; color: var(--muted); font-size: var(--fs-xs); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.muted { color: var(--muted); font-size: var(--fs-sm); }
+.form-error { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-sm); color: var(--light-red); line-height: 1.45; }
+.form-error :deep(svg) { margin-top: 2px; }
+
+.plan { padding: 18px 20px 0; display: flex; flex-direction: column; gap: 18px; }
+.plan-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.plan-head h2 { font-size: var(--fs-md); font-weight: 650; }
+.plan-head .muted { font-size: var(--fs-xs); margin-top: 2px; }
+.plan-block h3 { margin-bottom: 8px; font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.block-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.block-title h3 { margin: 0; }
+.bordered { border: 1px solid var(--border); border-radius: 12px; max-height: 460px; }
+.bordered .table td { vertical-align: top; font-size: var(--fs-sm); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.empty { padding: 16px; border: 1px dashed var(--border-strong); border-radius: 12px; text-align: center; font-size: var(--fs-sm); color: var(--muted); }
+.plan-foot { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 -20px; padding: 14px 20px;
+  border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(6px); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.inset { margin: 0; }
+.list-inline { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.list-inline li { padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface-3); font-size: var(--fs-sm); color: var(--text-2); }
+@media (max-width: 760px) {
+  .block { padding: 16px; }
+  .block-head { flex-wrap: wrap; }
+  .block-head > .b-icon { display: none; }
+  .block-head > .btn { width: 100%; }
+  .block-body { padding-left: 0; }
+  .plan { padding: 16px 16px 0; }
+  .plan-foot { margin: 0 -16px; padding: 12px 16px; }
+}

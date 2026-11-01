@@ -3,15 +3,18 @@ import { useAuthStore } from '@/stores/auth'
 
 /**
  * meta: title — заголовок вкладки и хлебных крошек; service — служба страницы; level — минимальный
- * уровень доступа; admin — только администратор; public — без входа; guide — раздел руководства.
+ * уровень доступа; records — исходные записи (реестры и списки, ADR-0009); dataClass — класс данных
+ * страницы (personal, financial); admin — только администратор; capability — полномочие
+ * администрирования (org.manage, users.manage); public — без входа; guide — раздел руководства.
  */
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true, title: 'Вход', bare: true } },
   { path: '/', name: 'home', component: () => import('@/views/HomeView.vue'), meta: { title: 'Обзор', guide: 'обзор' } },
+  { path: '/org', name: 'org', component: () => import('@/views/org/OrgView.vue'), meta: { title: 'Структура компании', guide: 'структура-компании' } },
 
   // Служба персонала
   { path: '/hr', name: 'hr-dashboard', component: () => import('@/views/hr/HrDashboard.vue'), meta: { service: 'hr', title: 'Дашборд', guide: 'дашборд-службы-персонала' } },
-  { path: '/hr/registry', name: 'hr-registry', component: () => import('@/views/hr/HrRegistry.vue'), meta: { service: 'hr', title: 'Приёмы и увольнения', guide: 'приёмы-и-увольнения' } },
+  { path: '/hr/registry', name: 'hr-registry', component: () => import('@/views/hr/HrRegistry.vue'), meta: { service: 'hr', records: true, dataClass: 'personal', title: 'Приёмы и увольнения', guide: 'приёмы-и-увольнения' } },
   { path: '/hr/data', name: 'hr-data', component: () => import('@/views/hr/HrDataEntry.vue'), meta: { service: 'hr', level: 'editor', title: 'Ввод данных', guide: 'ввод-данных-месяца' } },
   { path: '/hr/summary', name: 'hr-summary', component: () => import('@/views/hr/HrSummary.vue'), meta: { service: 'hr', title: 'Сводка по периодам', guide: 'сводка-по-периодам' } },
   { path: '/hr/targets', name: 'hr-targets', component: () => import('@/views/hr/HrTargets.vue'), meta: { service: 'hr', title: 'Цели', guide: 'цели-и-бенчмарки' } },
@@ -26,17 +29,20 @@ const routes = [
 
   // Проектный и продуктовый офис
   { path: '/product', name: 'product-dashboard', component: () => import('@/views/product/PartnershipsDashboard.vue'), meta: { service: 'project_product', title: 'Дашборд', guide: 'дашборд-партнёрств' } },
-  { path: '/product/registry', name: 'product-registry', component: () => import('@/views/product/PartnershipsRegistry.vue'), meta: { service: 'project_product', title: 'Реестр партнёрств', guide: 'реестр-партнёрств' } },
+  { path: '/product/registry', name: 'product-registry', component: () => import('@/views/product/PartnershipsRegistry.vue'), meta: { service: 'project_product', records: true, title: 'Реестр партнёрств', guide: 'реестр-партнёрств' } },
   { path: '/product/summary', name: 'product-summary', component: () => import('@/views/product/PartnershipsSummary.vue'), meta: { service: 'project_product', title: 'Сводка по годам', guide: 'сводка-и-хронология' } },
-  { path: '/product/timeline', name: 'product-timeline', component: () => import('@/views/product/PartnershipsTimeline.vue'), meta: { service: 'project_product', title: 'Хронология', guide: 'сводка-и-хронология' } },
+  { path: '/product/timeline', name: 'product-timeline', component: () => import('@/views/product/PartnershipsTimeline.vue'), meta: { service: 'project_product', records: true, title: 'Хронология', guide: 'сводка-и-хронология' } },
 
   // Настройки служб
   { path: '/settings/traffic-light/:service(hr|tech)', name: 'traffic-light', component: () => import('@/views/settings/TrafficLightSettings.vue'), meta: { serviceParam: true, level: 'manager', title: 'Светофор', guide: 'настройка-светофора' } },
   { path: '/settings/partnership-lights', name: 'partnership-lights', component: () => import('@/views/settings/PartnershipLightSettings.vue'), meta: { service: 'project_product', title: 'Светофор партнёрств', guide: 'настройка-светофора' } },
 
   // Администрирование
-  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { admin: true, title: 'Пользователи' } },
-  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { admin: true, title: 'Подразделения' } },
+  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { capability: 'users.manage', title: 'Пользователи' } },
+  { path: '/admin/access-profiles', name: 'admin-access-profiles', component: () => import('@/views/admin/AccessProfiles.vue'), meta: { capability: 'users.manage', title: 'Профили доступа' } },
+  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { capability: 'org.manage', title: 'Подразделения' } },
+  { path: '/admin/org-transfer', name: 'admin-org-transfer', component: () => import('@/views/admin/OrgTransfer.vue'), meta: { capability: 'org.manage', title: 'Импорт и экспорт' } },
+  { path: '/admin/integrations', name: 'admin-integrations', component: () => import('@/views/admin/AdminIntegrations.vue'), meta: { admin: true, title: 'Вход по домену' } },
   { path: '/admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { admin: true, title: 'Журнал изменений' } },
   { path: '/admin/palettes', name: 'admin-palettes', component: () => import('@/views/admin/AdminPalettes.vue'), meta: { admin: true, title: 'Палитры' } },
   { path: '/admin/system', name: 'admin-system', component: () => import('@/views/admin/AdminSystem.vue'), meta: { admin: true, title: 'О системе' } },
@@ -60,6 +66,7 @@ const routes = [
   { path: '/tp/traffic-light', redirect: '/settings/traffic-light/tech' },
   { path: '/product/traffic-light', redirect: '/settings/partnership-lights' },
   { path: '/users', redirect: '/admin/users' },
+  { path: '/structure', redirect: '/org' },
   { path: '/audit', redirect: '/admin/audit' },
   { path: '/palette', redirect: '/admin/palettes' },
 
@@ -89,9 +96,11 @@ router.beforeEach(async (to) => {
   }
   if (!auth.isLoggedIn) return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
   if (auth.mustChangePassword && !to.meta.allowPasswordChange) return { name: 'profile', query: { password: 'required' } }
-  if (to.meta.admin && !auth.isAdmin) return { name: 'no-access' }
+  if (to.meta.admin && !auth.isAdmin) return { name: 'no-access', query: { reason: 'admin' } }
+  if (to.meta.capability && !auth.hasCapability(to.meta.capability)) return { name: 'no-access', query: { reason: 'capability', capability: to.meta.capability } }
   const service = routeService(to)
-  if (service && !auth.can(service, to.meta.level || 'viewer')) return { name: 'no-access', query: { service } }
+  const reason = auth.denial({ service, level: to.meta.level || 'viewer', records: !!to.meta.records, dataClass: to.meta.dataClass })
+  if (reason) return { name: 'no-access', query: { reason, ...(service ? { service } : {}), page: to.meta.title } }
   return true
 })
 

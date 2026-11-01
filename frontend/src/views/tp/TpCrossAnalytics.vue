@@ -24,7 +24,7 @@ import {
 const app = useAppStore()
 const palette = usePaletteStore()
 const { state: f, reset, isDefault } = useQueryState({ by: 'weeks', year: 0, last: 26, basis: 'typical', only: false })
-const { data, loading } = useAsync(() => tpApi.naumenMatch())
+const { data, loading, error, reload } = useAsync(() => tpApi.naumenMatch())
 
 const weekly = computed(() => f.by === 'weeks')
 const unit = computed(() => (weekly.value ? 'weeks' : 'months'))
@@ -201,7 +201,11 @@ const NOTES = computed(() => ({
   <div class="page">
     <PageHeader title="Отчёт и Naumen" description="Недельный отчёт техподдержки в сравнении с заявками Naumen Service Desk" />
 
-    <EmptyState v-if="noReport" icon="layers" title="Сравнивать пока не с чем"
+    <EmptyState v-if="error && !data" icon="alert" title="Не удалось загрузить сопоставление" :text="error.message">
+      <button class="btn" type="button" @click="reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
+
+    <EmptyState v-else-if="noReport" icon="layers" title="Сравнивать пока не с чем"
                 text="Для сопоставления нужны недели отчёта ТП и выгрузка заявок Naumen. Загрузите их на страницах «Недельный отчёт» и «Заявки Naumen».">
       <router-link to="/tp/registry" class="btn">Недельный отчёт</router-link>
       <router-link to="/tp/naumen" class="btn">Заявки Naumen</router-link>

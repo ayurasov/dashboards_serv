@@ -25,7 +25,7 @@ from ...schemas.hr import (
 from ...services import access, audit
 from ...services import hr as hr_service
 from ...services.cache import cached_json
-from ..deps import require_service
+from ..deps import require_data_class, require_export, require_records, require_service
 from ..uploads import file_response
 
 router = APIRouter(prefix="/api/hr", tags=["Служба персонала"])
@@ -33,6 +33,10 @@ SERVICE = "hr"
 read = require_service(SERVICE, "viewer")
 edit = require_service(SERVICE, "editor")
 manage = require_service(SERVICE, "manager")
+# Реестр приёмов и увольнений — исходные записи с персональными данными (ФИО, должности, причины)
+registry = require_records(SERVICE, "personal")
+registry_export = require_export(SERVICE, records=True, data_class="personal")
+registry_edit = require_data_class("personal", SERVICE, "editor")
 
 
 def _event_out(e: HrEmployeeEvent, month_key: str | None = None) -> EventOut:
@@ -55,19 +59,24 @@ def metric_definitions(db: Session = Depends(get_db), _: User = Depends(read)):
                        lambda: [MetricDefinitionOut.model_validate(d) for d in hr_service.definitions(db)])
 
 
-def _scope_key(user: User) -> tuple | None:
-    scope = access.department_scope(user)
-    return None if scope is None else tuple(sorted(scope))
+def _scope_key(db: Session, user: User) -> tuple:
+    """Область, классы данных и записи пользователя — в ключе кэша (ADR-0009)."""
+    return access.cache_scope(db, user, SERVICE)
+
+
+def _sees_registry(user: User) -> bool:
+    eff = access.effective(user)
+    return eff.can_view_records and eff.allows("personal")
 
 
 @router.get("/departments", summary="Подразделения, встречающиеся в реестре")
 def departments(db: Session = Depends(get_db), user: User = Depends(read)):
     def compute():
-        scope = access.department_scope(user)
+        scope = access.department_scope(db, user)
         names = sorted({d for d in db.scalars(select(HrEmployeeEvent.department).distinct()) if d})
         return [n for n in names if n in scope] if scope is not None else names
 
-    return cached_json(db, [SERVICE], ("hr.departments", _scope_key(user)), compute)
+    return cached_json(db, [SERVICE], ("hr.departments", _scope_key(db, user)), compute)
 
 
 # ---------- месяцы ----------
@@ -75,7 +84,7 @@ def departments(db: Session = Depends(get_db), user: User = Depends(read)):
 @router.get("/months", response_model=list[MonthListItem], summary="Месяцы с данными")
 def list_months(db: Session = Depends(get_db), user: User = Depends(read)):
     def compute():
-        scope = access.department_scope(user)
+        scope = access.department_scope(db, user)
         total = len(hr_service.definitions(db))
         out = []
         for m in hr_service.months_sorted(db):
@@ -85,7 +94,7 @@ def list_months(db: Session = Depends(get_db), user: User = Depends(read)):
                                      filled_metrics=sum(1 for v in m.values if v.value is not None)))
         return out
 
-    return cached_json(db, [SERVICE], ("hr.months", _scope_key(user)), compute)
+    return cached_json(db, [SERVICE], ("hr.months", _scope_key(db, user)), compute)
 
 
 @router.post("/months", response_model=MonthListItem, status_code=201, summary="Добавить месяц")
@@ -109,14 +118,17 @@ def get_month(key: str, db: Session = Depends(get_db), user: User = Depends(read
     previous = db.scalar(select(HrMonth).where(
         or_(HrMonth.year < month.year, (HrMonth.year == month.year) & (HrMonth.month < month.month)))
         .order_by(HrMonth.year.desc(), HrMonth.month.desc()).limit(1))
-    scope = access.department_scope(user)
-    events = hr_service.visible_events(month.events, scope)
+    scope = access.department_scope(db, user)
+    # Записи реестра — только с правом на исходные записи и персональные данные; метрики — всем
+    shown = _sees_registry(user)
+    events = hr_service.visible_events(month.events, scope) if shown else []
     return {
         "key": month.key, "label": month.label, "year": month.year, "month": month.month,
         "comment": month.comment, "updated_at": month.updated_at,
         "previous_key": previous.key if previous else None,
         "metrics": hr_service.month_metrics(db, month, previous),
         "events": [_event_out(e, month.key) for e in events],
+        "events_hidden": not shown,
         "notes": [NoteOut(id=n.id, content=n.content, created_at=n.created_at,
                           author=n.author.full_name if n.author else "") for n in month.notes],
         "department_scope": sorted(scope) if scope is not None else None,
@@ -181,7 +193,8 @@ def save_metrics(key: str, body: list[MetricValueIn], request: Request, db: Sess
 # ---------- приёмы и увольнения ----------
 
 def query_events(month: str = "", year: int | None = None, event_type: str = Query("", pattern="^(|hired|fired)$"),
-                department: str = "", search: str = "", db: Session = Depends(get_db), user: User = Depends(read)):
+                 department: str = "", search: str = "", db: Session = Depends(get_db),
+                 user: User = Depends(registry)):
     stmt = select(HrEmployeeEvent).join(HrMonth).order_by(HrEmployeeEvent.event_date.desc(), HrEmployeeEvent.id.desc())
     if month:
         y, m = hr_service.parse_month_key(month)
@@ -196,21 +209,22 @@ def query_events(month: str = "", year: int | None = None, event_type: str = Que
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(or_(func.lower(HrEmployeeEvent.full_name).like(like),
                               func.lower(HrEmployeeEvent.position).like(like)))
-    return [_event_out(e) for e in hr_service.visible_events(list(db.scalars(stmt)), access.department_scope(user))]
-
+    return [_event_out(e) for e in hr_service.visible_events(list(db.scalars(stmt)), access.department_scope(db, user))]
 
 
 @router.get("/events", response_model=list[EventOut], summary="Реестр приёмов и увольнений")
 def list_events(month: str = "", year: int | None = None, event_type: str = Query("", pattern="^(|hired|fired)$"),
-                department: str = "", search: str = "", db: Session = Depends(get_db), user: User = Depends(read)):
-    key = ("hr.events", month, year, event_type, department, search.strip().lower(), _scope_key(user))
+                department: str = "", search: str = "", db: Session = Depends(get_db),
+                user: User = Depends(registry)):
+    """Исходные записи с персональными данными: нужны права «Исходные записи» и «Персональные»."""
+    key = ("hr.events", month, year, event_type, department, search.strip().lower(), _scope_key(db, user))
     return cached_json(db, [SERVICE], key,
                        lambda: query_events(month, year, event_type, department, search, db, user))
 
 
 @router.get("/events/export.xlsx", summary="Выгрузить реестр в Excel")
 def export_events(month: str = "", year: int | None = None, event_type: str = "", department: str = "",
-                  search: str = "", db: Session = Depends(get_db), user: User = Depends(read)):
+                  search: str = "", db: Session = Depends(get_db), user: User = Depends(registry_export)):
     import io
 
     from openpyxl import Workbook
@@ -234,7 +248,8 @@ def export_events(month: str = "", year: int | None = None, event_type: str = ""
 
 
 @router.post("/months/{key}/events", response_model=EventOut, status_code=201, summary="Добавить приём или увольнение")
-def add_event(key: str, body: EventIn, request: Request, db: Session = Depends(get_db), user: User = Depends(edit)):
+def add_event(key: str, body: EventIn, request: Request, db: Session = Depends(get_db),
+              user: User = Depends(registry_edit)):
     month = hr_service.get_month(db, key)
     _check_event_date(month, body)
     event = HrEmployeeEvent(month_id=month.id, **body.model_dump())
@@ -249,7 +264,7 @@ def add_event(key: str, body: EventIn, request: Request, db: Session = Depends(g
 
 @router.patch("/events/{event_id}", response_model=EventOut, summary="Изменить запись реестра")
 def update_event(event_id: int, body: EventIn, request: Request, db: Session = Depends(get_db),
-                 user: User = Depends(edit)):
+                 user: User = Depends(registry_edit)):
     event = db.get(HrEmployeeEvent, event_id)
     if event is None:
         raise NotFound("Запись реестра не найдена")
@@ -266,7 +281,8 @@ def update_event(event_id: int, body: EventIn, request: Request, db: Session = D
 
 
 @router.delete("/events/{event_id}", response_model=Ok, summary="Удалить запись реестра")
-def delete_event(event_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(edit)):
+def delete_event(event_id: int, request: Request, db: Session = Depends(get_db),
+                 user: User = Depends(registry_edit)):
     event = db.get(HrEmployeeEvent, event_id)
     if event is None:
         raise NotFound("Запись реестра не найдена")
@@ -312,16 +328,16 @@ def analytics_dashboard(months: str = "", db: Session = Depends(get_db), user: U
     keys = [k for k in months.split(",") if k]
     for k in keys:
         hr_service.parse_month_key(k)
-    return cached_json(db, [SERVICE], ("hr.dashboard", tuple(keys), _scope_key(user)),
-                       lambda: hr_service.dashboard(db, keys, access.department_scope(user)))
+    return cached_json(db, [SERVICE], ("hr.dashboard", tuple(keys), _scope_key(db, user)),
+                       lambda: hr_service.dashboard(db, keys, access.department_scope(db, user)))
 
 
 @router.get("/analytics/summary", summary="Сводка по периодам")
 def analytics_summary(period_type: str = "quarter", db: Session = Depends(get_db), user: User = Depends(read)):
     if period_type not in hr_service.PERIOD_TYPES:
         hr_service.period_summary(db, period_type, None)  # единое сообщение об ошибке
-    return cached_json(db, [SERVICE], ("hr.summary", period_type, _scope_key(user)),
-                       lambda: hr_service.period_summary(db, period_type, access.department_scope(user)))
+    return cached_json(db, [SERVICE], ("hr.summary", period_type, _scope_key(db, user)),
+                       lambda: hr_service.period_summary(db, period_type, access.department_scope(db, user)))
 
 
 # ---------- цели ----------

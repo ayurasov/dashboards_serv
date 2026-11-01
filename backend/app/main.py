@@ -15,11 +15,13 @@ from fastapi.staticfiles import StaticFiles
 
 from . import APP_NAME, __version__
 from .api.routers import (
+    access,
     auth,
     common,
     custom_dashboards,
     hr,
     naumen,
+    org,
     partnerships,
     pdf,
     system,
@@ -93,9 +95,9 @@ def create_app() -> FastAPI:
                                 "status": response.status_code, "duration_ms": duration})
         return response
 
-    for module in (auth, users, common, hr, custom_dashboards, tp, naumen, partnerships, pdf, system):
+    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, pdf, system):
         app.include_router(module.router)
-    app.include_router(users.departments_router)
+    app.include_router(org.departments_router)
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     async def api_not_found(path: str):

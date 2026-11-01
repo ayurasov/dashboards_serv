@@ -4,7 +4,7 @@ import {
   aggregate, avgOf, channelTotals, clientRows, clientShares, compareMetrics, comparePeriods, deltaLabel,
   evaluateInterval, filterRows, groupColumns, intervalDelta, intervalScale, intervalTitle, metricDirection,
   metricDigits, normalizeRows, periodRange, productSummary, projServerSummary, quickSelection, quickWeeks,
-  rulesByKey, searchRows, seriesOf, shortLabels, sortRows, sumOf, tableRows, toneCounts, topWeeks, totals,
+  rulesByKey, searchRows, seriesOf, shortLabels, sortRows, sumOf, tableCell, tableRows, toneCounts, topWeeks, totals,
   trafficCards, weekLight, weeksOf, yearsOf,
 } from './tp'
 
@@ -202,22 +202,36 @@ describe('comparePeriods and intervalDelta', () => {
     expect(pair.prev.map((r) => r.new_received)).toEqual([13, 14, 15, 16])
   })
 
-  it('quick N without enough history gives a partial or empty previous interval', () => {
+  it('quick N without N earlier weeks has nothing to compare (sums of unequal intervals are not compared)', () => {
     expect(comparePeriods(rows, rows, '26').prev).toEqual([])
-    expect(comparePeriods(rows, rows, '12').prev.map((r) => r.new_received)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    // 12 последних недель из 20: перед ними только 8 — сравнение 12 недель с 8 завысило бы рост
+    expect(comparePeriods(rows, rows, '12').prev).toEqual([])
+    expect(intervalDelta(comparePeriods(rows, rows, '12'), 'new_received').pct).toBeNull()
+    expect(comparePeriods(rows, rows, '10').prev.map((r) => r.new_received)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   })
 
-  it('«all» compares the second half of the selection with the first half', () => {
-    const selection = rows.slice(0, 7)
-    const pair = comparePeriods(rows, selection, 'all')
-    expect(pair.mode).toBe('halves')
-    expect(pair.prev.map((r) => r.new_received)).toEqual([1, 2, 3])
-    expect(pair.now.map((r) => r.new_received)).toEqual([4, 5, 6, 7])
+  it('«all» compares the second half of the selection with the first half of the same length', () => {
+    const even = comparePeriods(rows, rows.slice(0, 6), 'all')
+    expect(even.mode).toBe('halves')
+    expect(even.prev.map((r) => r.new_received)).toEqual([1, 2, 3])
+    expect(even.now.map((r) => r.new_received)).toEqual([4, 5, 6])
+    // Нечётное число недель: средняя неделя не входит ни в одну половину
+    const odd = comparePeriods(rows, rows.slice(0, 7), 'all')
+    expect(odd.prev.map((r) => r.new_received)).toEqual([1, 2, 3])
+    expect(odd.now.map((r) => r.new_received)).toEqual([5, 6, 7])
+    expect(odd.now).toHaveLength(odd.prev.length)
+  })
+
+  it('«all» with three weeks compares the last week with the first, not two weeks with one', () => {
+    const pair = comparePeriods(rows, rows.slice(0, 3), 'all')
+    expect(pair.prev.map((r) => r.new_received)).toEqual([1])
+    expect(pair.now.map((r) => r.new_received)).toEqual([3])
+    expect(intervalDelta(pair, 'new_received').pct).toBeCloseTo(200)
   })
 
   it('«all» with a single week has nothing to compare', () => {
     const pair = comparePeriods(rows, rows.slice(0, 1), 'all')
-    expect(pair.prev).toHaveLength(1)
+    expect(pair.prev).toHaveLength(0)
     expect(pair.now).toHaveLength(0)
     expect(intervalDelta(pair, 'new_received').pct).toBeNull()
   })
@@ -244,14 +258,14 @@ describe('comparePeriods and intervalDelta', () => {
   it('labels the intervals', () => {
     expect(deltaLabel({ mode: 'quick', weeks: 8 })).toBe('к пред. 8 нед.')
     expect(deltaLabel({ mode: 'quick', weeks: 1 })).toBe('к пред. неделе')
-    expect(deltaLabel({ mode: 'halves' })).toBe('ко 1-й половине периода')
+    expect(deltaLabel({ mode: 'halves' })).toBe('к 1-й половине периода')
     const pair = comparePeriods(rows, rows, '8')
     expect(intervalTitle(pair, 'now')).toBe('Последние 8 недель')
     expect(intervalTitle(pair, 'prev')).toBe('Предыдущие 8 недель')
     expect(intervalTitle(comparePeriods(rows, rows, '1'), 'now')).toBe('Последняя неделя')
     expect(intervalTitle(comparePeriods(rows, rows, '1'), 'prev')).toBe('Предыдущая неделя')
     expect(intervalTitle(comparePeriods(rows, rows, '2'), 'now')).toBe('Последние 2 недели')
-    expect(intervalTitle(comparePeriods(rows, rows, '12'), 'prev')).toBe('Предыдущие 8 недель')
+    expect(intervalTitle(comparePeriods(rows, rows, '10'), 'prev')).toBe('Предыдущие 10 недель')
     expect(intervalTitle(comparePeriods(rows, rows, 'all'), 'now')).toBe('2-я половина периода')
     expect(intervalTitle(comparePeriods(rows, rows, 'all'), 'prev')).toBe('1-я половина периода')
   })
@@ -461,5 +475,18 @@ describe('period comparison page', () => {
     expect(shortLabels(['AlterOS · РусГидро · e-mail', 'AlterOS · прочие · телефон'])).toEqual(['РусГидро · e-mail', 'Прочие · телефон'])
     expect(shortLabels(['РусГидро', 'Транснефть'])).toEqual(['РусГидро', 'Транснефть'])
     expect(shortLabels(['AlterOS · 1–2 линия'])).toEqual(['AlterOS · 1–2 линия'])
+  })
+})
+
+describe('ячейки детальной таблицы', () => {
+  it('отношение всегда с двумя знаками, остальное — до одного, пусто — прочерк', () => {
+    expect(tableCell(1, 'ratio_solved_received')).toBe('1,00')
+    expect(tableCell(1.9, 'ratio_solved_received')).toBe('1,90')
+    expect(tableCell(1.378, 'ratio_solved_received')).toBe('1,38')
+    expect(tableCell(274, 'total_in_work')).toBe('274')
+    expect(tableCell(270.333, 'total_in_work')).toBe('270,3')
+    expect(tableCell(9757, 'avail_total')).toBe('9 757')
+    expect(tableCell(null, 'ratio_solved_received')).toBe('—')
+    expect(tableCell(undefined, 'total_in_work')).toBe('—')
   })
 })

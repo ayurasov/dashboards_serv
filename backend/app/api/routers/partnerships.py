@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ...core.db import get_db
 from ...core.errors import NotFound, ValidationFailed
+from ...core.timeutil import local_today
 from ...models import Partnership, User
 from ...schemas.common import Ok
 from ...schemas.partnerships import LightRuleChange, LightRuleOut, PartnershipIn, PartnershipPatch
@@ -14,7 +15,7 @@ from ...services import audit
 from ...services import partnerships as p_service
 from ...services.cache import cached_json
 from ...services.registry import PARTNERSHIP_LIGHT_GROUPS
-from ..deps import require_service
+from ..deps import require_export, require_records, require_service
 from ..uploads import file_response
 
 router = APIRouter(prefix="/api/partnerships", tags=["Партнёрства"])
@@ -22,6 +23,9 @@ SERVICE = "project_product"
 read = require_service(SERVICE, "viewer")
 edit = require_service(SERVICE, "editor")
 manage = require_service(SERVICE, "manager")
+# Реестр, карточка и хронология — исходные записи; дашборд и сводка — агрегаты (ADR-0009)
+records = require_records(SERVICE)
+records_export = require_export(SERVICE, records=True)
 
 SNAPSHOT_FIELDS = ("partner", "product", "direction", "almi_product", "almi_version", "status", "cert_date",
                    "nda", "agreement", "type", "bitrix", "website", "comment", "last_modified")
@@ -81,20 +85,20 @@ def _options(db: Session) -> dict:
 @router.get("", summary="Реестр партнёрств")
 def list_partnerships(year: int | None = None, status: str = "", almi_product: str = "", direction: str = "",
                       type: str = "", search: str = "", light: str = "",
-                      db: Session = Depends(get_db), _: User = Depends(read)):
+                      db: Session = Depends(get_db), _: User = Depends(records)):
     def compute():
         rules = p_service.rule_map(db)
         rows = _filtered(db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type,
                          search=search, light=light)
         return [p_service.serialize(r, rules) for r in rows]
 
-    key = ("pp.list", year, status, almi_product, direction, type, search.strip().lower(), light)
+    key = ("pp.list", year, status, almi_product, direction, type, search.strip().lower(), light, local_today())
     return cached_json(db, [SERVICE], key, compute)
 
 
 @router.get("/export.xlsx", summary="Выгрузить реестр в Excel")
 def export(year: int | None = None, status: str = "", almi_product: str = "", direction: str = "", type: str = "",
-           search: str = "", light: str = "", db: Session = Depends(get_db), _: User = Depends(read)):
+           search: str = "", light: str = "", db: Session = Depends(get_db), _: User = Depends(records_export)):
     rules = p_service.rule_map(db)
     rows = [p_service.serialize(r, rules) for r in _filtered(
         db, year=year, status=status, almi_product=almi_product, direction=direction, type_=type, search=search,
@@ -107,28 +111,39 @@ def analytics(year: int | None = None, status: str = "", almi_product: str = "",
               db: Session = Depends(get_db), _: User = Depends(read)):
     def compute():
         rows = _filtered(db, year=year, status=status, almi_product=almi_product)
+        rules = p_service.rule_map(db)
         data = p_service.analytics(rows)
-        data["lights"] = p_service.light_rows(rows, p_service.rule_map(db))
+        data["lights"] = p_service.light_rows(rows, rules)
+        # Распределение записей по светофору — дашборду не нужен реестр (право на исходные записи)
+        data["record_lights"] = _record_lights(rows, rules)
         return data
 
-    return cached_json(db, [SERVICE], ("pp.analytics", year, status, almi_product), compute)
+    return cached_json(db, [SERVICE], ("pp.analytics", year, status, almi_product, local_today()), compute)
+
+
+def _record_lights(rows: list[Partnership], rules) -> dict[str, int]:
+    out = {"green": 0, "yellow": 0, "red": 0, "gray": 0}
+    for r in rows:
+        light = p_service.record_light(r, rules)["light"] if rules else "gray"
+        out[light if light in out else "gray"] += 1
+    return out
 
 
 @router.get("/summary", summary="Сводка по годам сертификации")
 def summary(db: Session = Depends(get_db), _: User = Depends(read)):
-    return cached_json(db, [SERVICE], ("pp.summary",),
+    return cached_json(db, [SERVICE], ("pp.summary", local_today()),
                        lambda: p_service.summary_by_year(_filtered(db), p_service.rule_map(db)))
 
 
 @router.get("/timeline", summary="Хронология сертификаций и изменений")
-def timeline(db: Session = Depends(get_db), _: User = Depends(read)):
+def timeline(db: Session = Depends(get_db), _: User = Depends(records)):
     def compute():
         rules = p_service.rule_map(db)
         rows = [r for r in _filtered(db) if r.last_modified or r.cert_date]
         rows.sort(key=lambda r: r.last_modified or r.cert_date, reverse=True)
         return [p_service.serialize(r, rules) for r in rows]
 
-    return cached_json(db, [SERVICE], ("pp.timeline",), compute)
+    return cached_json(db, [SERVICE], ("pp.timeline", local_today()), compute)
 
 
 @router.get("/light-rules", response_model=list[LightRuleOut], summary="Правила светофора партнёрств")
@@ -168,7 +183,7 @@ def set_light_rules(body: list[LightRuleChange], request: Request, db: Session =
 
 
 @router.get("/{pid}", summary="Карточка партнёрства")
-def get_partnership(pid: int, db: Session = Depends(get_db), _: User = Depends(read)):
+def get_partnership(pid: int, db: Session = Depends(get_db), _: User = Depends(records)):
     return p_service.serialize(_get(db, pid), p_service.rule_map(db))
 
 

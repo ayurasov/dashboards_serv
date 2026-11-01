@@ -53,7 +53,7 @@ def test_viewer_cannot_change_data(login):
 
 
 def test_forbidden_message_names_the_level(admin, login):
-    viewer = next(u for u in admin.get("/api/users").json() if u["username"] == "viewer")
+    viewer = next(u for u in admin.get("/api/users").json()["items"] if u["username"] == "viewer")
     admin.put(f"/api/users/{viewer['id']}/access", json=[{"service_key": "hr", "level": "editor"}])
     c = login("viewer")
     assert c.post("/api/hr/months", json={"year": 2031, "month": 2}).status_code == 201
@@ -84,6 +84,28 @@ def test_department_scope_limits_registry(login, admin):
 
 
 def test_admin_pages_forbidden_for_non_admins(login):
+    # Справочник подразделений с 0.2.0 видят все вошедшие (ADR-0007) — его здесь нет
     c = login("hr_head")
-    for url in ("/api/audit", "/api/palettes", "/api/system/info", "/api/departments"):
+    for url in ("/api/audit", "/api/palettes", "/api/system/info", "/api/system/ldap", "/api/users",
+                "/api/access/profiles"):
         assert c.get(url).status_code == 403, url
+
+
+# Модель доступа 2.0: исходные записи и выгрузка по профилям демо-пользователей.
+# ceo — «Высшее руководство» (без записей, с выгрузкой); tech_dir — «Руководитель направления»;
+# engineer — «Сотрудник» (без записей и выгрузки, служб нет).
+PROFILE_PASSWORDS = {"ceo": "ceo12345", "tech_dir": "td123456", "engineer": "en123456"}
+RECORDS_AND_EXPORT = {
+    # пользователь: (реестр персонала, PDF дашборда персонала, реестр партнёрств, выгрузка недельного отчёта)
+    "viewer": (200, 200, 200, 200),
+    "ceo": (403, 200, 403, 403),
+    "tech_dir": (200, 200, 200, 200),
+    "engineer": (403, 403, 403, 403),
+}
+
+
+@pytest.mark.parametrize("username", sorted(RECORDS_AND_EXPORT))
+def test_records_and_export_by_profile(login, username):
+    c = login(username, PROFILE_PASSWORDS.get(username))
+    urls = ("/api/hr/events", "/api/pdf/hr/dashboard", "/api/partnerships", "/api/tp/reports/export.csv")
+    assert tuple(c.get(url).status_code for url in urls) == RECORDS_AND_EXPORT[username]

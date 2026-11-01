@@ -8,7 +8,7 @@
  * умножаются на число недель интервала.
  */
 import { evaluate } from '@/utils/lights'
-import { deltaTone, pctChange, plural } from '@/utils/format'
+import { deltaTone, formatNumber, pctChange, plural } from '@/utils/format'
 
 /** Быстрые периоды: последние N недель с данными или всё время. */
 export const QUICK_PERIODS = [
@@ -41,8 +41,8 @@ export const TRAFFIC_METRICS = [
   { key: 'new_received', label: 'Принято новых заявок' },
   { key: 'total_solved_week', label: 'Решено заявок' },
   { key: 'ratio_solved_received', label: 'Решено / получено' },
-  { key: 'altos_avg_time', label: 'AlterOS: среднее время решения' },
-  { key: 'altoffice_avg_time', label: 'AlterOffice: среднее время решения' },
+  { key: 'altos_avg_time', label: 'AlterOS: ср. время решения' },
+  { key: 'altoffice_avg_time', label: 'AlterOffice: ср. время решения' },
   { key: 'altos_avail_total', label: 'AlterOS: доступно' },
   { key: 'altoffice_avail_total', label: 'AlterOffice: доступно' },
 ]
@@ -211,6 +211,18 @@ export function seriesOf(rows, key) {
   return rows.map((r) => (r[key] === undefined ? null : r[key]))
 }
 
+/**
+ * Ячейка детальной таблицы. Отношение «решено / получено» — всегда с двумя знаками («1,00», «0,95»),
+ * как в недельном отчёте: иначе в столбце смешиваются «1», «1,9» и «1,38».
+ */
+export function tableCell(value, key) {
+  if (value === null || value === undefined || value === '' || !Number.isFinite(Number(value))) return '—'
+  if (key === 'ratio_solved_received') {
+    return Number(value).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace('-', '−')
+  }
+  return formatNumber(value, { digits: metricDigits(key) })
+}
+
 /** Знаков после запятой: отношение — 2, остальное — 1 (целые выводятся без дробной части). */
 export function metricDigits(key) {
   return key === 'ratio_solved_received' ? 2 : 1
@@ -219,17 +231,19 @@ export function metricDigits(key) {
 // ---------- сравнение интервалов ----------
 
 /**
- * Текущий и предыдущий интервалы одинаковой длины:
- * быстрый период N — последние N недель и N недель перед ними;
- * «всё время» — вторая половина выбранных недель против первой.
+ * Текущий и предыдущий интервалы одинаковой длины — суммы за разное число недель не сравниваются:
+ * быстрый период N — последние N недель и N недель перед ними (если истории меньше N недель,
+ * сравнивать не с чем — prev пустой); «всё время» — вторая половина выбранных недель против первой,
+ * при нечётном числе недель средняя неделя не входит ни в одну половину.
  */
 export function comparePeriods(rows, filtered, quick) {
   const n = quickWeeks(quick)
   if (n) {
-    return { mode: 'quick', weeks: n, now: rows.slice(-n), prev: rows.length > n ? rows.slice(-2 * n, -n) : [] }
+    return { mode: 'quick', weeks: n, now: rows.slice(-n), prev: rows.length >= 2 * n ? rows.slice(-2 * n, -n) : [] }
   }
-  const half = Math.max(1, Math.floor(filtered.length / 2))
-  return { mode: 'halves', weeks: null, now: filtered.slice(half), prev: filtered.slice(0, half) }
+  const half = Math.floor(filtered.length / 2)
+  if (!half) return { mode: 'halves', weeks: null, now: [], prev: [] }
+  return { mode: 'halves', weeks: half, now: filtered.slice(-half), prev: filtered.slice(0, half) }
 }
 
 /** Изменение показателя: значения интервалов, разница и процент (null — сравнить нельзя). */
@@ -242,7 +256,7 @@ export function intervalDelta(pair, key) {
 
 /** Подпись к изменению в карточке. */
 export function deltaLabel(pair) {
-  if (pair.mode === 'halves') return 'ко 1-й половине периода'
+  if (pair.mode === 'halves') return 'к 1-й половине периода'
   return pair.weeks === 1 ? 'к пред. неделе' : `к пред. ${pair.weeks} нед.`
 }
 

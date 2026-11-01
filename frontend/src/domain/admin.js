@@ -1,25 +1,18 @@
 /**
- * Администрирование: матрица доступа к службам, разбор записей журнала, правила светофора,
- * палитры. Чистые функции — покрыты тестами (admin.test.js).
+ * Администрирование: пользователи (список, фильтры, сводка, статусы, формы), разбор записей журнала,
+ * правила светофора, палитры. Модель доступа — domain/access.js. Чистые функции — покрыты
+ * тестами (admin.test.js).
  */
-import { LEVEL_LABELS } from '@/stores/auth'
+import { LEVEL_LABELS, SERVICE_LEVEL_LABELS } from '@/domain/access'
 import { FALLBACK } from '@/stores/palette'
 import { DIRECTION_LABELS } from '@/utils/lights'
 import { formatNumber, plural } from '@/utils/format'
 
-// ---------- пользователи и доступ ----------
+// ---------- пользователи ----------
 
-export const LEVELS = ['viewer', 'editor', 'manager']
 export const ROLE_LABELS = { admin: 'Администратор', user: 'Пользователь' }
-/** Столбцы матрицы доступа: «Нет» и три уровня. */
-export const ACCESS_COLUMNS = [
-  { value: '', label: 'Нет', hint: 'Служба не видна пользователю' },
-  { value: 'viewer', label: LEVEL_LABELS.viewer, hint: 'Дашборды, отчёты и выгрузки' },
-  { value: 'editor', label: LEVEL_LABELS.editor, hint: 'Просмотр, ввод и загрузка данных' },
-  { value: 'manager', label: LEVEL_LABELS.manager, hint: 'Ввод данных и настройки службы: светофор, цели' },
-]
-/** Службы, где просмотр можно ограничить своими подразделениями. */
-export const SCOPE_SERVICES = ['hr']
+export const STATUS_LABELS = { active: 'Активен', disabled: 'Отключён', no_access: 'Без доступа' }
+export const AUTH_SOURCE_LABELS = { local: 'Пароль системы', ldap: 'Учётная запись домена' }
 /** Логин: латиница, цифры и . _ @ - (как на сервере). */
 export const USERNAME_PATTERN = '[A-Za-z0-9._@\\-]+'
 const USERNAME_RE = /^[A-Za-z0-9._@-]+$/
@@ -35,71 +28,193 @@ export function sortServices(services) {
     .map(({ s }) => s)
 }
 
-/** Строки матрицы: по одной на службу, с текущим уровнем пользователя ('' — нет доступа). */
-export function buildAccessRows(services, access = []) {
-  const byKey = Object.fromEntries((access || []).map((a) => [a.service_key, a]))
-  return sortServices(services).map((s) => {
-    const current = byKey[s.key]
-    const scopeAvailable = SCOPE_SERVICES.includes(s.key)
+/** Фильтры списка пользователей (в адресной строке); '' — все. department и profile: id или none. */
+export const USER_FILTERS = Object.freeze({ search: '', role: '', status: '', department: '', profile: '', auth: '' })
+
+/** Параметры GET /users из фильтров страницы. */
+export function usersParams(f) {
+  return {
+    search: (f.search || '').trim(),
+    role: f.role || '',
+    status: f.status || '',
+    department_id: f.department || '',
+    profile_id: f.profile || '',
+    auth_source: f.auth || '',
+  }
+}
+
+/**
+ * Сводка для шапки «N всего · активных · отключено · без доступа · по домену · администраторов»;
+ * filter — что выставить в фильтрах по щелчку.
+ */
+export function summaryParts(summary) {
+  if (!summary) return []
+  const n = (key) => summary[key] ?? 0
+  return [
+    { key: 'total', count: n('total'), label: 'всего', filter: {} },
+    { key: 'active', count: n('active'), label: plural(n('active'), ['активный', 'активных', 'активных']), filter: { status: 'active' } },
+    { key: 'disabled', count: n('disabled'), label: 'отключено', filter: { status: 'disabled' } },
+    { key: 'no_access', count: n('no_access'), label: 'без доступа', filter: { status: 'no_access' } },
+    { key: 'ldap', count: n('ldap'), label: 'по домену', filter: { auth: 'ldap' } },
+    { key: 'admins', count: n('admins'), label: plural(n('admins'), ['администратор', 'администратора', 'администраторов']), filter: { role: 'admin' } },
+  ]
+}
+
+/** Метки в строке пользователя: «Вы», «домен», «без пароля», «администратор», «временный пароль». */
+export function userBadges(user, meId = null) {
+  const badges = []
+  if (!user) return badges
+  if (meId && user.id === meId) badges.push({ key: 'self', label: 'Вы', tone: 'self', title: 'Ваша учётная запись' })
+  if (user.role === 'admin') badges.push({ key: 'admin', label: 'администратор', tone: 'brand', title: 'Полный доступ ко всем службам и администрированию' })
+  if (user.auth_source === 'ldap') badges.push({ key: 'ldap', label: 'домен', tone: 'blue', title: 'Входит по учётной записи домена; пароль хранит домен' })
+  else if (!user.has_password) badges.push({ key: 'no_password', label: 'без пароля', tone: 'yellow', title: 'Пароль не задан — войти не может, пока не выдан доступ' })
+  else if (user.must_change_password) badges.push({ key: 'temporary', label: 'временный пароль', tone: 'gray', title: 'При входе пользователь задаст свой пароль' })
+  return badges
+}
+
+/** Нужен ли «Выдать доступ»: войти не может — нет пароля (не домен). */
+export function needsAccess(user) {
+  return !!user && user.status === 'no_access'
+}
+
+/** Подразделение: название и путь до него («АЛМИ Партнер / Техническая дирекция»). */
+export function departmentParts(department) {
+  if (!department) return { name: '', parent: '', path: '' }
+  const parts = String(department.path || department.name).split(' / ')
+  return { name: department.name || parts.at(-1), parent: parts.slice(0, -1).join(' / '), path: department.path || department.name }
+}
+
+/** Руководитель для строки: «Соколова Мария Игоревна», явный — с пометкой. */
+export function managerLabel(manager) {
+  if (!manager) return ''
+  return manager.source === 'explicit' ? `${manager.full_name} · назначен явно` : manager.full_name
+}
+
+/** Сброс пароля: у доменной учётной записи — «Перевести на пароль системы». */
+export function resetAction(user) {
+  const name = user ? `${user.full_name} (${user.username})` : ''
+  if (user?.auth_source === 'ldap') {
     return {
-      key: s.key,
-      title: s.title,
-      short_title: s.short_title || s.title,
-      icon: s.icon || 'grid',
-      has_dashboard: !!s.has_dashboard,
-      level: current?.level || '',
-      department_scope: scopeAvailable && current?.level === 'viewer' && !!current?.department_scope,
-      scopeAvailable,
+      label: 'Перевести на пароль системы', icon: 'key',
+      title: 'Перевести на пароль системы?', confirmText: 'Перевести',
+      message: `${name} входит по учётной записи домена. Будет создан временный пароль системы — передайте его пользователю; все сессии будут завершены. Вход с паролем домена снова привяжет учётную запись к домену.`,
     }
-  })
+  }
+  return {
+    label: 'Сбросить пароль', icon: 'key',
+    title: 'Сбросить пароль?', confirmText: 'Сбросить пароль',
+    message: `${name}.\nТекущий пароль перестанет действовать, все сессии пользователя будут завершены. Будет создан временный пароль — при входе система попросит задать новый.`,
+  }
 }
 
-export function setRowLevel(rows, key, level) {
-  return rows.map((r) => (r.key === key
-    ? { ...r, level, department_scope: level === 'viewer' ? r.department_scope : false }
-    : r))
-}
-
-export function setRowScope(rows, key, scope) {
-  return rows.map((r) => (r.key === key && r.scopeAvailable && r.level === 'viewer' ? { ...r, department_scope: !!scope } : r))
-}
-
-/** Тело PUT /users/{id}/access. */
-export function serializeAccess(rows) {
-  return rows.filter((r) => r.level).map((r) => ({
-    service_key: r.key,
-    level: r.level,
-    department_scope: !!(r.scopeAvailable && r.level === 'viewer' && r.department_scope),
+/** Личные уровни служб из строк доступа (UserOut.access) — «лично: Техподдержка — управление». */
+export function personalServices(user, services = []) {
+  if (!user || user.role === 'admin') return []
+  const titles = Object.fromEntries((services || []).map((s) => [s.key, s.short_title || s.title]))
+  return (user.access || []).map((a) => ({
+    key: a.service_key,
+    title: titles[a.service_key] || a.service_key,
+    level: a.level,
+    label: a.level === 'none' ? 'нет доступа' : (LEVEL_LABELS[a.level] || SERVICE_LEVEL_LABELS[a.level] || a.level).toLowerCase(),
   }))
 }
 
-function accessKey(list) {
-  return (list || [])
-    .map((a) => `${a.service_key}:${a.level}:${a.level === 'viewer' && a.department_scope ? 1 : 0}`)
-    .sort().join('|')
+/** Способы входа новой учётной записи. */
+export const ACCESS_METHODS = [
+  { value: 'password', label: 'Временный пароль', hint: 'Пароль покажется один раз — при первом входе пользователь задаст свой' },
+  { value: 'ldap', label: 'Вход по домену', hint: 'Логин и пароль домена; учётная запись сопоставится с каталогом по e-mail' },
+  { value: 'none', label: 'Без доступа', hint: 'Учётная запись без пароля — доступ выдадите позже' },
+]
+
+/** Форма нового пользователя. */
+export function newUserForm() {
+  return {
+    username: '', full_name: '', email: '', position: '', phone: '', department_id: null, role: 'user',
+    profile_id: null, access_method: 'password', password: '', capabilities: [], services: {},
+  }
 }
 
-/** Совпадает ли доступ (порядок строк не важен). */
-export function sameAccess(a, b) {
-  return accessKey(a) === accessKey(b)
+/** Тело POST /users. services — личные уровни служб { служба: уровень } ('' — как в профиле). */
+export function createUserBody(form, { isAdmin = true } = {}) {
+  const role = isAdmin ? form.role : 'user'
+  return {
+    username: (form.username || '').trim(),
+    full_name: (form.full_name || '').trim(),
+    email: (form.email || '').trim(),
+    position: (form.position || '').trim() || null,
+    phone: (form.phone || '').trim() || null,
+    role,
+    access_method: form.access_method,
+    password: form.access_method === 'password' && form.password ? form.password : null,
+    department_id: form.department_id ?? null,
+    profile_id: form.profile_id ?? null,
+    capabilities: isAdmin && role !== 'admin' ? [...(form.capabilities || [])] : [],
+    access: role === 'admin' ? [] : Object.entries(form.services || {}).filter(([, level]) => level)
+      .map(([service_key, level]) => ({ service_key, level })),
+  }
 }
 
-/** Краткая сводка доступа для таблицы: короткое имя службы и уровень. */
-export function accessSummary(user, services) {
-  if (user?.role === 'admin') return []
-  const order = sortServices(services)
-  const byKey = Object.fromEntries(order.map((s, i) => [s.key, { s, i }]))
-  return (user?.access || [])
-    .map((a) => ({
-      key: a.service_key,
-      title: byKey[a.service_key]?.s.title || a.service_key,
-      short: byKey[a.service_key]?.s.short_title || a.service_key,
-      level: a.level,
-      label: LEVEL_LABELS[a.level] || a.level,
-      scoped: !!a.department_scope,
-      order: byKey[a.service_key]?.i ?? 99,
-    }))
-    .sort((x, y) => x.order - y.order)
+const PROFILE_FIELDS = ['full_name', 'email', 'position', 'phone', 'role', 'is_active']
+
+/** Карточка пользователя для формы. */
+export function profileForm(user) {
+  return {
+    full_name: user?.full_name || '',
+    email: user?.email || '',
+    position: user?.position || '',
+    phone: user?.phone || '',
+    role: user?.role || 'user',
+    is_active: user?.is_active ?? true,
+    department_id: user?.department?.id ?? null,
+    capabilities: [...(user?.capabilities || [])].sort(),
+  }
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** Проверка полей формы пользователя до отправки: { поле: сообщение }. */
+export function userFormErrors(form, { isNew = false } = {}) {
+  const errors = {}
+  if (isNew && !isValidUsername((form.username || '').trim())) errors.username = 'Не короче 2 символов: латиница, цифры и . _ @ -'
+  if (!(form.full_name || '').trim()) errors.full_name = 'Укажите ФИО'
+  const email = (form.email || '').trim()
+  if (email && !EMAIL_RE.test(email)) errors.email = 'Некорректный e-mail'
+  if (isNew && form.access_method === 'ldap' && !email) errors.email = 'Для входа по домену нужен e-mail: по нему учётная запись сопоставляется с каталогом'
+  return errors
+}
+
+/** Только изменённые поля карточки — тело PATCH /users/{id}. */
+export function profilePatch(user, form) {
+  const base = profileForm(user)
+  const patch = {}
+  for (const key of PROFILE_FIELDS) {
+    const value = typeof form[key] === 'string' ? form[key].trim() : form[key]
+    if (value !== base[key]) patch[key] = value
+  }
+  if ((form.department_id ?? null) !== base.department_id) patch.department_id = form.department_id ?? null
+  const caps = [...(form.capabilities || [])].sort()
+  if (caps.join(',') !== base.capabilities.join(',')) patch.capabilities = caps
+  return patch
+}
+
+/** Ошибки полей с сервера → поля формы (пароль проверяется общим правилом new_password). */
+export function formFieldErrors(fields) {
+  const out = {}
+  for (const [key, message] of Object.entries(fields || {})) {
+    const name = key === 'new_password' ? 'password' : key.split('.')[0]
+    if (!out[name]) out[name] = message
+  }
+  return out
+}
+
+/** Журнал пользователя: записи карточки и доступа с его id, без повторов, новые сверху. */
+export function userHistory(lists, userId) {
+  const seen = new Set()
+  return (lists || []).flat().filter((e) => {
+    if (!e || seen.has(e.id)) return false
+    seen.add(e.id)
+    return e.entity_type === 'session' || String(e.entity_id) === String(userId)
+  }).sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)))
 }
 
 /** Инициалы по первым буквам слов (скобки и знаки пропускаются). */
@@ -115,66 +230,18 @@ export function avatarTone(seed) {
   return (h % 7) + 1
 }
 
-const PROFILE_FIELDS = ['full_name', 'email', 'position', 'phone', 'role', 'is_active']
-
-/** Профиль пользователя для формы. */
-export function profileForm(user) {
-  return {
-    full_name: user?.full_name || '',
-    email: user?.email || '',
-    position: user?.position || '',
-    phone: user?.phone || '',
-    role: user?.role || 'user',
-    is_active: user?.is_active ?? true,
-    department_ids: (user?.departments || []).map((d) => d.id),
-  }
-}
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-/** Проверка полей формы пользователя до отправки: { поле: сообщение }. */
-export function userFormErrors(form, { isNew = false } = {}) {
-  const errors = {}
-  if (isNew && !isValidUsername((form.username || '').trim())) errors.username = 'Не короче 2 символов: латиница, цифры и . _ @ -'
-  if (!(form.full_name || '').trim()) errors.full_name = 'Укажите ФИО'
-  const email = (form.email || '').trim()
-  if (email && !EMAIL_RE.test(email)) errors.email = 'Некорректный e-mail'
-  return errors
-}
-
-/** Только изменённые поля профиля — тело PATCH /users/{id}. */
-export function profilePatch(user, form) {
-  const base = profileForm(user)
-  const patch = {}
-  for (const key of PROFILE_FIELDS) {
-    const value = typeof form[key] === 'string' ? form[key].trim() : form[key]
-    if (value !== base[key]) patch[key] = value
-  }
-  const ids = [...(form.department_ids || [])].sort((a, b) => a - b)
-  if (ids.join(',') !== [...base.department_ids].sort((a, b) => a - b).join(',')) patch.department_ids = ids
-  return patch
-}
-
-/** Ошибки полей с сервера → поля формы (пароль проверяется общим правилом new_password). */
-export function formFieldErrors(fields) {
-  const out = {}
-  for (const [key, message] of Object.entries(fields || {})) {
-    const name = key === 'new_password' ? 'password' : key.split('.')[0]
-    if (!out[name]) out[name] = message
-  }
-  return out
-}
-
 // ---------- журнал изменений ----------
 
 export const ACTION_LABELS = {
   create: 'Создание', update: 'Изменение', delete: 'Удаление', login: 'Вход', password: 'Пароль', import: 'Загрузка',
+  grant: 'Выдача доступа',
 }
-export const ACTION_TONES = { create: 'green', update: 'blue', delete: 'red', login: 'gray', password: 'yellow', import: 'dark' }
+export const ACTION_TONES = { create: 'green', update: 'blue', delete: 'red', login: 'gray', password: 'yellow', import: 'dark', grant: 'green' }
 
 export const ENTITY_LABELS = {
   user: 'Пользователь',
   user_access: 'Доступ пользователя',
+  access_profile: 'Профиль доступа',
   department: 'Подразделение',
   hr_month: 'Месяц HR',
   hr_metrics: 'Метрики месяца',
@@ -209,6 +276,10 @@ export const FIELD_LABELS = {
   partner: 'Партнёр', product: 'Продукт', almi_product: 'Продукт АЛМИ', almi_version: 'Версия', status: 'Статус',
   cert_date: 'Дата сертификата', nda: 'NDA', agreement: 'Соглашение', type: 'Тип', bitrix: 'Битрикс',
   website: 'Сайт', last_modified: 'Изменено', is_shared: 'Общий', widgets: 'Виджеты',
+  profile: 'Профиль доступа', overrides: 'Личные настройки', services: 'Службы', extra_units: 'Дополнительные подразделения',
+  capabilities: 'Полномочия', auth_source: 'Способ входа', has_password: 'Пароль задан', key: 'Ключ', sort_order: 'Порядок',
+  org_scope: 'Область структуры', data_classes: 'Классы данных', drill_depth: 'Глубина детализации',
+  can_view_records: 'Исходные записи', can_export: 'Выгрузка', service_levels: 'Уровни служб',
 }
 
 /** Подписи ключей внутри раздела (green в colors.traffic_light — цвет, а не граница). */
@@ -221,6 +292,8 @@ const VALUE_LABELS = {
   direction: DIRECTION_LABELS,
   event_type: { hired: 'Приём', fired: 'Увольнение' },
   mode: { merge: 'Дополнение', replace: 'Замена' },
+  auth_source: { local: 'Пароль системы', ldap: 'Учётная запись домена' },
+  org_scope: { company: 'Вся компания', branch: 'Своя ветка структуры', unit: 'Своё подразделение' },
 }
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -244,8 +317,8 @@ export function formatAuditValue(value, key = '') {
   const dict = VALUE_LABELS[key]
   if (dict?.[text]) return dict[text]
   // Уровень доступа, возможно с пометкой «(свои подразделения)»
-  const level = text.match(/^(viewer|editor|manager)(\s.*)?$/)
-  if (level) return `${LEVEL_LABELS[level[1]]}${level[2] || ''}`
+  const level = text.match(/^(none|viewer|editor|manager)(\s.*)?$/)
+  if (level) return `${SERVICE_LEVEL_LABELS[level[1]]}${level[2] || ''}`
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return text.slice(0, 16).replace('T', ' ')
   return text
 }

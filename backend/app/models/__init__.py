@@ -1,9 +1,14 @@
 """Модели базы данных. Импорт пакета регистрирует все таблицы в Base.metadata."""
 from .core import (  # noqa: F401
     ACCESS_LEVELS,
+    AUTH_SOURCES,
     GLOBAL_ROLES,
     LIGHT_DIRECTIONS,
+    ORG_SCOPES,
+    SERVICE_ACCESS_LEVELS,
     WIDGET_TYPES,
+    AccessProfile,
+    AppSetting,
     AuditEntry,
     ColorPalette,
     CustomDashboard,
@@ -12,13 +17,16 @@ from .core import (  # noqa: F401
     DataImport,
     DataRevision,
     Department,
+    DepartmentHead,
+    OrgRevision,
     Service,
     ServiceAccess,
     ServiceSetting,
     TrafficLightRule,
     User,
     UserSession,
-    user_departments,
+    name_key,
+    user_access_units,
 )
 from .hr import (  # noqa: F401
     EVENT_TYPES,

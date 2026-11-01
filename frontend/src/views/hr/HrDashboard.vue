@@ -15,9 +15,9 @@ import { useQueryState } from '@/composables/useQueryState'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import { lightColor } from '@/components/charts/echarts'
-import { deltaTone, formatDelta, formatNumber, monthLabel } from '@/utils/format'
-import { KEY_METRICS, QUICK_PERIODS, funnelSteps, groupByCategory, lastMonths, metricMap, metricSeries } from '@/domain/hr'
+import { axisNumber, lightColor } from '@/components/charts/echarts'
+import { deltaTone, formatDelta, formatNumber, monthLabel, plural } from '@/utils/format'
+import { KEY_METRICS, QUICK_PERIODS, funnelSteps, groupByCategory, kpiHint, kpiLabel, lastMonths, metricMap, metricSeries } from '@/domain/hr'
 
 const auth = useAuthStore()
 const app = useAppStore()
@@ -27,7 +27,12 @@ const months = useAsync(() => hrApi.months())
 const allKeys = computed(() => (months.data.value || []).map((m) => m.key))
 const selected = computed(() => (filters.months.length ? filters.months : lastMonths(allKeys.value, filters.quick)))
 
-const { data, loading, reload } = useAsync(() => hrApi.dashboard(selected.value), { immediate: false })
+const { data, loading, reload, error } = useAsync(() => hrApi.dashboard(selected.value), { immediate: false })
+const loadError = computed(() => (months.error.value && !months.data.value ? months.error.value : error.value && !data.value ? error.value : null))
+function retry() {
+  if (months.error.value) months.reload()
+  else reload()
+}
 watch(selected, (v) => { if (v.length || months.data.value) reload() }, { immediate: true })
 
 function pickQuick(value) {
@@ -59,8 +64,10 @@ const layout = useDashboardLayout('hr', BLOCKS)
 const layoutOpen = ref(false)
 const blockStyle = (key) => ({ order: layout.orderOf(key) })
 
+const people = (v) => (v === null || v === undefined ? '—' : formatNumber(v, { unit: 'чел.' }))
 const flowOption = computed(() => ({
   legend: { data: ['Принято', 'Уволено', 'Прирост'] },
+  tooltip: { valueFormatter: people },
   xAxis: { type: 'category', data: labels.value },
   yAxis: { type: 'value', minInterval: 1 },
   series: [
@@ -76,7 +83,7 @@ const turnoverOption = computed(() => {
     legend: { data: ['Текучесть', 'По инициативе компании'] },
     tooltip: { valueFormatter: (v) => (v === null || v === undefined ? '—' : `${formatNumber(v)}%`) },
     xAxis: { type: 'category', data: labels.value, boundaryGap: false },
-    yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v) => `${axisNumber(v)}%` } },
     series: [
       { name: 'Текучесть', type: 'line', smooth: true, symbolSize: 7, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2.5 }, data: metricSeries(series.value, 'turnover'),
         markLine: target ? { symbol: 'none', label: { formatter: `Цель ${formatNumber(target)}%`, position: 'insideEndTop' }, lineStyle: { type: 'dashed', color: lightColor('red') }, data: [{ yAxis: target }] } : undefined },
@@ -86,6 +93,9 @@ const turnoverOption = computed(() => {
 })
 
 const funnel = computed(() => funnelSteps(latest.value))
+// Месяц без значений: пустые графики показывают «нет данных», а не пустую сетку
+const hasTurnover = computed(() => [...metricSeries(series.value, 'turnover'), ...metricSeries(series.value, 'turnover_company')].some((v) => v !== null))
+const hasFunnel = computed(() => funnel.value.some((s) => s.value !== null))
 const funnelOption = computed(() => ({
   tooltip: { trigger: 'item', formatter: (p) => `${p.name}: <b>${formatNumber(p.value)}</b>${funnel.value[p.dataIndex].share !== null ? ` · ${funnel.value[p.dataIndex].share}%` : ''}` },
   grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
@@ -97,7 +107,8 @@ const funnelOption = computed(() => ({
 
 const lightsOption = computed(() => ({
   legend: { data: ['Норма', 'Внимание', 'Критично'] },
-  xAxis: { type: 'category', data: labels.value },
+  tooltip: { axisPointer: { type: 'shadow' }, valueFormatter: (v) => `${formatNumber(v ?? 0)} ${plural(v ?? 0, ['метрика', 'метрики', 'метрик'])}` },
+  xAxis: { type: 'category', data: labels.value, axisLabel: { interval: 0, hideOverlap: true } },
   yAxis: { type: 'value', minInterval: 1 },
   series: [['green', 'Норма'], ['yellow', 'Внимание'], ['red', 'Критично']].map(([l, name]) => ({
     name, type: 'bar', stack: 'l', barMaxWidth: 30, itemStyle: { color: lightColor(l) }, data: series.value.map((s) => s.light_counts[l]),
@@ -108,6 +119,7 @@ const deptOption = computed(() => {
   const rows = (data.value?.departments || []).slice(0, 10)
   return {
     legend: { data: ['Принято', 'Уволено'] },
+    tooltip: { valueFormatter: people, axisPointer: { type: 'shadow' } },
     grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
     xAxis: { type: 'value', minInterval: 1 },
     yAxis: { type: 'category', inverse: true, data: rows.map((r) => r.department), axisLabel: { width: 180, overflow: 'truncate' } },
@@ -151,35 +163,47 @@ const periodText = computed(() => {
       <router-link v-if="auth.can('hr', 'editor')" to="/hr/data" class="btn btn-primary">Ввод данных</router-link>
     </EmptyState>
 
+    <EmptyState v-else-if="loadError" icon="alert" title="Не удалось загрузить дашборд" :text="loadError.message">
+      <button class="btn" type="button" @click="retry"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
+
     <div v-else class="blocks">
       <section v-if="layout.visible('kpi')" class="stack" :style="blockStyle('kpi')">
         <div class="section-title"><h2>Ключевые показатели</h2><span class="muted">{{ latest ? `за ${latest.label}, изменение к предыдущему месяцу` : '' }}</span></div>
+        <div v-if="latest?.missing?.length" class="missing-alert" role="alert" data-testid="hr-missing">
+          <AppIcon name="alert" :size="16" />
+          <div>
+            <strong>Не заполнены показатели со светофором за {{ latest.label.toLowerCase() }}</strong> — критичное нарушение полноты данных:
+            {{ latest.missing.join(', ') }}. До заполнения они показываются как «Нет данных».
+          </div>
+          <router-link v-if="auth.can('hr', 'editor')" :to="{ path: '/hr/data', query: { month: latest.key } }" class="btn btn-sm">Заполнить</router-link>
+        </div>
         <div class="grid grid-kpi">
           <KpiCard label="Принято за период" :value="data?.totals.hired" unit="чел." :loading="loading && !data" />
           <KpiCard label="Уволено за период" :value="data?.totals.fired" unit="чел." :loading="loading && !data" />
           <KpiCard label="Чистый прирост" :value="data?.totals.net" unit="чел." :loading="loading && !data" />
-          <KpiCard v-for="m in keyMetrics" :key="m.key" :label="m.label" :value="m.value" :unit="m.unit" :light="m.light"
-                   :delta="m.delta" :direction="m.direction" :target="m.target" :hint="m.description" />
+          <KpiCard v-for="m in keyMetrics" :key="m.key" :label="kpiLabel(m)" :value="m.value" :unit="m.unit" :light="m.light"
+                   :missing="m.missing" :delta="m.delta" :direction="m.direction" :target="m.target" :hint="kpiHint(m)" />
         </div>
       </section>
 
       <div class="grid grid-2" :style="{ order: Math.min(layout.orderOf('flow'), layout.orderOf('turnover')) }">
-        <ChartCard v-if="layout.visible('flow')" title="Приём и увольнение" hint="По месяцам периода" :empty="!series.length">
+        <ChartCard v-if="layout.visible('flow')" title="Приём и увольнение" hint="По месяцам периода" :loading="loading && !data" :empty="!series.length">
           <EChart :option="flowOption" />
         </ChartCard>
-        <ChartCard v-if="layout.visible('turnover')" title="Текучесть кадров" hint="Накопительно с начала года, %" :empty="!series.length">
+        <ChartCard v-if="layout.visible('turnover')" title="Текучесть кадров" hint="Накопительно с начала года, %" :loading="loading && !data" :empty="!hasTurnover">
           <EChart :option="turnoverOption" />
         </ChartCard>
       </div>
 
       <div class="grid grid-3" :style="{ order: Math.min(layout.orderOf('funnel'), layout.orderOf('lights'), layout.orderOf('departments')) }">
-        <ChartCard v-if="layout.visible('funnel')" title="Воронка найма" :hint="latest ? latest.label : ''" :height="260" :empty="!latest">
+        <ChartCard v-if="layout.visible('funnel')" title="Воронка найма" :hint="latest ? latest.label : ''" :height="260" :loading="loading && !data" :empty="!latest || !hasFunnel">
           <EChart :option="funnelOption" />
         </ChartCard>
-        <ChartCard v-if="layout.visible('lights')" title="Светофор по месяцам" hint="Сколько метрик в норме, требует внимания, критично" :height="260" :empty="!series.length">
+        <ChartCard v-if="layout.visible('lights')" title="Светофор по месяцам" hint="Сколько метрик в норме, требует внимания, критично" :height="260" :loading="loading && !data" :empty="!series.length">
           <EChart :option="lightsOption" />
         </ChartCard>
-        <ChartCard v-if="layout.visible('departments')" title="По подразделениям" hint="Приёмы и увольнения за период" :height="260" :empty="!data?.departments?.length">
+        <ChartCard v-if="layout.visible('departments')" title="По подразделениям" hint="Приёмы и увольнения за период" :height="260" :loading="loading && !data" :empty="!data?.departments?.length">
           <EChart :option="deptOption" />
         </ChartCard>
       </div>
@@ -201,7 +225,7 @@ const periodText = computed(() => {
                 <td class="num muted">{{ formatNumber(m.previous, { unit: m.unit }) }}</td>
                 <td class="num" :class="`delta-${deltaTone(m.delta, m.direction)}`">{{ formatDelta(m.delta, m.unit) }}</td>
                 <td class="num muted">{{ formatNumber(m.target, { unit: m.unit }) }}</td>
-                <td><LightBadge :light="m.light" /></td>
+                <td><LightBadge :light="m.light" :label="m.missing ? 'Нет данных' : ''" /><span v-if="m.missing" class="missing-mark" title="Показатель со светофором не заполнен — критичное нарушение">не заполнено</span></td>
               </tr>
             </tbody>
           </table>
@@ -221,4 +245,9 @@ const periodText = computed(() => {
 .group-row td { background: var(--surface-2); font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding-top: 8px; padding-bottom: 8px; }
 .strong { font-weight: 620; }
 .note { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+.missing-alert { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--light-red) 40%, var(--border)); background: color-mix(in srgb, var(--light-red) 8%, var(--surface)); color: var(--text); font-size: var(--fs-sm); line-height: 1.45; }
+.missing-alert > svg { color: var(--light-red); flex: 0 0 auto; margin-top: 2px; }
+.missing-alert > div { flex: 1; }
+.missing-alert strong { color: var(--light-red); }
+.missing-mark { margin-left: 8px; font-size: var(--fs-xs); font-weight: 620; color: var(--light-red); }
 </style>

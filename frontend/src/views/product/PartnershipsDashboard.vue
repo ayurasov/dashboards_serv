@@ -22,7 +22,7 @@ import { chartColors, cssVar, lightColor } from '@/components/charts/echarts'
 import { formatNumber } from '@/utils/format'
 import { LIGHT_LABELS } from '@/utils/lights'
 import {
-  PARTNERSHIP_STATUSES, PARTNERSHIP_TYPES, countByLight, countWord, fitSpans, groupLightRows, lightSegments, mergeOptions, orderStatuses,
+  PARTNERSHIP_STATUSES, PARTNERSHIP_TYPES, countWord, fitSpans, groupLightRows, lightSegments, mergeOptions, orderStatuses,
   share, shortRuleLabel, sortedEntries,
 } from '@/domain/partnerships'
 
@@ -35,13 +35,11 @@ const { state: f, reset, isDefault } = useQueryState({ year: '', status: '', alm
 const params = computed(() => ({ year: f.year, status: f.status, almi_product: f.almi_product }))
 
 const options = useAsync(() => partnershipsApi.options())
-const { data, loading, reload } = useAsync(() => partnershipsApi.analytics(params.value), { immediate: false })
-const records = useAsync(() => partnershipsApi.list(params.value), { immediate: false })
-watch(params, () => { reload(); records.reload() }, { immediate: true, deep: true })
+const { data, loading, reload, error } = useAsync(() => partnershipsApi.analytics(params.value), { immediate: false })
+watch(params, () => reload(), { immediate: true, deep: true })
 
 function refresh() {
   reload()
-  records.reload()
   options.reload()
   app.loadServices()
 }
@@ -69,13 +67,17 @@ const kpis = computed(() => {
 
 // ---------- светофор ----------
 const lightGroups = computed(() => groupLightRows(data.value?.lights || []))
-const recordLights = computed(() => countByLight(records.data.value || []))
+// Светофор записей считает сервер (analytics.record_lights): дашборду не нужен доступ к реестру
+const recordLights = computed(() => ({ green: 0, yellow: 0, red: 0, gray: 0, ...(data.value?.record_lights || {}) }))
 const recordSegments = computed(() => lightSegments(recordLights.value))
 const recordTotal = computed(() => recordSegments.value.reduce((s, x) => s + x.count, 0))
 
 const compact = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== '' && v !== null && v !== undefined))
 const registryQuery = computed(() => compact(params.value))
+// Переходы в реестр — только с правом на исходные записи (ADR-0009)
+const canRegistry = computed(() => auth.canRecords)
 function toRegistry(extra) {
+  if (!canRegistry.value) return
   router.push({ path: '/product/registry', query: compact({ ...params.value, ...extra }) })
 }
 
@@ -198,8 +200,8 @@ const periodText = computed(() => {
   <div class="page">
     <PageHeader title="Технологические партнёрства" :description="periodText" :updatedAt="app.service('project_product')?.data_updated_at">
       <button class="btn btn-ghost" type="button" title="Состав и порядок блоков" @click="layoutOpen = true"><AppIcon name="settings" :size="15" />Настроить</button>
-      <router-link :to="{ path: '/product/registry', query: registryQuery }" class="btn"><AppIcon name="list" :size="15" />Реестр</router-link>
-      <PdfButton report="partnerships/summary" />
+      <router-link v-if="canRegistry" :to="{ path: '/product/registry', query: registryQuery }" class="btn"><AppIcon name="list" :size="15" />Реестр</router-link>
+      <PdfButton report="partnerships/summary" :params="params" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </PageHeader>
 
@@ -220,6 +222,9 @@ const periodText = computed(() => {
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </EmptyState>
 
+    <EmptyState v-else-if="error && !data" icon="alert" title="Не удалось загрузить аналитику" :text="error.message">
+      <button class="btn" type="button" @click="refresh"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
     <EmptyState v-else-if="data && !data.total" icon="filter" title="Нет партнёрств по выбранным фильтрам" text="Измените или сбросьте фильтры.">
       <button class="btn" type="button" @click="reset">Сбросить фильтры</button>
     </EmptyState>
@@ -251,10 +256,10 @@ const periodText = computed(() => {
                 <span v-for="s in recordSegments" v-show="s.count" :key="s.light" class="seg" :class="s.light" :style="{ flexGrow: s.count }" :title="`${LIGHT_LABELS[s.light]}: ${s.count} (${formatNumber(s.share)}%)`" />
               </div>
               <div class="legend">
-                <button v-for="s in recordSegments" :key="s.light" class="legend-item" type="button" :title="`Открыть в реестре: ${LIGHT_LABELS[s.light].toLowerCase()}`" @click="toRegistry({ light: s.light })">
+                <button v-for="s in recordSegments" :key="s.light" class="legend-item" type="button" :disabled="!canRegistry" :title="canRegistry ? `Открыть в реестре: ${LIGHT_LABELS[s.light].toLowerCase()}` : LIGHT_LABELS[s.light]" @click="toRegistry({ light: s.light })">
                   <LightBadge :light="s.light" dot />{{ LIGHT_LABELS[s.light] }}
                   <b class="num">{{ formatNumber(s.count) }}</b><span class="muted num">{{ formatNumber(s.share) }}%</span>
-                  <AppIcon name="chevron-right" :size="12" class="go" />
+                  <AppIcon v-if="canRegistry" name="chevron-right" :size="12" class="go" />
                 </button>
               </div>
             </div>
@@ -343,7 +348,8 @@ const periodText = computed(() => {
 .legend-item { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px 0 9px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; transition: all var(--t-fast); }
 .legend-item b { color: var(--text); font-weight: 650; }
 .legend-item .go { color: var(--faint); opacity: 0; transition: opacity var(--t-fast); }
-.legend-item:hover { background: var(--surface); border-color: var(--border); color: var(--text); }
+.legend-item:hover:not(:disabled) { background: var(--surface); border-color: var(--border); color: var(--text); }
+.legend-item:disabled { cursor: default; color: inherit; }
 .legend-item:hover .go { opacity: 1; }
 
 .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); margin-top: var(--sp-5); }

@@ -35,7 +35,6 @@ const items = computed(() => compareMetrics(columns.data.value || [], pair.value
 const groups = computed(() => groupColumns(items.value))
 const counts = computed(() => toneCounts(items.value))
 const comparable = computed(() => pair.value.now.length > 0 && pair.value.prev.length > 0)
-const partial = computed(() => pair.value.mode === 'quick' && pair.value.prev.length > 0 && pair.value.prev.length < pair.value.weeks)
 
 // Мини-графики: недели обоих интервалов подряд.
 const sparkRows = computed(() => [...pair.value.prev, ...pair.value.now])
@@ -180,7 +179,6 @@ const weeksText = (n) => `${n} ${plural(n, ['неделя', 'недели', 'н�
         </div>
       </div>
       <p v-if="all.length && !comparable" class="note"><AppIcon name="info" :size="14" />Для сравнения не хватает недель: в отчёте {{ weeksText(all.length) }}. Выберите период короче.</p>
-      <p v-else-if="partial" class="note"><AppIcon name="info" :size="14" />Предыдущий интервал неполный — суммы за него меньше обычного.</p>
     </div>
 
     <template v-if="loadingFirst">

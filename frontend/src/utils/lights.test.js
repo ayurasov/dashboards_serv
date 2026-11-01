@@ -34,3 +34,12 @@ describe('traffic light (same rules as the server)', () => {
     expect(countLights(['red', 'green', 'red', undefined])).toEqual({ green: 1, yellow: 0, red: 2, gray: 1 })
   })
 })
+
+describe('незаполненный показатель со светофором', () => {
+  it('подпись — «Нет данных», а не цвет', async () => {
+    const { lightLabel, MISSING_LABEL } = await import('./lights')
+    expect(lightLabel('gray', true)).toBe(MISSING_LABEL)
+    expect(lightLabel('gray')).toBe('Нет оценки')
+    expect(lightLabel('red')).toBe('Критично')
+  })
+})
