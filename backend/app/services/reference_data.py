@@ -21,6 +21,7 @@ from ..models import (
     HrTarget,
     OrgRevision,
     PartnershipLightRule,
+    ReportRevision,
     Service,
     ServiceAccess,
     TrafficLightRule,
@@ -82,6 +83,8 @@ def ensure_org_settings(db: Session) -> None:
             db.add(AppSetting(key=key, value=value))
     if db.get(OrgRevision, 1) is None:
         db.add(OrgRevision(id=1, revision=0))
+    if db.get(ReportRevision, 1) is None:
+        db.add(ReportRevision(id=1, revision=0))
     db.flush()
 
 

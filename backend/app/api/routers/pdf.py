@@ -15,6 +15,7 @@ from ...core.db import get_db
 from ...models import User
 from ...services import access
 from ...services import partnerships as p_service
+from ...services import reports as reports_service
 from ...services.pdf import reports
 from ..deps import require_export
 from ..uploads import file_response
@@ -43,6 +44,8 @@ hr_registry_pdf = require_export("hr", records=True, data_class="personal")
 tp_pdf = require_export("tech")
 pp_pdf = require_export("project_product")
 pp_registry_pdf = require_export("project_product", records=True)
+# Сквозной отчёт — по области, глубине и классам данных пользователя; нужна только выгрузка
+report_pdf = require_export()
 
 
 @contextmanager
@@ -133,3 +136,14 @@ def partnerships_summary(year: int | None = None, status: str = "", almi_product
     with _pdf_slot(db):
         content = reports.partnerships_summary(db, rows, filters)
     return file_response(content, "Партнёрства — сводка.pdf")
+
+
+@router.get("/reports/scorecard", summary="Сквозной отчёт")
+def reports_scorecard(period: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+                                                 description="ГГГГ-ММ; по умолчанию — последний период с данными"),
+                      root: int | None = Query(None, ge=1), db: Session = Depends(get_db),
+                      user: User = Depends(report_pdf)):
+    data = reports_service.scorecard(db, user, period, root)
+    with _pdf_slot(db):
+        content = reports.report_scorecard(db, data)
+    return file_response(content, f"Сквозной отчёт {data['period']}.pdf")

@@ -49,7 +49,7 @@ def test_meta_for_any_user(client, login):
     assert [d["key"] for d in data["dimensions"]] == list(ACCESS_DIMENSIONS)
     assert [lvl["key"] for lvl in data["levels"]] == ["none", "viewer", "editor", "manager"]
     assert data["levels"][0]["label"] == "Нет" and data["max_drill_depth"] == MAX_DRILL_DEPTH
-    assert {c["key"] for c in data["capabilities"]} == {"org.manage", "users.manage"}
+    assert {c["key"] for c in data["capabilities"]} == {"org.manage", "users.manage", "reports.manage"}
     hr = data["services"][0]
     assert hr["key"] == "hr" and hr["has_dashboard"] and hr["levels"] == ["none", "viewer", "editor", "manager"]
     assert len(data["services"]) == 9

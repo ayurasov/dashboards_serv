@@ -144,8 +144,9 @@ class Report:
 
     def table(self, header: Sequence[str], rows: Sequence[Sequence], widths: Sequence[float] | None = None,
               lights: Sequence[str | None] | None = None, align_right_from: int | None = None,
-              bold_last: bool = False) -> None:
-        """Таблица с шапкой, «зеброй» и необязательной цветной меткой светофора в первой колонке."""
+              bold_last: bool = False, cell_lights: Sequence[Sequence[str | None]] | None = None) -> None:
+        """Таблица с шапкой, «зеброй» и необязательной цветной меткой светофора в первой колонке;
+        cell_lights — метки светофора у отдельных ячеек (строка × столбец)."""
         # Числовые столбцы выравниваются по правому краю. Выравнивание задаётся стилем абзаца:
         # ALIGN из TableStyle на Paragraph в ячейке не действует.
         def right(i: int) -> bool:
@@ -176,6 +177,10 @@ class Report:
             for i, light in enumerate(lights, start=1):
                 if light:
                     style.append(("LINEBEFORE", (0, i), (0, i), 3, self.light_color(light)))
+        for i, row_lights in enumerate(cell_lights or [], start=1):
+            for j, light in enumerate(row_lights):
+                if light:
+                    style.append(("LINEBEFORE", (j, i), (j, i), 2.5, self.light_color(light)))
         if align_right_from is not None:
             style.append(("ALIGN", (align_right_from, 1), (-1, -1), "RIGHT"))
         if bold_last and len(data) > 1:

@@ -21,7 +21,7 @@ from app.core.migrate import LEGACY_HEAD, alembic_config, upgrade
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
-HEAD = "0014_org_access"
+HEAD = "0015_reports"
 
 
 def _diff(url: str) -> list:
@@ -132,6 +132,66 @@ def test_0014_downgrade_and_upgrade(tmp_path):
         assert conn.execute(text("SELECT department_id FROM users WHERE id = 101")).scalar() == 102
         assert conn.execute(text("SELECT org_scope FROM service_access WHERE user_id = 101")).scalar() == "branch"
     engine.dispose()
+
+
+def _check_0015_roundtrip(url: str) -> None:
+    """0015: таблицы отчётов и ревизия; уникальность значения; откат удаляет отчёты и их настройку,
+    не трогая структуру и остальные настройки; повторное применение совпадает с моделями."""
+    from sqlalchemy.exc import IntegrityError
+
+    assert upgrade(url) == HEAD
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        assert conn.execute(text("SELECT revision FROM report_revision WHERE id = 1")).scalar() == 0
+        conn.execute(text("INSERT INTO departments (id, name, name_key, code, kind, sort_order, org_source, "
+                          "created_at, updated_at) VALUES (201, 'Компания', 'компания', 'C201', 'company', 0, "
+                          "'manual', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO indicators (id, key, name, description, unit, data_class, direction, rollup, "
+                          "rule_type, green_deviation, yellow_deviation, default_target, source_type, owner_service, "
+                          "expected_kinds, sort_order, is_active, created_at, updated_at) VALUES (1, 'fin.revenue', "
+                          "'Выручка', '', 'млн ₽', 'financial', 'higher_is_better', 'sum', 'target', 5, 15, NULL, "
+                          "'manual', 'finance', '[]', 10, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO indicator_values (indicator_id, department_id, period, value, target, comment, "
+                          "source, updated_at) VALUES (1, 201, '2026-07-01', 61.5, 64, '', 'manual', "
+                          "CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO unit_status_notes (department_id, period, status, comment, created_at) "
+                          "VALUES (201, '2026-07-01', 'watch', 'Следим', CURRENT_TIMESTAMP)"))
+        conn.execute(text("INSERT INTO app_settings (key, value, updated_at) VALUES "
+                          "('report_service_units', '{\"tech\": 201}', CURRENT_TIMESTAMP), "
+                          "('org_max_depth', '12', CURRENT_TIMESTAMP)"))
+    with engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(text("INSERT INTO indicator_values (indicator_id, department_id, period, value, comment, "
+                          "source, updated_at) VALUES (1, 201, '2026-07-01', 1, '', 'manual', CURRENT_TIMESTAMP)"))
+    with engine.connect() as conn, pytest.raises(IntegrityError):
+        conn.execute(text("INSERT INTO unit_status_notes (department_id, period, status, comment, created_at) "
+                          "VALUES (201, '2026-08-01', 'done', '', CURRENT_TIMESTAMP)"))
+    engine.dispose()
+
+    command.downgrade(alembic_config(url), "0014_org_access")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        tables = set(inspect(conn).get_table_names())
+        assert {"indicators", "indicator_values", "unit_status_notes", "report_revision"}.isdisjoint(tables)
+        assert set(conn.execute(text("SELECT key FROM app_settings")).scalars()) == {"org_max_depth"}
+        assert conn.execute(text("SELECT name FROM departments WHERE id = 201")).scalar() == "Компания"
+    engine.dispose()
+
+    assert upgrade(url) == HEAD
+    assert _diff(url) == []
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM report_revision")).scalar() == 1
+        assert conn.execute(text("SELECT COUNT(*) FROM indicators")).scalar() == 0
+    engine.dispose()
+
+
+def test_0015_downgrade_and_upgrade(tmp_path):
+    _check_0015_roundtrip(f"sqlite:///{tmp_path / 'reports.db'}")
+
+
+@pytest.mark.postgres
+def test_0015_downgrade_and_upgrade_on_postgres(pg_url):
+    _check_0015_roundtrip(pg_url)
 
 
 def test_downgrade_of_0012_is_refused(tmp_path):
