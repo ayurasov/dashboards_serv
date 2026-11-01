@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FUNNEL, KEY_METRICS, QUICK_PERIODS, funnelSteps, groupByCategory, lastMonths, metricMap, metricSeries } from './hr'
+import { FUNNEL, KEY_METRICS, QUICK_PERIODS, funnelSteps, groupByCategory, kpiHint, kpiLabel, lastMonths, metricMap, metricSeries } from './hr'
 
 const metric = (key, value, over = {}) => ({ key, value, label: key, category: 'hiring', category_label: 'Подбор', ...over })
 
@@ -62,5 +62,25 @@ describe('воронка найма', () => {
   })
   it('funnelSteps: пустой месяц', () => {
     expect(funnelSteps(null).map((s) => s.value)).toEqual([null, null, null, null])
+  })
+})
+
+describe('подписи карточек ключевых показателей', () => {
+  it('kpiLabel: длинные названия заменяются короткими и различимыми', () => {
+    const general = { key: 'probation_pass_rate', label: 'Прохождение испытательного срока (общее)' }
+    const adaptation = { key: 'probation_pass_rate_adaptation', label: 'Прохождение испытательного срока (адаптация)' }
+    expect(kpiLabel(general)).not.toBe(kpiLabel(adaptation))
+    // Первые 30 символов (две строки карточки) у подписей разные
+    expect(kpiLabel(general).slice(0, 30)).not.toBe(kpiLabel(adaptation).slice(0, 30))
+    expect(kpiLabel({ key: 'turnover', label: 'Текучесть кадров' })).toBe('Текучесть кадров')
+    expect(kpiLabel(null)).toBe('')
+  })
+  it('у каждой метрики KEY_METRICS короткая подпись не длиннее 40 символов', () => {
+    for (const key of KEY_METRICS) expect(kpiLabel({ key, label: key }).length).toBeLessThanOrEqual(40)
+  })
+  it('kpiHint: полное название и описание без повторов', () => {
+    expect(kpiHint({ label: 'Текучесть', description: 'Доля уволенных' })).toBe('Текучесть — Доля уволенных')
+    expect(kpiHint({ label: 'Текучесть', description: 'Текучесть' })).toBe('Текучесть')
+    expect(kpiHint({ label: 'Текучесть' })).toBe('Текучесть')
   })
 })

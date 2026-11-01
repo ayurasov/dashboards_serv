@@ -131,7 +131,7 @@ async function remove(row) {
     danger: true,
   })
   if (!ok) return
-  await tpApi.deleteReport(row.id)
+  try { await tpApi.deleteReport(row.id) } catch { return } // ошибку показал клиент API
   toastOk(`Неделя ${row.period} удалена`)
   editing.value = null
   reports.reload()
@@ -223,7 +223,7 @@ function onImported() {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" @click="openRow(r)">
+                  <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" :tabindex="canEdit ? 0 : undefined" @click="openRow(r)" @keydown.enter.self="openRow(r)">
                     <td class="sticky-col">
                       <div class="period">
                         <span class="period-code num">{{ r.period }}</span>

@@ -97,6 +97,7 @@ async function submit() {
 <style scoped>
 .drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 16px; border: 1.5px dashed var(--border-strong); border-radius: 12px; cursor: pointer; text-align: center; color: var(--text-2); transition: all var(--t-fast); }
 .drop:hover, .drop.dragging { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.drop:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
 .drop.has { border-style: solid; }
 .drop strong { color: var(--text); font-size: var(--fs-base); }
 .drop .muted { font-size: var(--fs-xs); }

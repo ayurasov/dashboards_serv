@@ -12,7 +12,7 @@ import { LIGHT_LABELS } from '@/utils/lights'
 
 /** Обзор: главное по каждой доступной службе — показатели, светофор, свежесть данных. */
 const auth = useAuthStore()
-const { data, loading } = useAsync(() => api.get('/overview'))
+const { data, loading, error, reload } = useAsync(() => api.get('/overview'))
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -39,6 +39,10 @@ function lightTotal(counts) {
       <div v-for="i in 3" :key="i" class="card skeleton" style="height: 260px" />
     </div>
 
+    <EmptyState v-else-if="error && !data" icon="alert" title="Не удалось загрузить обзор" :text="error.message">
+      <button class="btn" type="button" @click="reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
+
     <EmptyState v-else-if="data && !data.services.length" icon="lock" title="Нет доступа к службам"
                 text="Администратор ещё не выдал вам доступ ни к одной службе. Обратитесь к нему — после этого здесь появятся показатели." />
 
@@ -57,7 +61,7 @@ function lightTotal(counts) {
         <template v-else>
           <div v-if="lightTotal(s.light_counts)" class="lights" :title="`Светофор: ${s.light_counts.green} в норме, ${s.light_counts.yellow} требуют внимания, ${s.light_counts.red} критично`">
             <div class="bar">
-              <span v-for="l in ['green', 'yellow', 'red']" :key="l" :class="l" :style="{ flex: s.light_counts[l] }" />
+              <span v-for="l in ['green', 'yellow', 'red']" v-show="s.light_counts[l]" :key="l" :class="l" :style="{ flex: s.light_counts[l] }" />
             </div>
             <div class="legend">
               <span v-for="l in ['green', 'yellow', 'red']" :key="l"><LightBadge :light="l" dot /> {{ LIGHT_LABELS[l] }} <b class="num">{{ s.light_counts[l] }}</b></span>
@@ -129,6 +133,7 @@ function lightTotal(counts) {
 .kpi dd { margin: 3px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; font-size: 19px; font-weight: 660; letter-spacing: -0.01em; }
 .kpi dd small { font-size: var(--fs-xs); font-weight: 600; }
 .s-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.s-foot > .muted { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .imports { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .imports li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); flex-wrap: wrap; }
 .imports li:last-child { border-bottom: 0; }

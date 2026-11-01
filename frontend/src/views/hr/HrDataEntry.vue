@@ -121,7 +121,7 @@ async function save() {
 
 async function saveComment() {
   const text = comment.value.trim()
-  await hrApi.updateMonth(current.value, { comment: text })
+  try { await hrApi.updateMonth(current.value, { comment: text }) } catch { return } // ошибку показал клиент API
   savedComment.value = text
   comment.value = text
   toastOk('Комментарий сохранён')
@@ -205,7 +205,7 @@ async function removeMonth() {
     confirmText: 'Удалить месяц', danger: true,
   })
   if (!ok) return
-  await hrApi.deleteMonth(m.key)
+  try { await hrApi.deleteMonth(m.key) } catch { return } // ошибку показал клиент API
   toastOk(`Месяц «${m.label}» удалён`)
   noteDraft.value = ''
   form.value = {}
@@ -233,7 +233,7 @@ async function addNote() {
 async function removeNote(note) {
   const preview = note.content.length > 160 ? `${note.content.slice(0, 160)}…` : note.content
   if (!await confirm({ title: 'Удалить заметку?', message: preview, confirmText: 'Удалить', danger: true })) return
-  await hrApi.deleteNote(note.id)
+  try { await hrApi.deleteNote(note.id) } catch { return } // ошибку показал клиент API
   notes.value = notes.value.filter((n) => n.id !== note.id)
   toastOk('Заметка удалена')
 }

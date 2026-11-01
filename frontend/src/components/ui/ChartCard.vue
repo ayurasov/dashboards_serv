@@ -5,6 +5,8 @@ defineProps({
   hint: { type: String, default: '' },
   height: { type: [Number, String], default: 300 },
   empty: { type: Boolean, default: false },
+  // Первая загрузка: заглушка вместо «нет данных», которое иначе мелькает до ответа сервера
+  loading: { type: Boolean, default: false },
   emptyText: { type: String, default: 'Нет данных за выбранный период' },
 })
 </script>
@@ -20,7 +22,8 @@ defineProps({
       <slot name="actions" />
     </header>
     <div class="card-body" :style="{ height: typeof height === 'number' ? `${height}px` : height }">
-      <div v-if="empty" class="empty">{{ emptyText }}</div>
+      <div v-if="loading" class="skeleton fill" aria-busy="true" />
+      <div v-else-if="empty" class="empty">{{ emptyText }}</div>
       <slot v-else />
     </div>
   </section>
@@ -32,4 +35,5 @@ defineProps({
 .hint { margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); }
 .card-body { position: relative; padding-top: 8px; }
 .empty { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: var(--fs-sm); }
+.fill { height: 100%; }
 </style>

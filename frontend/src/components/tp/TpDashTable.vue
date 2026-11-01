@@ -3,8 +3,8 @@ import { computed, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import LightBadge from '@/components/ui/LightBadge.vue'
-import { TABLE_COLUMNS, clientInfo, metricDigits, tableRows, totals, weekLight } from '@/domain/tp'
-import { formatNumber, plural } from '@/utils/format'
+import { TABLE_COLUMNS, clientInfo, tableCell, tableRows, totals, weekLight } from '@/domain/tp'
+import { plural } from '@/utils/format'
 
 /** Детальная таблица недель: поиск, сортировка по столбцу, точки светофора, строка итогов. */
 const props = defineProps({
@@ -28,7 +28,7 @@ function sortBy(key) {
 
 const list = computed(() => tableRows(props.rows, { search: search.value, client: props.client, sortKey: sortKey.value, sortDir: sortDir.value }))
 const sums = computed(() => totals(list.value, METRICS.map((c) => c.key)))
-const cell = (value, key) => formatNumber(value, { digits: metricDigits(key) })
+const cell = (value, key) => tableCell(value, key)
 const dots = computed(() => list.value.map((r) => Object.fromEntries(METRICS.filter((c) => c.dot).map((c) => [c.key, weekLight(r, c.key, props.rules[c.key])]))))
 
 const hint = computed(() => {

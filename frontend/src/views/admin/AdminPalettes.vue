@@ -37,7 +37,8 @@ async function activate(p) {
 }
 async function remove(p) {
   if (!await confirm({ title: `Удалить палитру «${p.name}»?`, message: 'Палитру нельзя будет восстановить.', confirmText: 'Удалить', danger: true })) return
-  const result = await adminApi.deletePalette(p.id)
+  let result
+  try { result = await adminApi.deletePalette(p.id) } catch { return } // ошибку показал клиент API
   toastOk(result?.message || 'Палитра удалена')
   reload()
 }

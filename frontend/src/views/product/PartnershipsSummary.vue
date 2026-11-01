@@ -13,7 +13,7 @@ import { partnershipsApi } from '@/api/services'
 import { useAuthStore } from '@/stores/auth'
 import { useAsync } from '@/composables/useAsync'
 import { useQueryState } from '@/composables/useQueryState'
-import { cssVar, lightColor } from '@/components/charts/echarts'
+import { axisNumber, cssVar, lightColor } from '@/components/charts/echarts'
 import { formatNumber } from '@/utils/format'
 import { LIGHT_LABELS } from '@/utils/lights'
 import { countWord, lightSegments, orderStatuses, share, sortedEntries, summaryTotals, yearDelta } from '@/domain/partnerships'
@@ -80,7 +80,7 @@ const docsOption = computed(() => ({
   legend: { data: ['NDA подписан', 'Соглашение подписано'] },
   tooltip: { valueFormatter: (v) => (v === null || v === undefined ? '—' : `${formatNumber(v)}%`) },
   xAxis: { type: 'category', data: years.value, boundaryGap: false },
-  yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
+  yAxis: { type: 'value', max: 100, axisLabel: { formatter: (v) => `${axisNumber(v)}%` } },
   series: [
     { name: 'NDA подписан', type: 'line', symbolSize: 7, lineStyle: { width: 2 }, itemStyle: { color: cssVar('--chart-2') },
       data: periods.value.map((p) => share(p.nda_count, p.total)) },

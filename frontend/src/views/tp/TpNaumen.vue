@@ -31,7 +31,7 @@ const { state: f, reset, isDefault } = useQueryState({ months: 12, year: 0, org:
 
 const filters = useAsync(() => tpApi.naumenFilters())
 const params = computed(() => ({ year: f.year || undefined, org: f.org || undefined, months: f.months || undefined }))
-const { data: raw, loading, reload } = useAsync(() => tpApi.naumenSummary(params.value), { immediate: false })
+const { data: raw, loading, reload, error } = useAsync(() => tpApi.naumenSummary(params.value), { immediate: false })
 watch(params, () => reload(), { immediate: true })
 
 const noTickets = computed(() => !!filters.data.value && !filters.data.value.years.length)
@@ -114,7 +114,7 @@ const shareOption = computed(() => {
     legend: { data: ['Просрочено', 'Возобновлено'] },
     tooltip: { formatter: (items) => tipTitle(items[0].dataIndex) + items.map((p) => fmt(p, p.seriesIndex === 0 ? 'overdue' : 'reopened')).join('<br>') },
     xAxis: { type: 'category', data: labels.value, boundaryGap: false },
-    yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v) => `${axisNumber(v)}%` } },
     series: [
       { name: 'Просрочено', type: 'line', smooth: 0.25, smoothMonotone: 'x', showSymbol: months.value.length <= 18, symbolSize: 7, lineStyle: { width: 2 }, itemStyle: { color: c[0] },
         areaStyle: { opacity: 0.08 }, data: months.value.map((m) => m.overdue_pct),
@@ -239,7 +239,10 @@ const overdueNote = `Просрочка: до ${OVERDUE_LEVELS.yellow}% — но
         </label>
       </FilterBar>
 
-      <EmptyState v-if="nothingFound" icon="filter" title="Нет заявок по выбранным фильтрам" text="Расширьте период, выберите другой год или организацию.">
+      <EmptyState v-if="error && !raw" icon="alert" title="Не удалось загрузить заявки" :text="error.message">
+        <button class="btn" type="button" @click="reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+      </EmptyState>
+      <EmptyState v-else-if="nothingFound" icon="filter" title="Нет заявок по выбранным фильтрам" text="Расширьте период, выберите другой год или организацию.">
         <button class="btn" type="button" @click="reset"><AppIcon name="refresh" :size="14" />Сбросить фильтры</button>
       </EmptyState>
 
@@ -305,7 +308,7 @@ const overdueNote = `Просрочка: до ${OVERDUE_LEVELS.yellow}% — но
                     <tr><th class="org-col">Организация</th><th class="num">Заявок</th><th class="num">Закрыто</th><th class="num">Просрочено</th><th class="num" title="Доля просроченных заявок">Доля</th><th class="num" title="Среднее время обработки заявки">Обработка</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-for="o in orgRows" :key="o.org" class="clickable" :class="{ selected: f.org === o.org }" :title="f.org === o.org ? 'Показать все организации' : 'Показать только эту организацию'" @click="pickOrg(o.org)">
+                    <tr v-for="o in orgRows" :key="o.org" class="clickable" :class="{ selected: f.org === o.org }" :title="f.org === o.org ? 'Показать все организации' : 'Показать только эту организацию'" tabindex="0" @click="pickOrg(o.org)" @keydown.enter.self="pickOrg(o.org)">
                       <td class="org-col">
                         <span class="org-name">
                           <span class="ellipsis">{{ o.org }}</span>

@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { isTopModal, popModal, pushModal, restoreFocus, trapFocus } from '@/components/ui/modalStack'
 
 /**
  * Боковая панель карточки: Esc и щелчок по фону закрывают (если поверх не открыт другой диалог),
@@ -12,20 +13,27 @@ defineProps({
 })
 const emit = defineEmits(['close'])
 const panel = ref(null)
+let token = null
+let opener = null
 
 function onKey(event) {
+  // Поверх панели открыто подтверждение — клавиши принадлежат ему
+  if (!isTopModal(token)) return
+  if (event.key === 'Tab') return trapFocus(event, panel.value)
   if (event.key !== 'Escape') return
   const active = document.activeElement
   if (!active || active === document.body || panel.value?.contains(active)) emit('close')
 }
 onMounted(() => {
+  opener = document.activeElement
+  token = pushModal()
   document.addEventListener('keydown', onKey)
-  document.body.style.overflow = 'hidden'
   panel.value?.focus()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
-  document.body.style.overflow = ''
+  popModal(token)
+  restoreFocus(opener)
 })
 </script>
 

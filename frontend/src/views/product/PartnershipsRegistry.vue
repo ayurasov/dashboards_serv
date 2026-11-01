@@ -43,7 +43,7 @@ watch(() => f.search, (v) => {
 // Светофор отбирается на странице: так полоса оценок показывает все записи выборки
 const params = computed(() => ({ year: f.year, status: f.status, almi_product: f.almi_product, direction: f.direction, type: f.type, search: query.value }))
 const exportParams = computed(() => ({ ...params.value, light: f.light }))
-const { data, loading, reload } = useAsync(() => partnershipsApi.list(params.value), { immediate: false })
+const { data, loading, reload, error } = useAsync(() => partnershipsApi.list(params.value), { immediate: false })
 watch(params, () => reload(), { immediate: true, deep: true })
 
 const all = computed(() => data.value || [])
@@ -112,7 +112,7 @@ function onDeleted() {
 async function remove(row) {
   const ok = await confirm({ title: 'Удалить партнёрство?', message: `${row.partner}${row.product ? ` — ${row.product}` : ''}\nДействие попадёт в журнал изменений.`, confirmText: 'Удалить', danger: true })
   if (!ok) return
-  await partnershipsApi.remove(row.id)
+  try { await partnershipsApi.remove(row.id) } catch { return } // ошибку показал клиент API
   toastOk('Партнёрство удалено')
   onDeleted()
 }
@@ -191,7 +191,7 @@ const createDefaults = computed(() => ({ status: f.status || 'В работе', 
               </tr>
             </thead>
             <tbody v-if="data">
-              <tr v-for="r in rows" :key="r.id" class="clickable" @click="openRow(r)">
+              <tr v-for="r in rows" :key="r.id" class="clickable" tabindex="0" @click="openRow(r)" @keydown.enter.self="openRow(r)">
                 <td class="col-light">
                   <span class="light-hit" tabindex="0" :aria-label="`Светофор: ${LIGHT_LABELS[r.light]}`" @mouseenter="showTip($event, r)" @mouseleave="hideTip" @focus="showTip($event, r)" @blur="hideTip">
                     <span class="ldot" :class="r.light" />
@@ -234,6 +234,9 @@ const createDefaults = computed(() => ({ status: f.status || 'В работе', 
           <div v-if="loading && !data" class="skel">
             <div v-for="i in 8" :key="i" class="skeleton" />
           </div>
+          <EmptyState v-else-if="error && !data" compact icon="alert" title="Не удалось загрузить реестр" :text="error.message">
+            <button class="btn btn-sm" type="button" @click="reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+          </EmptyState>
           <EmptyState v-else-if="data && !rows.length" compact icon="search" title="Ничего не найдено" text="Измените условия поиска или сбросьте фильтры.">
             <button class="btn btn-sm" type="button" @click="reset">Сбросить фильтры</button>
           </EmptyState>

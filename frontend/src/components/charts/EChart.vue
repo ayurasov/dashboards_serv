@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { baseOption, echarts, mergeOption } from './echarts'
+import { baseOption, cssVar, echarts, fitMarkLines, mergeOption, ruAxisLabels, solidSymbols } from './echarts'
 import { useAppStore } from '@/stores/app'
 import { usePaletteStore } from '@/stores/palette'
 
@@ -28,7 +28,8 @@ function render() {
     delete base.grid
     base.tooltip = { ...base.tooltip, trigger: 'item' }
   }
-  chart.value.setOption(mergeOption(base, props.option), { notMerge: true })
+  const option = solidSymbols(fitMarkLines(ruAxisLabels(mergeOption(base, props.option))), cssVar('--surface', '#fff'))
+  chart.value.setOption(option, { notMerge: true })
 }
 
 onMounted(() => {

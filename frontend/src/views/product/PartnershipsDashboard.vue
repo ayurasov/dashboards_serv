@@ -35,7 +35,7 @@ const { state: f, reset, isDefault } = useQueryState({ year: '', status: '', alm
 const params = computed(() => ({ year: f.year, status: f.status, almi_product: f.almi_product }))
 
 const options = useAsync(() => partnershipsApi.options())
-const { data, loading, reload } = useAsync(() => partnershipsApi.analytics(params.value), { immediate: false })
+const { data, loading, reload, error } = useAsync(() => partnershipsApi.analytics(params.value), { immediate: false })
 watch(params, () => reload(), { immediate: true, deep: true })
 
 function refresh() {
@@ -222,6 +222,9 @@ const periodText = computed(() => {
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </EmptyState>
 
+    <EmptyState v-else-if="error && !data" icon="alert" title="Не удалось загрузить аналитику" :text="error.message">
+      <button class="btn" type="button" @click="refresh"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
     <EmptyState v-else-if="data && !data.total" icon="filter" title="Нет партнёрств по выбранным фильтрам" text="Измените или сбросьте фильтры.">
       <button class="btn" type="button" @click="reset">Сбросить фильтры</button>
     </EmptyState>

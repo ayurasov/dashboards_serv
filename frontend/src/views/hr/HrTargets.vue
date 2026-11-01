@@ -83,7 +83,7 @@ async function save() {
 async function remove(row) {
   const ok = await confirm({ title: 'Удалить цель?', message: `${row.metric_label} — ${row.label || row.year}`, confirmText: 'Удалить', danger: true })
   if (!ok) return
-  await hrApi.deleteTarget(row.id)
+  try { await hrApi.deleteTarget(row.id) } catch { return } // ошибку показал клиент API
   toastOk('Цель удалена')
   reload()
 }
@@ -105,12 +105,12 @@ async function remove(row) {
 
     <template v-else-if="data">
       <section v-if="latest" class="stack">
-        <div class="section-title"><h2>Выполнение целей {{ latest.year }} года</h2><span class="muted">по последнему заполненному месяцу</span></div>
+        <div class="section-title"><h2>Выполнение целей {{ latest.year }} года</h2><span class="muted">по последнему заполненному месяцу года</span></div>
         <div class="grid grid-kpi">
           <KpiCard :label="`Целей на ${latest.year} год`" :value="latest.withTarget" />
-          <KpiCard label="Цель достигнута" :value="latest.counts.green" :light="latest.counts.green ? 'green' : ''" />
-          <KpiCard label="Близко к цели" :value="latest.counts.yellow" :light="latest.counts.yellow ? 'yellow' : ''" hint="Отклонение от цели не больше 10%" />
-          <KpiCard label="Цель не достигнута" :value="latest.counts.red" :light="latest.counts.red ? 'red' : ''" />
+          <KpiCard label="Цель достигнута" :value="latest.counts.green" :light="latest.counts.green ? 'green' : ''" :caption="`из ${latest.withTarget}`" />
+          <KpiCard label="Близко к цели" :value="latest.counts.yellow" :light="latest.counts.yellow ? 'yellow' : ''" :caption="`из ${latest.withTarget}`" hint="Отклонение от цели не больше 10%" />
+          <KpiCard label="Цель не достигнута" :value="latest.counts.red" :light="latest.counts.red ? 'red' : ''" :caption="`из ${latest.withTarget}`" />
         </div>
       </section>
 
@@ -123,8 +123,10 @@ async function remove(row) {
 
       <p class="footnote muted">
         <AppIcon name="info" :size="14" />
-        Факт — значение из последнего месяца, в котором метрика заполнена. Статус учитывает направление метрики;
-        «Близко к цели» — отклонение не больше 10%. Справочные значения (например, факт прошлого года) не оцениваются.
+        Факт цели — значение из последнего заполненного месяца того же года: цель прошлого года не оценивается
+        данными текущего, у цели будущего года факта ещё нет. Статус учитывает направление метрики; «Близко к цели» —
+        отклонение не больше 10%. Справочные значения (например, факт прошлого года) не оцениваются и сравниваются
+        с последним фактом.
       </p>
     </template>
 

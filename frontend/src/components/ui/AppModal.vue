@@ -1,8 +1,12 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from './AppIcon.vue'
+import { isTopModal, popModal, pushModal, restoreFocus, trapFocus } from './modalStack'
 
-/** Модальное окно: Esc и щелчок по фону закрывают, фокус переходит в окно. */
+/**
+ * Модальное окно: Esc и щелчок по фону закрывают, фокус переходит в окно и не уходит из него по Tab,
+ * после закрытия возвращается к элементу, который открыл окно. Название окна — его заголовок.
+ */
 const props = defineProps({
   title: { type: String, required: true },
   subtitle: { type: String, default: '' },
@@ -11,30 +15,39 @@ const props = defineProps({
 })
 const emit = defineEmits(['close'])
 const dialog = ref(null)
+const titleId = useId()
+const subtitleId = useId()
+let token = null
+let opener = null
 
 function onKey(event) {
+  // Клавиши обрабатывает только верхнее окно: подтверждение поверх формы закрывается само по себе
+  if (!isTopModal(token)) return
   if (event.key === 'Escape' && props.closable) emit('close')
+  else trapFocus(event, dialog.value)
 }
 onMounted(() => {
+  opener = document.activeElement
+  token = pushModal()
   document.addEventListener('keydown', onKey)
-  document.body.style.overflow = 'hidden'
   dialog.value?.focus()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
-  document.body.style.overflow = ''
+  popModal(token)
+  restoreFocus(opener)
 })
 </script>
 
 <template>
   <Teleport to="body">
     <div class="overlay" @mousedown.self="closable && emit('close')">
-      <section ref="dialog" class="dialog" role="dialog" aria-modal="true" tabindex="-1"
+      <section ref="dialog" class="dialog" role="dialog" aria-modal="true" tabindex="-1" :aria-labelledby="titleId" :aria-describedby="subtitle ? subtitleId : undefined"
                :style="{ width: typeof width === 'number' ? `${width}px` : width }">
         <header class="head">
           <div>
-            <h2>{{ title }}</h2>
-            <p v-if="subtitle" class="sub">{{ subtitle }}</p>
+            <h2 :id="titleId">{{ title }}</h2>
+            <p v-if="subtitle" :id="subtitleId" class="sub">{{ subtitle }}</p>
           </div>
           <button v-if="closable" class="close" type="button" aria-label="Закрыть" @click="emit('close')">
             <AppIcon name="x" :size="18" />
@@ -48,7 +61,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px; background: var(--overlay); backdrop-filter: blur(3px); animation: fade .15s ease; }
+.overlay { position: fixed; inset: 0; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 24px; background: var(--overlay); backdrop-filter: blur(3px); animation: fade .15s ease; }
 .dialog { max-width: 100%; max-height: calc(100vh - 48px); display: flex; flex-direction: column; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); outline: none; animation: rise .18s var(--ease); }
 .head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 22px 6px; }
 .head > div { flex: 1; min-width: 0; }
@@ -60,4 +73,6 @@ h2 { font-size: 17px; }
 .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 16px 16px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.99); } }
+/* Телефон: окно во всю ширину с небольшим полем; колонка minmax(0, 1fr) не даёт окну шире экрана */
+@media (max-width: 560px) { .overlay { padding: 12px; } }
 </style>

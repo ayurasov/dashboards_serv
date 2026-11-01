@@ -28,6 +28,8 @@ const emit = defineEmits(['reset'])
 .fields :deep(.field) { flex-direction: row; align-items: center; gap: 8px; }
 .fields :deep(.field > span) { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 620; white-space: nowrap; }
 .fields :deep(.select), .fields :deep(.input) { height: 32px; width: auto; min-width: 150px; }
+/* Длинное значение в списке (название подразделения, направления) не растягивает фильтр на всю строку */
+.fields :deep(.select) { max-width: 320px; text-overflow: ellipsis; }
 .side { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .summary { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
 </style>

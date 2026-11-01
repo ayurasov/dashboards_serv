@@ -23,7 +23,7 @@ const { state: f, reset, isDefault } = useQueryState({ month: '', event_type: ''
 const months = useAsync(() => hrApi.months())
 const departments = useAsync(() => hrApi.departments())
 const params = computed(() => ({ month: f.month, event_type: f.event_type, department: f.department, search: f.search.trim() }))
-const { data, loading, reload } = useAsync(() => hrApi.events(params.value), { immediate: false })
+const { data, loading, reload, error } = useAsync(() => hrApi.events(params.value), { immediate: false })
 let timer
 watch(params, () => { clearTimeout(timer); timer = setTimeout(reload, f.search ? 250 : 0) }, { immediate: true, deep: true })
 
@@ -41,7 +41,7 @@ const rows = computed(() => {
   return list.sort((a, b) => String(a[f.sort] ?? '').localeCompare(String(b[f.sort] ?? ''), 'ru') * dir)
 })
 const hired = computed(() => rows.value.filter((r) => r.event_type === 'hired').length)
-const summary = computed(() => `${rows.value.length} ${plural(rows.value.length, ['запись', 'записи', 'записей'])}`)
+const summary = computed(() => (data.value ? `${rows.value.length} ${plural(rows.value.length, ['запись', 'записи', 'записей'])}` : ''))
 
 // ---------- форма ----------
 const editing = ref(null)
@@ -82,9 +82,10 @@ async function save() {
 }
 async function remove(row) {
   if (!await confirm({ title: 'Удалить запись?', message: `${row.full_name}, ${formatDate(row.event_date)}`, confirmText: 'Удалить', danger: true })) return
-  await hrApi.deleteEvent(row.id)
+  try { await hrApi.deleteEvent(row.id) } catch { return } // ошибку показал клиент API
   toastOk('Запись удалена')
   reload()
+  months.reload()
 }
 watch(() => form.month, (m, old) => {
   if (!editing.value?.id && m && (!form.event_date || form.event_date.slice(0, 7) === old)) form.event_date = `${m}-01`
@@ -115,10 +116,10 @@ watch(() => form.month, (m, old) => {
     </FilterBar>
 
     <div class="grid grid-kpi">
-      <KpiCard label="Записей" :value="rows.length" />
-      <KpiCard label="Приёмов" :value="hired" unit="чел." />
-      <KpiCard label="Увольнений" :value="rows.length - hired" unit="чел." />
-      <KpiCard label="Чистый прирост" :value="hired * 2 - rows.length" unit="чел." />
+      <KpiCard label="Записей" :value="rows.length" :loading="loading && !data" />
+      <KpiCard label="Приёмов" :value="hired" unit="чел." :loading="loading && !data" />
+      <KpiCard label="Увольнений" :value="rows.length - hired" unit="чел." :loading="loading && !data" />
+      <KpiCard label="Чистый прирост" :value="hired * 2 - rows.length" unit="чел." :loading="loading && !data" />
     </div>
 
     <section class="card">
@@ -133,7 +134,7 @@ watch(() => form.month, (m, old) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" @click="canEdit && open(r)">
+            <tr v-for="r in rows" :key="r.id" :class="{ clickable: canEdit }" :tabindex="canEdit ? 0 : undefined" @click="canEdit && open(r)" @keydown.enter.self="canEdit && open(r)">
               <td class="nowrap num">{{ formatDate(r.event_date) }}</td>
               <td><span class="badge" :class="r.event_type === 'hired' ? 'badge-green' : 'badge-red'">{{ r.event_type === 'hired' ? 'Приём' : 'Увольнение' }}</span></td>
               <td class="strong">{{ r.full_name }}</td>
@@ -146,7 +147,10 @@ watch(() => form.month, (m, old) => {
             </tr>
           </tbody>
         </table>
-        <EmptyState v-if="!loading && !rows.length" compact icon="search" title="Ничего не найдено" text="Измените фильтры или добавьте запись." />
+        <EmptyState v-if="error && !data" compact icon="alert" title="Не удалось загрузить реестр" :text="error.message">
+          <button class="btn btn-sm" type="button" @click="reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+        </EmptyState>
+        <EmptyState v-else-if="!loading && !rows.length" compact icon="search" title="Ничего не найдено" text="Измените фильтры или добавьте запись." />
         <div v-if="loading && !data" class="skeleton" style="height: 240px; margin: 12px" />
       </div>
     </section>

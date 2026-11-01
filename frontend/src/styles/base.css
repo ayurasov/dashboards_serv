@@ -138,6 +138,7 @@ p { margin: 0; }
 .table tbody tr { transition: background var(--t-fast); }
 .table tbody tr:hover { background: var(--row-hover); }
 .table tbody tr.clickable { cursor: pointer; }
+.table tbody tr:focus-visible { outline-offset: -2px; border-radius: 0; }
 .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .table tfoot td { font-weight: 620; background: var(--surface-2); border-top: 1px solid var(--border); }
 .table-compact td { padding: 7px 12px; }

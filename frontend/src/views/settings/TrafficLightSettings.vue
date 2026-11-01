@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -90,11 +90,14 @@ function discard() {
   rules.value = rules.value.map((r) => toDraft(r._saved))
 }
 
-// Несохранённые изменения не теряются молча
-onBeforeRouteLeave(async () => {
-  if (!dirtyRules.value.length) return true
+// Несохранённые изменения не теряются молча — ни при уходе со страницы, ни при переходе
+// к светофору другой службы (тот же экран, меняется только параметр адреса)
+async function confirmLeave(to, from) {
+  if (!dirtyRules.value.length || (to && from && to.path === from.path)) return true
   return confirm({ title: 'Уйти без сохранения?', message: `Не сохранено правил: ${dirtyRules.value.length}. Изменения будут потеряны.`, confirmText: 'Уйти' })
-})
+}
+onBeforeRouteLeave(confirmLeave)
+onBeforeRouteUpdate(confirmLeave)
 function beforeUnload(event) {
   if (dirtyRules.value.length) event.preventDefault()
 }

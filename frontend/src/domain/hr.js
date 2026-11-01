@@ -3,6 +3,26 @@
 export const KEY_METRICS = ['turnover', 'turnover_company', 'avg_time_to_fill', 'offers_accepted_pct',
   'probation_pass_rate', 'probation_pass_rate_adaptation', 'adaptation_dismissals']
 
+/**
+ * Короткие подписи карточек ключевых показателей. Полные названия обрезаются на второй строке
+ * одинаково («Прохождение испытательного срока…» у общего и у адаптационного) — карточки не различить.
+ * Полное название остаётся в подсказке карточки.
+ */
+export const KPI_SHORT_LABELS = {
+  avg_time_to_fill: 'Время закрытия позиции',
+  probation_pass_rate: 'Испытательный срок пройден, всего',
+  probation_pass_rate_adaptation: 'Испытательный срок пройден, адаптация',
+}
+
+export function kpiLabel(metric) {
+  return KPI_SHORT_LABELS[metric?.key] || metric?.label || ''
+}
+
+/** Подсказка карточки: полное название метрики и её описание. */
+export function kpiHint(metric) {
+  return [metric?.label, metric?.description].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' — ')
+}
+
 export const FUNNEL = [
   { key: 'resumes_screened', label: 'Отобрано резюме' },
   { key: 'interviews_hr', label: 'Интервью с HR' },

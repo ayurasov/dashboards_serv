@@ -49,7 +49,8 @@ const chartOption = computed(() => {
   const two = axes.units.length === 2
   return {
     legend: { type: 'scroll', data: metricDefs.value.map((d) => d.label) },
-    grid: { left: 8, right: 12, top: 36, bottom: 4, containLabel: true },
+    // Две оси с единицами: подписи осей ниже легенды, чтобы не наезжали на неё
+    grid: { left: 8, right: 12, top: two ? 58 : 36, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: bar ? { type: 'shadow' } : undefined,

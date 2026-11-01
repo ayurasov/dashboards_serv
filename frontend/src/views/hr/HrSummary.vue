@@ -149,6 +149,10 @@ const countText = computed(() => {
       <router-link v-if="auth.can('hr', 'editor')" to="/hr/data" class="btn btn-primary">Ввод данных</router-link>
     </EmptyState>
 
+    <EmptyState v-else-if="summary.error.value && !summary.data.value" icon="alert" title="Не удалось загрузить сводку" :text="summary.error.value.message">
+      <button class="btn" type="button" @click="summary.reload()"><AppIcon name="refresh" :size="14" />Повторить</button>
+    </EmptyState>
+
     <template v-else>
       <!-- итоги периода -->
       <section class="stack">

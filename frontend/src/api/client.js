@@ -83,8 +83,8 @@ export async function request(method, path, { body, params, silent = false, raw 
       onPasswordChangeRequired()
       throw error
     }
-    // Ошибки полей формы (422 с fields) форма показывает рядом с полями — без второго уведомления
-    const formErrors = response.status === 422 && method !== 'GET' && Object.keys(error.fields).length > 0
+    // Ошибки полей формы (422 или 409 «уже есть» с fields) форма показывает рядом с полями — без второго уведомления
+    const formErrors = (response.status === 422 || response.status === 409) && method !== 'GET' && Object.keys(error.fields).length > 0
     if (!silent && !formErrors) toastError(error.message)
     throw error
   }

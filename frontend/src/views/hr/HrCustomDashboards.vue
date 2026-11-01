@@ -78,7 +78,7 @@ async function remove(d) {
     confirmText: 'Удалить', danger: true,
   })
   if (!ok) return
-  await hrApi.deleteDashboard(d.id)
+  try { await hrApi.deleteDashboard(d.id) } catch { return } // ошибку показал клиент API
   toastOk('Дашборд удалён')
   q.id = 0
   list.reload()
