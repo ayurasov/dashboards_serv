@@ -22,7 +22,7 @@ export function guide(kind = 'user') {
 
 // PDF руководств собираются tools/docs/build_manuals.py и попадают в сборку приложения:
 // скачивается всегда руководство к работающей версии.
-const pdfs = import.meta.glob('../../../docs/manuals/*.pdf', { eager: true, query: '?url', import: 'default' })
+const pdfs = import.meta.glob('../../../docs/manuals/{user,admin}-guide.pdf', { eager: true, query: '?url', import: 'default' })
 
 export const GUIDE_PDF = {
   user: { url: pdfs['../../../docs/manuals/user-guide.pdf'] || null, name: `dashboards-${__APP_VERSION__}-rukovodstvo-polzovatelya.pdf` },
