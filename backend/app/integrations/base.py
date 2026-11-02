@@ -439,6 +439,14 @@ class Connector(ABC):
         return str((config or {}).get(cls.url_field) or "") if cls.url_field else ""
 
     @classmethod
+    def stored_config(cls, config: dict | None) -> dict:
+        """Сохранённые настройки в нынешнем виде — для формы (API), проверки, запуска, изменения и привязки секретов.
+        У подключения, сохранённого прежней сборкой, нет поля, появившегося позже: переопределите метод и подставьте
+        значение, которое сохраняет прежнее поведение, а не значение по умолчанию для нового подключения («По Делу»
+        без «Режима подключения» — служебная учётная запись, хотя новое подключение — по ключу)."""
+        return dict(config or {})
+
+    @classmethod
     def config_keys(cls) -> set[str]:
         return {f.key for f in cls.fields if not f.secret}
 

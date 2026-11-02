@@ -312,7 +312,7 @@ def test_kinds_order_and_counter_labels(admin):
     for kind in kinds:
         labels = kind["counter_labels"]
         assert labels["values"] == "значений" and labels["status_applied"], "общие подписи каркаса"
-    assert by_kind["podelu"]["counter_labels"]["tasks"] == "задач в списке"
+    assert by_kind["podelu"]["counter_labels"]["tasks"] == "задач просмотрено"
     assert by_kind["jira"]["counter_labels"]["overspent"] == "задач: затрачено больше оценки"
     assert by_kind["confluence"]["counter_labels"]["created"] == "страница создана", "свои подписи сильнее общих"
     imap = next(f for f in by_kind["exchange"]["fields"] if f["key"] == "imap_host")

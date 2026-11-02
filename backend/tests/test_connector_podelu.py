@@ -1,14 +1,20 @@
-"""Коннектор «По Делу» против поддельной «По Делу» (настоящий HTTP-сервер в потоке): вход служебной учётной записью
-(CSRF, Referer, Origin, cookie, выход всегда), проверка прав и списка, синхронизация структуры и сотрудников через
-движки «Дашбордов» (сопоставление по id «По Делу» и email, «Без доступа», роли не переносятся, правила «Входящих»),
-данные из вложений задач (курсор, повторы, файлы результатов, комментарий-отметка), ошибки и секреты."""
+"""Коннектор «По Делу» против поддельной «По Делу» (настоящий HTTP-сервер в потоке).
+
+Ключ интеграции («По Делу» 1.4.5, /api/integrations/v1): Bearer без cookie, области ключа, отзыв, списки ключа,
+курсор activityAt и листание nextCursor, hasAttachments/updatedSince, sha256 файлов, комментарии системы
+и comments_disabled, предел частоты 429, старая «По Делу» без API ключей (404), ключ не попадает наружу.
+Служебная учётная запись («По Делу» до 1.4.5): вход (CSRF, Referer, Origin, cookie, выход всегда), проверка прав
+и списка, синхронизация структуры и сотрудников через движки «Дашбордов» (сопоставление по id «По Делу» и email,
+«Без доступа», роли не переносятся, правила «Входящих»), данные из вложений задач (курсор, повторы, файлы
+результатов, комментарий-отметка), ошибки и секреты."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import secrets as pysecrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, update
@@ -21,6 +27,11 @@ from tests.test_inbox import csv_bytes, tp_file
 
 PASSWORD = "Пароль-служебной-42"
 COOKIE = "todo_planner_session"
+KEY = "podelu_" + "Kd7xQ2" * 7
+V1 = "/api/integrations/v1"
+ALL_SCOPES = ["org.read", "users.read", "tasks.attachments.read", "tasks.comment"]
+SCOPE_TITLES = {"org.read": "Структура компании", "users.read": "Сотрудники",
+                "tasks.attachments.read": "Задачи и вложения", "tasks.comment": "Комментарии к задачам"}
 
 
 def _now(offset: int = 0) -> str:
@@ -78,6 +89,20 @@ class FakePodelu:
         self.tasks: dict[str, dict] = {}
         self.files: dict[str, list[dict]] = {}
         self.results: dict[str, list[dict]] = {}
+        # API ключей интеграций (1.4.5): ключи систем, версия, предел частоты (budget — сколько запросов v1 ещё
+        # до 429), часы активности задач (файл и комментарий сдвигают activityAt, а не updatedAt)
+        self.version = "1.4.5"
+        self.keys = {KEY: {"name": "Дашборды", "app": "dashboards", "scopes": list(ALL_SCOPES), "listIds": ["L1"],
+                           "revoked": False}}
+        self.budget: int | None = None
+        self.clock = datetime(2026, 10, 21, 9, 0, tzinfo=UTC)
+        for method, path, handler in (
+            ("GET", f"{V1}/ping", self.v1(self.v1_ping)),
+            ("GET", f"{V1}/org/export", self.v1(self.v1_org, "org.read")),
+            ("GET", f"{V1}/users/export", self.v1(self.v1_users, "users.read")),
+            ("GET", f"{V1}/tasks", self.v1(self.v1_tasks, "tasks.attachments.read")),
+        ):
+            server.route(method, path, handler)
         for method, path, handler in (
             ("GET", "/api/auth/csrf-token", self.csrf_token), ("POST", "/api/auth/login", self.login),
             ("POST", "/api/auth/logout", self.logout), ("GET", "/api/org/export", self.org_export),
@@ -174,7 +199,8 @@ class FakePodelu:
     def add_task(self, task_id: str, title: str, *, list_id: str = "L1", updated: str | None = None,
                  tags: tuple = (), created_by: str = "p-iv") -> dict:
         task = {"id": task_id, "listId": list_id, "title": title, "status": "open", "tags": list(tags),
-                "attachmentCount": 0, "updatedAt": updated or _now(), "createdBy": created_by}
+                "attachmentCount": 0, "updatedAt": updated or _now(), "createdBy": created_by,
+                "activityAt": updated or _now()}
         self.tasks[task_id] = task
         self.files[task_id] = []
         self.results[task_id] = []
@@ -184,6 +210,10 @@ class FakePodelu:
             lambda r: (200, [{**res, "attachments": [self.public(a) for a in res["attachments"]]}
                              for res in self.results[task_id]])))
         self.server.route("POST", f"/api/tasks/{task_id}/comments", lambda r: self.comment(r, task_id))
+        self.server.route("GET", f"{V1}/tasks/{task_id}/attachments",
+                          self.v1(lambda r, key: self.v1_attachments(key, task_id), "tasks.attachments.read"))
+        self.server.route("POST", f"{V1}/tasks/{task_id}/comments",
+                          self.v1(lambda r, key: self.v1_comment(r, key, task_id), "tasks.comment"))
         return task
 
     @staticmethod
@@ -204,12 +234,17 @@ class FakePodelu:
         else:
             self.files[task_id].append(att)
         self.tasks[task_id]["attachmentCount"] += 1   # загрузка вложения не меняет updatedAt — как в «По Делу»
+        self.tasks[task_id]["activityAt"] = self.tick()  # …но с 1.4.5 сдвигает время последней активности
 
-        def content_route(r):
+        def content_route(r, key=None):
             if self.content_status != 200:
                 return self.content_status, {"error": "internal", "message": "Сбой хранилища"}
+            if key is not None and (result or not self.open_to(key, task_id)):
+                return 404, {"error": "not_found", "message": "Файл не найден"}
             return 200, content, {"ETag": f'"{hashlib.sha256(content).hexdigest()}"'}
         self.server.route("GET", f"/api/tasks/{task_id}/attachments/{att_id}/content", self.guarded(content_route))
+        self.server.route("GET", f"{V1}/tasks/{task_id}/attachments/{att_id}/content",
+                          self.v1(content_route, "tasks.attachments.read"))
 
     def v2_tasks(self, request):
         def handler(r):
@@ -238,6 +273,127 @@ class FakePodelu:
         self.comments.append((task_id, text))
         self.tasks[task_id]["updatedAt"] = _now(5)  # комментарий меняет updatedAt (touch_activity)
         return 201, {"id": f"c{len(self.comments)}", "taskId": task_id, "text": text}
+
+    # --- API ключей интеграций /api/integrations/v1 (1.4.5)
+    def tick(self) -> str:
+        self.clock += timedelta(minutes=1)
+        return self.clock.isoformat().replace("+00:00", "Z")
+
+    def v1(self, handler, scope: str | None = None):
+        """Вход по ключу: Bearer без cookie, отзыв, область ключа, общий предел частоты (как в v1_routes.py)."""
+        def wrapper(request: Request):
+            assert "cookie" not in request.headers, "ключ интеграции — без cookie сессии"
+            assert "x-csrf-token" not in request.headers, "и без CSRF-токена"
+            if self.budget is not None:
+                if self.budget <= 0:
+                    return 429, {"error": "too_many_requests",
+                                 "message": "Слишком много запросов по этому ключу — повторите позже"}, \
+                        {"Retry-After": "0"}
+                self.budget -= 1
+            header = request.headers.get("authorization") or ""
+            token = header[7:].strip() if header[:7].lower() == "bearer " else ""
+            if not token.startswith("podelu_"):
+                return 401, {"error": "unauthorized",
+                             "message": "Нужен ключ «По Делу»: заголовок Authorization: Bearer podelu_…"}
+            key = self.keys.get(token)
+            if key is None:
+                return 401, {"error": "unauthorized",
+                             "message": "Неверный ключ «По Делу» — проверьте ключ или выпустите новый в «По Делу»"}
+            if key["revoked"]:
+                return 403, {"error": "key_revoked", "message": "Ключ отозван администратором «По Делу»"}
+            if scope and scope not in key["scopes"]:
+                return 403, {"error": "insufficient_scope",
+                             "message": f"У ключа нет доступа «{SCOPE_TITLES[scope]}» (область {scope})"}
+            return handler(request, key)
+        return wrapper
+
+    def key_lists(self, key: dict) -> list[str]:
+        if not {"tasks.attachments.read", "tasks.comment"} & set(key["scopes"]):
+            return []
+        return [i for i in key["listIds"] if any(x["id"] == i for x in self.lists)]
+
+    def open_to(self, key: dict, task_id: str) -> bool:
+        return self.tasks[task_id]["listId"] in self.key_lists(key)
+
+    def user_id(self, email: str) -> str | None:
+        return next((p["id"] for p in self.people if p["email"] == email), None)
+
+    def v1_ping(self, request, key):
+        body = {"ok": True, "app": "podelu", "name": "По Делу", "version": self.version,
+                "key": {"name": key["name"], "app": key["app"]},
+                "scopes": [s for s in ALL_SCOPES if s in key["scopes"]]}
+        if {"tasks.attachments.read", "tasks.comment"} & set(key["scopes"]):
+            body["listIds"] = list(key["listIds"])
+        return 200, body
+
+    def v1_org(self, request, key):
+        departments = [{**d, "heads": [{**h, "userId": self.user_id(h["email"])} for h in d["heads"]]}
+                       for d in self.departments]
+        return 200, {"format": "podelu.org-structure", "version": 1, "exportedAt": _now(), "app": self.version,
+                     "settings": {"org_max_depth": 12}, "departments": departments}
+
+    def v1_users(self, request, key):
+        if (request.query.get("format") or ["json"])[0] != "json":
+            return 400, {"error": "validation_error", "message": "format — только json"}
+        active = (request.query.get("inactive") or ["1"])[0] == "0"
+        items = [{"userId": self.user_id(e["email"]), **e} for e in self.employees if e["isActive"] or not active]
+        return 200, {"format": "podelu.employees", "version": 1, "app": self.version, "employees": items}
+
+    @staticmethod
+    def cursor(task: dict) -> str:
+        return base64.urlsafe_b64encode(f"{task['activityAt']}|{task['id']}".encode()).decode().rstrip("=")
+
+    def v1_tasks(self, request, key):
+        arg = {k: v[0] for k, v in request.query.items()}
+        lists = self.key_lists(key)
+        if arg.get("listId") and arg["listId"] not in lists:
+            return 404, {"error": "not_found", "message": "Список не найден или не открыт этому ключу"}
+        targets = [arg["listId"]] if arg.get("listId") else lists
+        items = [t for t in self.tasks.values() if t["listId"] in targets]
+        tags = [t for t in (arg.get("tags") or "").split(",") if t]
+        items = [t for t in items if all(tag in t["tags"] for tag in tags)]
+        if arg.get("hasAttachments") == "1":
+            items = [t for t in items if self.files[t["id"]]]
+        if arg.get("updatedSince"):
+            items = [t for t in items if t["activityAt"] >= arg["updatedSince"]]
+        if arg.get("cursor"):
+            raw = arg["cursor"] + "=" * (-len(arg["cursor"]) % 4)
+            stamp, task_id = base64.urlsafe_b64decode(raw).decode().split("|", 1)
+            items = [t for t in items if (t["activityAt"], t["id"]) > (stamp, task_id)]
+        items.sort(key=lambda t: (t["activityAt"], t["id"]))
+        limit = min(500, int(arg.get("limit") or 100))
+        page = items[:limit]
+        titles = {x["id"]: x["title"] for x in self.lists}
+        out = [{"id": t["id"], "listId": t["listId"], "listTitle": titles.get(t["listId"]), "parentTaskId": None,
+                "title": t["title"], "status": t["status"], "priority": "normal", "tags": t["tags"],
+                "assigneeId": None, "createdBy": t["createdBy"], "dueDate": None, "startDate": None,
+                "createdAt": t["updatedAt"], "updatedAt": t["updatedAt"], "activityAt": t["activityAt"],
+                "completedAt": None, "attachmentsCount": len(self.files[t["id"]])} for t in page]
+        return 200, {"items": out, "nextCursor": self.cursor(page[-1]) if len(items) > limit else None}
+
+    def v1_attachments(self, key, task_id):
+        if not self.open_to(key, task_id):
+            return 404, {"error": "not_found", "message": "Задача не найдена"}
+        items = [{"id": a["id"], "fileName": a["fileName"], "mimeType": a["mimeType"], "size": a["size"],
+                  "sha256": hashlib.sha256(a["_content"]).hexdigest(), "uploadedAt": a["uploadedAt"],
+                  "uploadedBy": a["uploadedBy"] or None,
+                  "contentPath": f"{V1}/tasks/{task_id}/attachments/{a['id']}/content"}
+                 for a in self.files[task_id]]      # файлы результатов поручений API ключей не отдаёт
+        return 200, {"taskId": task_id, "items": items}
+
+    def v1_comment(self, request, key, task_id):
+        if not self.open_to(key, task_id):
+            return 404, {"error": "not_found", "message": "Задача не найдена"}
+        settings = next(x for x in self.lists if x["id"] == self.tasks[task_id]["listId"])["settings"]
+        if settings.get("allowComments") is False:
+            return 403, {"error": "comments_disabled", "message": "Комментарии в этом списке отключены его владельцем"}
+        if self.comment_status != 201:
+            return self.comment_status, {"error": "internal_server_error", "message": "Внутренняя ошибка сервера"}
+        text = request.json().get("text")
+        self.comments.append((task_id, text))
+        self.tasks[task_id]["activityAt"] = self.tick()   # комментарий — событие задачи (touch_activity)
+        return 201, {"id": f"c{len(self.comments)}", "taskId": task_id, "text": text,
+                     "createdAt": self.tasks[task_id]["activityAt"], "integrationName": key["name"]}
 
 
 @pytest.fixture()
@@ -704,3 +860,442 @@ def test_password_never_logged_or_returned(admin, fake, db, caplog):
     assert runs[-1]["status"] == "error"
     texts = [caplog.text, json.dumps(runs, ensure_ascii=False), admin.get(f"/api/integrations/{item['id']}").text]
     assert not any(PASSWORD in t for t in texts)
+
+
+# ================================================================ ключ интеграции («По Делу» 1.4.5)
+
+def _create_key(admin, fake, *, key=KEY, **config) -> dict:
+    """Подключение по ключу. Служебной учётной записи у «Дашбордов» в этом режиме нет — нет её и в выгрузке."""
+    fake.employees = [e for e in fake.employees if e["login"] != "svc"]
+    body = {"kind": "podelu", "name": "По Делу", "config": {"base_url": fake.server.url, **config},
+            "secrets": {"key": key}}
+    response = admin.post("/api/integrations", json=body)
+    assert response.status_code == 201, response.text
+    assert response.json()["config"]["mode"] == "key", "новое подключение — по ключу"
+    return response.json()
+
+
+def _key_requests(fake):
+    return [r for r in fake.server.requests if r.path.startswith(V1)]
+
+
+def _key_files(fake):
+    fake.add_task("T1", "Недельный отчёт ТП", created_by="p-pm")
+    fake.add_file("T1", "a1", "tp-week.xlsx", tp_file())
+    fake.add_file("T1", "a2", "photo.png", b"\x89PNG....")
+    fake.add_file("T1", "a3", "показатели.csv", csv_bytes([["Подразделение", "Показатель", "Период", "Значение"],
+                                                           ["COMM", "fin.revenue", "2031-01", "61,5"]]))
+    fake.add_file("T1", "a4", "итог.csv", b"x;y\n1;2\n", result=True)
+    fake.add_task("T2", "Без файлов")
+    fake.add_task("T3", "Чужой список", list_id="L2")
+    fake.add_file("T3", "b1", "other.xlsx", tp_file())
+
+
+def test_key_mode_is_default_with_hints_and_old_settings_still_work(admin, fake, db):
+    meta = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}["podelu"]
+    fields = {f["key"]: f for f in meta["fields"]}
+    mode = fields["mode"]
+    assert mode["default"] == "key" and [(o["value"], o["label"]) for o in mode["options"]] == [
+        ("key", "Ключ интеграции (По Делу 1.4.5 и новее)"),
+        ("session", "Служебная учётная запись (для версий до 1.4.5)")]
+    key = fields["key"]
+    assert key["secret"] and key["required"] and key["show_if"] == {"mode": ["key"]}
+    for text in ("Настройки → Интеграции → Ключи интеграций", "«Дашборды»", "dashboards", "org.read", "users.read",
+                 "tasks.attachments.read", "tasks.comment", "списки задач"):
+        assert text in key["hint"], text
+    assert fields["login"]["show_if"] == fields["password"]["show_if"] == {"mode": ["session"]}
+    assert "пусто — все списки ключа" in fields["data_list"]["hint"]
+    assert meta["secret_url_fields"] == ["base_url", "server_url"], "ключ привязан к тем же адресам, что и пароль"
+    assert meta["counter_labels"]["comments_disabled"] == "не отмечено: комментарии выключены"
+    # Новое подключение без режима — по ключу: нужен ключ, а не пароль
+    bare = admin.post("/api/integrations", json={"kind": "podelu", "config": {"base_url": fake.server.url}})
+    assert bare.status_code == 422 and "secrets.key" in bare.json()["fields"]
+    # Запрос прежнего вида (логин без режима) — служебная учётная запись, как раньше
+    legacy = _create(admin, fake)
+    assert legacy["config"]["mode"] == "session"
+    # Подключение, сохранённое до режима ключа (mode нет), видно, проверяется и сохраняется служебной учётной записью
+    from app.core import db as core_db
+
+    stored = {k: v for k, v in legacy["config"].items() if k != "mode"}
+    with core_db.SessionLocal() as session:
+        session.execute(update(Integration).where(Integration.id == legacy["id"]).values(config=stored))
+        session.commit()
+    shown = admin.get(f"/api/integrations/{legacy['id']}").json()
+    assert shown["config"]["mode"] == "session" and shown["secret_problem"] is None
+    assert admin.post(f"/api/integrations/{legacy['id']}/check").json()["ok"]
+    saved = admin.patch(f"/api/integrations/{legacy['id']}", json={"config": {"data_tags": ["данные"]}})
+    assert saved.status_code == 200 and saved.json()["config"]["mode"] == "session"
+    db.expire_all()
+    assert db.get(Integration, legacy["id"]).config["mode"] == "session"
+
+
+def test_key_check_reports_version_key_scopes_and_lists(admin, fake):
+    fake.keys[KEY]["listIds"] = ["L1", "L2", "L-gone"]
+    fake.add_task("T1", "Отчёт", list_id="L1")
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"], check
+    assert check["message"] == ("Подключено к «По Делу» 1.4.5 по ключу «Дашборды», подразделений: 4, списки ключа: "
+                                "«Данные для дашбордов», L2, L-gone")
+    details = check["details"]
+    assert details["mode"] == "key" and details["version"] == "1.4.5"
+    assert details["key"] == {"name": "Дашборды", "app": "dashboards"} and details["scopes"] == ALL_SCOPES
+    assert details["lists"] == [{"id": "L1", "title": "Данные для дашбордов"}, {"id": "L2", "title": None},
+                                {"id": "L-gone", "title": None}], "названия — по задачам; список без задач — id"
+    assert details["missing"] == []
+    probes = [r.query for r in fake.server.requests if r.path == f"{V1}/tasks"]
+    assert probes[0] == {"limit": ["200"]} and {"listId": ["L2"], "limit": ["1"]} in probes
+    requests = _key_requests(fake)
+    assert requests and all(r.headers["authorization"] == f"Bearer {KEY}" for r in requests)
+    assert not any(r.path.startswith("/api/auth/") or r.path == "/api/lists" for r in fake.server.requests), \
+        "по ключу — без входа служебной учётной записью"
+    assert KEY not in json.dumps(check, ensure_ascii=False)
+    # Выбранный список — по названию или id из списков ключа
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": "данные для дашбордов"}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"] and check["message"].endswith("список «Данные для дашбордов»")
+    assert check["details"]["data_list"] == {"id": "L1", "title": "Данные для дашбордов"}
+
+
+def test_key_check_lists_what_is_missing(admin, fake):
+    fake.keys[KEY]["scopes"] = ["tasks.attachments.read"]
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"], "ключ только для файлов задач — «Забрать данные из задач» работает"
+    assert ("Не хватает: область «Структура компании» (org.read) — для «Синхронизировать структуру»; область "
+            "«Сотрудники» (users.read) — для сотрудников в «Синхронизировать структуру»; область «Комментарии к "
+            "задачам» (tasks.comment) — для «Отмечать задачу комментарием» — добавьте ключу: «По Делу» → «Настройки "
+            "→ Интеграции → Ключи интеграций»") in check["message"]
+    assert not any(r.path == f"{V1}/org/export" for r in fake.server.requests)
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"mark_processed": False}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert "tasks.comment" not in check["message"], "отметка выключена — область комментариев не нужна"
+    # Ни одно действие не работает — проверка не пройдена
+    fake.keys[KEY].update(scopes=["users.read"], listIds=[])
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"]
+    assert check["message"].startswith("Ключ «Дашборды» принят в «По Делу» 1.4.5, но не хватает: область «Структура "
+                                       "компании» (org.read)")
+    assert "область «Задачи и вложения» (tasks.attachments.read) со списками задач — для «Забрать данные из задач»" \
+        in check["message"]
+    # Выбранного списка нет среди списков ключа
+    fake.keys[KEY].update(scopes=list(ALL_SCOPES), listIds=["L1"])
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": "Прочее"}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and "доступ ключа к списку «Прочее»" in check["message"]
+
+
+def test_key_revoked_wrong_and_malformed_keys(admin, fake, db):
+    item = _create_key(admin, fake)
+    fake.keys[KEY]["revoked"] = True
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "key_revoked"
+    assert check["message"] == ("Ключ интеграции отозван администратором «По Делу» — выпустите ключ заново: «По Делу» "
+                                "→ «Настройки → Интеграции → Ключи интеграций» и введите его в подключении")
+    run = _run(admin, item, "pull")
+    assert run["status"] == "error" and "отозван администратором «По Делу»" in run["error"]
+    assert db.scalar(select(func.count()).select_from(InboxItem)) == 0
+    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"key": "podelu_" + "x" * 43}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "auth"
+    assert check["message"] == ("«По Делу» не приняла ключ интеграции (401): Неверный ключ «По Делу» — проверьте ключ "
+                                "или выпустите новый в «По Делу»")
+    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"key": "dash_not-a-podelu-key"}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["message"] == "Ключ интеграции «По Делу» начинается с podelu_ — проверьте ключ"
+
+
+@pytest.mark.parametrize("answer", [(404, {"message": "not found"}),
+                                    (404, {"error": "not_found", "message": "The requested URL was not found on the "
+                                                                           "server."})])
+def test_key_mode_against_podelu_without_key_api(admin, fake, answer):
+    fake.server.route("GET", f"{V1}/ping", lambda r: answer)
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "no_api"
+    assert "«По Делу» старше 1.4.5 или адрес указан неверно" in check["message"]
+    assert "выберите режим «Служебная учётная запись (для версий до 1.4.5)»" in check["message"]
+    run = _run(admin, item, "sync")
+    assert run["status"] == "error" and "нет API ключей интеграций" in run["error"]
+
+
+def test_key_sync_uses_user_ids_without_admin_list_or_service_account(admin, fake, db):
+    _rules(db, "structure", "employees")
+    # Руководитель уже пришёл из «По Делу» с прежним email: по userId он находится и до синхронизации сотрудников;
+    # прежняя служебная учётная запись больше не исключается — её нет в выгрузке, и она отключается как отсутствующая
+    db.add_all([
+        User(username="petrov", full_name="Петров Пётр", email="pm.old@company.ru", role="user", is_active=True,
+             org_source="podelu", external_id="p-pm", auth_source="local", must_change_password=False),
+        User(username="svc", full_name="Синхронизация дашбордов", email="svc@company.ru", role="user", is_active=True,
+             org_source="podelu", external_id="u-svc", auth_source="local", must_change_password=False),
+    ])
+    db.commit()
+    item = _create_key(admin, fake, deactivate_missing=True)
+    run = _run(admin, item, "sync")
+    assert run["status"] == "ok", run
+    assert run["message"].startswith("Структура: создать 2, изменить 1, руководителей 1 — применено"), \
+        "руководитель назначен по userId, хотя email в «По Делу» другой"
+    assert "Сотрудники: создано 2, изменено 1" in run["message"] and "отключено 1" in run["message"]
+    assert run["summary"]["details"]["mode"] == "key"
+    pm = db.scalar(select(User).where(User.external_id == "p-pm"))
+    db.refresh(pm)
+    assert pm.department.name == "Проектная служба" and pm.position == "Руководитель офиса"
+    assert pm.email == "pm.old@company.ru", "email у сопоставленного по id сотрудника движок не перезаписывает"
+    from app.services import org
+
+    assert pm.id in org.build_snapshot(db).heads[pm.department_id]
+    ivanova = _user(db, "ivanova@company.ru")
+    assert ivanova.external_id == "p-iv" and ivanova.org_source == "podelu" and ivanova.password_hash is None
+    assert _user(db, "svc@company.ru").is_active is False, "в режиме ключа служебной учётной записи нет — keep пуст"
+    paths = [r.path for r in fake.server.requests]
+    assert f"{V1}/org/export" in paths and f"{V1}/users/export" in paths
+    assert "/api/users/admin/all" not in paths and not any(p.startswith("/api/auth/") for p in paths)
+    users_query = next(r.query for r in fake.server.requests if r.path == f"{V1}/users/export")
+    assert users_query == {"format": ["json"], "inactive": ["0"]}
+    again = _run(admin, item, "sync")
+    assert again["message"].startswith("Структура: без изменений") and again["summary"]["users_update"] == 0
+
+
+def test_key_sync_needs_org_and_users_scopes(admin, fake):
+    fake.keys[KEY]["scopes"] = ["org.read", "tasks.attachments.read"]
+    item = _create_key(admin, fake)
+    run = _run(admin, item, "sync")
+    assert run["status"] == "error"
+    assert run["error"] == ("У ключа «Дашборды» нет областей: «Сотрудники» (users.read) — добавьте их ключу: «По Делу» "
+                            "→ «Настройки → Интеграции → Ключи интеграций»")
+    assert not any(r.path == f"{V1}/org/export" for r in fake.server.requests)
+    # Область отняли между проверкой и выгрузкой — ответ «По Делу» 403 insufficient_scope понятен
+    fake.keys[KEY]["scopes"] = list(ALL_SCOPES)
+    fake.server.route("GET", f"{V1}/users/export", fake.v1(fake.v1_users, "users.manage"))
+    SCOPE_TITLES["users.manage"] = "Сотрудники"
+    try:
+        run = _run(admin, item, "sync")
+    finally:
+        SCOPE_TITLES.pop("users.manage")
+    assert run["status"] == "error" and run["error"] == (
+        "У ключа нет доступа «Сотрудники» (область users.manage) — добавьте её ключу: «По Делу» → «Настройки → "
+        "Интеграции → Ключи интеграций»")
+
+
+def test_key_pull_takes_task_files_with_uploader_and_comment(admin, fake, db):
+    _key_files(fake)
+    _rules(db, "tp-weekly")
+    item = _create_key(admin, fake)
+    activity = fake.tasks["T1"]["activityAt"]
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok", run
+    summary = run["summary"]
+    assert summary["tasks"] == 1 and summary["candidates"] == 1 and summary["added"] == 2
+    assert summary["skipped_type"] == 1 and summary["comments"] == 1
+    assert run["message"].startswith("Списки ключа «Дашборды» (1): задач с новыми вложениями 1, файлов во «Входящие» 2")
+    items = {i.filename: i for i in db.scalars(select(InboxItem).where(InboxItem.integration_id == item["id"]))}
+    assert set(items) == {"tp-week.xlsx", "показатели.csv"}, "файлы результатов поручений API ключей не отдаёт"
+    assert items["tp-week.xlsx"].status == "applied"
+    assert items["tp-week.xlsx"].source_ref == f"podelu:T1:a1:{hashlib.sha256(tp_file()).hexdigest()}"
+    assert items["tp-week.xlsx"].note == "Задача «Недельный отчёт ТП» · Иванова Анна", "имя — из выгрузки сотрудников"
+    assert fake.comments == [("T1", "Файл «tp-week.xlsx» принят в «Дашборды»: применён\n"
+                                    "Файл «показатели.csv» принят в «Дашборды»: ожидает подтверждения")]
+    tasks_query = next(r.query for r in fake.server.requests if r.path == f"{V1}/tasks")
+    assert tasks_query == {"hasAttachments": ["1"], "limit": ["200"]}, "все списки ключа, первый запуск — с начала"
+    assert sum(1 for r in fake.server.requests if r.path == f"{V1}/users/export") == 1, "имена — один раз за запуск"
+    assert not any("/T3/" in r.path or "/T2/" in r.path for r in fake.server.requests), \
+        "задачи без файлов и вне списков ключа не трогаются"
+    comment = next(r for r in fake.server.requests if r.method == "POST")
+    assert comment.path == f"{V1}/tasks/T1/comments" and comment.headers["authorization"] == f"Bearer {KEY}"
+    db.expire_all()
+    state = db.get(Integration, item["id"]).state
+    assert state == {"mode": "key", "scope": {"lists": ["L1"], "tags": []}, "since": activity}
+    assert fake.tasks["T1"]["activityAt"] > activity, "комментарий сдвинул активность — задача придёт ещё раз"
+    assert "tasks" not in state, "число вложений по задачам больше не отслеживается"
+
+
+def test_key_pull_without_users_scope_names_nobody(admin, fake, db):
+    fake.keys[KEY]["scopes"] = ["tasks.attachments.read", "tasks.comment"]
+    _key_files(fake)
+    item = _create_key(admin, fake)
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok"
+    taken = db.scalar(select(InboxItem).where(InboxItem.filename == "показатели.csv"))
+    assert taken.note == "Задача «Недельный отчёт ТП»"
+    assert not any(r.path.endswith("/users/export") for r in fake.server.requests)
+
+
+def test_key_pull_cursor_dedup_by_sha256_and_new_file(admin, fake, db):
+    _key_files(fake)
+    item = _create_key(admin, fake)
+    first = _run(admin, item, "pull")
+    assert first["summary"]["added"] == 2 and len(fake.comments) == 1
+    since = db.get(Integration, item["id"]).state["since"]
+    fake.server.requests.clear()
+    second = _run(admin, item, "pull")
+    assert second["status"] == "ok" and second["summary"]["added"] == 0 and second["summary"]["seen"] == 2
+    query = next(r.query for r in fake.server.requests if r.path == f"{V1}/tasks")
+    assert query["updatedSince"] == [since], "курсор — время активности прошлого запуска"
+    assert not any(r.path.endswith("/content") for r in fake.server.requests), \
+        "уже забранные — по sha256, без скачивания"
+    assert len(fake.comments) == 1, "задача без новых файлов не отмечается снова"
+    fake.add_file("T1", "a5", "naumen.csv", csv_bytes([["Подразделение", "Показатель", "Период", "Значение"],
+                                                       ["COMM", "fin.revenue", "2031-02", "70"]]))
+    fake.server.requests.clear()
+    third = _run(admin, item, "pull")
+    assert third["summary"]["added"] == 1 and third["summary"]["seen"] == 2
+    assert [r.path for r in fake.server.requests if r.path.endswith("/content")] == \
+        [f"{V1}/tasks/T1/attachments/a5/content"]
+    # Состояние потеряно: всё просматривается заново, но ничего не скачивается и не кладётся повторно
+    db.execute(update(Integration).where(Integration.id == item["id"]).values(state={}))
+    db.commit()
+    fake.server.requests.clear()
+    fourth = _run(admin, item, "pull")
+    assert fourth["summary"]["added"] == 0 and fourth["summary"]["seen"] == 3
+    assert not any(r.path.endswith("/content") for r in fake.server.requests)
+    assert db.scalar(select(func.count()).select_from(InboxItem).where(InboxItem.integration_id == item["id"])) == 3
+
+
+def test_key_pull_pages_by_cursor_and_continues_after_rate_limit(admin, fake, db, monkeypatch):
+    from app.integrations.connectors import podelu
+
+    monkeypatch.setattr(podelu, "PAGE_SIZE", 2)
+    for n in range(5):
+        fake.add_task(f"P{n}", f"Задача {n}", created_by="p-pm")
+        fake.add_file(f"P{n}", f"f{n}", f"week-{n}.csv", csv_bytes([["Подразделение", "Показатель", "Период",
+                                                                      "Значение"], ["COMM", "fin.revenue",
+                                                                                    f"2031-0{n + 1}", str(n)]]))
+    item = _create_key(admin, fake, mark_processed=False)
+    # Предел частоты: ping, страница задач (P0, P1), P0 (файлы, имена, содержимое), P1 — и 429 на второй странице
+    fake.budget = 7
+    run = _run(admin, item, "pull")
+    assert run["status"] == "partial", run
+    assert run["summary"]["added"] == 2 and run["summary"]["tasks"] == 2
+    assert "Ключ «Дашборды» превысил лимит частоты запросов «По Делу» (429) — повторите позже" in run["message"]
+    assert "следующий запуск продолжит с места остановки" in run["message"]
+    db.expire_all()
+    assert db.get(Integration, item["id"]).state["since"] == fake.tasks["P1"]["activityAt"], \
+        "курсор — последняя обработанная задача"
+    fake.budget = None
+    fake.server.requests.clear()
+    again = _run(admin, item, "pull")
+    assert again["status"] == "ok" and again["summary"]["added"] == 3 and again["summary"]["seen"] == 1
+    pages = [r.query for r in fake.server.requests if r.path == f"{V1}/tasks"]
+    assert pages[0]["updatedSince"] == [fake.tasks["P1"]["activityAt"]] and "cursor" not in pages[0]
+    assert len(pages) == 2 and pages[1]["cursor"] and pages[1]["updatedSince"] == pages[0]["updatedSince"]
+    listed = [r.path for r in fake.server.requests if r.path.endswith("/attachments")]
+    assert f"{V1}/tasks/P0/attachments" not in listed, "до курсора задачи не просматриваются"
+    assert not any(r.path.endswith("/P1/attachments/f1/content") for r in fake.server.requests)
+    assert db.get(Integration, item["id"]).state["since"] == fake.tasks["P4"]["activityAt"]
+
+
+def test_key_pull_list_and_tags(admin, fake, db):
+    fake.keys[KEY]["listIds"] = ["L1", "L2"]
+    fake.add_task("A", "Отчёт по меткам", tags=("данные", "финансы"))
+    fake.add_file("A", "x1", "a.csv", b"a;b\n1;2\n")
+    fake.add_task("B", "Другой отчёт", tags=("hr",))
+    fake.add_file("B", "x2", "b.csv", b"c;d\n3;4\n")
+    fake.add_task("C", "Прочее", list_id="L2", tags=("данные",))
+    fake.add_file("C", "x3", "c.csv", b"e;f\n5;6\n")
+    item = _create_key(admin, fake, mark_processed=False, data_list="Данные для дашбордов", data_tags=["данные"])
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok" and run["summary"]["added"] == 1
+    assert run["message"].startswith("Список «Данные для дашбордов»:")
+    query = [r.query for r in fake.server.requests if r.path == f"{V1}/tasks"][-1]
+    assert query["listId"] == ["L1"] and query["tags"] == ["данные"], "одна метка — отбор у «По Делу»"
+    # Несколько меток — «одна из» (у «По Делу» метки через запятую — все сразу): отбор у нас
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": "L2", "data_tags": ["hr", "данные"]}})
+    fake.server.requests.clear()
+    run = _run(admin, item, "pull")
+    assert run["summary"]["added"] == 1 and run["message"].startswith("Список «Прочее»:")
+    queries = [r.query for r in fake.server.requests if r.path == f"{V1}/tasks"]
+    assert queries == [{"hasAttachments": ["1"], "limit": ["200"], "listId": ["L2"]}], \
+        "id из списков ключа — без поиска названия; смена списка — курсор с начала"
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": ""}})
+    run = _run(admin, item, "pull")
+    assert run["summary"]["added"] == 1 and run["summary"]["seen"] == 2, "все списки ключа: B (метка hr) — новый"
+    admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": "Нет такого"}})
+    run = _run(admin, item, "pull")
+    assert run["status"] == "error" and run["error"].startswith("Список «Нет такого» не открыт ключу «Дашборды»")
+    assert "оставьте «Список задач с данными» пустым" in run["error"]
+
+
+def test_key_pull_comments_disabled_is_a_warning(admin, fake, db):
+    fake.lists[0]["settings"] = {"allowComments": False}
+    _key_files(fake)
+    fake.add_task("T4", "Ещё отчёт")
+    fake.add_file("T4", "c1", "ещё.csv", b"a;b\n1;2\n")
+    item = _create_key(admin, fake)
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok", "комментарии выключены владельцем списка — предупреждение, а не сбой"
+    assert run["summary"]["added"] == 3 and run["summary"]["comments_disabled"] == 1
+    assert "не отмечено задач: 1 (комментарии выключены)" in run["message"]
+    assert run["summary"]["details"]["notes"] == [
+        "в списке «Данные для дашбордов» владелец отключил комментарии — задачи не отмечаются"]
+    assert sum(1 for r in fake.server.requests if r.method == "POST") == 1, "в этом списке больше не пробуем"
+    assert fake.comments == []
+
+
+def test_key_pull_comment_scope_and_errors(admin, fake, db):
+    fake.keys[KEY]["scopes"] = ["users.read", "tasks.attachments.read"]
+    _key_files(fake)
+    item = _create_key(admin, fake)
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok" and run["summary"]["comments"] == 0
+    assert run["summary"]["details"]["notes"] == [
+        "у ключа нет области «Комментарии к задачам» (tasks.comment) — задачи не отмечаются"]
+    assert not any(r.method == "POST" for r in fake.server.requests)
+    fake.keys[KEY]["scopes"] = list(ALL_SCOPES)
+    fake.add_file("T1", "a9", "новый.csv", b"a;b\n9;9\n")
+    fake.comment_status = 500
+    run = _run(admin, item, "pull")
+    assert run["status"] == "partial" and run["summary"]["comment_errors"] == 1
+    assert "«По Делу» вернула ошибку 500" in run["error"]
+
+
+def test_key_rate_limit_and_comment_post_is_not_retried(admin, fake, db):
+    item = _create_key(admin, fake)
+    fake.budget = 0
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "rate_limited"
+    assert check["message"] == "Ключ интеграции превысил лимит частоты запросов «По Делу» (429) — повторите позже"
+    assert sum(1 for r in fake.server.requests if r.path == f"{V1}/ping") == 3, "GET повторяется по Retry-After"
+    fake.budget = 1
+    run = _run(admin, item, "sync")
+    assert run["status"] == "error" and run["error"] == ("Ключ «Дашборды» превысил лимит частоты запросов «По Делу» "
+                                                         "(429) — повторите позже")
+    fake.add_task("T1", "Отчёт")
+    fake.add_file("T1", "a1", "a.csv", b"a;b\n1;2\n")
+    fake.budget = 5          # ping, страница, файлы, имена, содержимое — и 429 на комментарии
+    fake.server.requests.clear()
+    run = _run(admin, item, "pull")
+    assert run["status"] == "partial" and run["summary"]["added"] == 1
+    assert sum(1 for r in fake.server.requests if r.method == "POST") == 1, "POST при 429 не повторяется"
+
+
+def test_key_never_logged_stored_or_returned(admin, fake, db, caplog):
+    _key_files(fake)
+    caplog.set_level(logging.DEBUG)
+    item = _create_key(admin, fake)
+    responses = [admin.post(f"/api/integrations/{item['id']}/check").text,
+                 admin.post("/api/integrations/check", json={"kind": "podelu", "config": {"base_url": fake.server.url},
+                                                             "secrets": {"key": KEY}}).text]
+    runs = [_run(admin, item, "sync"), _run(admin, item, "pull")]
+    fake.budget = 0
+    runs.append(_run(admin, item, "pull"))
+    fake.budget = None
+    fake.keys[KEY]["revoked"] = True
+    runs.append(_run(admin, item, "sync"))
+    responses.append(admin.post(f"/api/integrations/{item['id']}/check").text)
+    assert runs[2]["status"] == runs[3]["status"] == "error"
+    responses += [json.dumps(runs, ensure_ascii=False), admin.get(f"/api/integrations/{item['id']}").text,
+                  admin.get("/api/integrations").text, admin.get(f"/api/integrations/{item['id']}/runs").text]
+    from app.models import AuditEntry, IntegrationRun
+
+    db.expire_all()
+    row = db.get(Integration, item["id"])
+    stored = [row.last_error, json.dumps(row.state, ensure_ascii=False), json.dumps(row.config, ensure_ascii=False),
+              row.secret_bound_url or ""]
+    for run in db.scalars(select(IntegrationRun).where(IntegrationRun.integration_id == item["id"])):
+        stored += [run.message, run.error, json.dumps(run.summary, ensure_ascii=False)]
+    stored += [f"{e.summary} {json.dumps(e.after, ensure_ascii=False)}"
+               for e in db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "integration"))]
+    stored += [f"{i.note} {i.source_ref} {i.message}" for i in db.scalars(select(InboxItem))]
+    for where, content in (("журнал сервера", caplog.text), *(("ответ API", t) for t in responses),
+                           *(("база", t) for t in stored)):
+        assert KEY not in content and KEY[7:] not in content, f"{where}: {content[:300]}"

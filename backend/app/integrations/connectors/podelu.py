@@ -1,40 +1,60 @@
 """«По Делу» (todo-planner): структура и сотрудники, данные из вложений задач (ADR-0011, таблица «Коннекторы 0.4.0»).
 
-Вход — служебной учётной записью (ключей для нескольких систем в «По Делу» пока нет): GET /api/auth/csrf-token →
-POST /api/auth/login (X-CSRF-Token, Referer, Origin) → запросы → POST /api/auth/logout — всегда, и после ошибки.
-Права учётной записи в «По Делу»: полномочия «Ведёт структуру компании» (org.manage) и «Ведёт учётные записи»
-(users.manage), участник (просмотр) выделенного списка задач; роль администратора не нужна.
+Два режима подключения (настройка mode):
+- «Ключ интеграции» (key, по умолчанию; «По Делу» 1.4.5 и новее, ADR-0058 там) — у «Дашбордов» свой ключ
+  podelu_… с областями доступа: org.read (структура), users.read (сотрудники), tasks.attachments.read (задачи
+  и файлы выбранных для ключа списков), tasks.comment (комментарии в них). Запросы — /api/integrations/v1 с
+  Authorization: Bearer, без cookie и CSRF; предел частоты — на ключ (INTEGRATION_RATE_LIMIT «По Делу»,
+  по умолчанию 120 запросов в минуту). Ключ выпускает администратор «По Делу»: «Настройки → Интеграции → Ключи
+  интеграций», система «Дашборды», код dashboards;
+- «Служебная учётная запись» (session; для «По Делу» до 1.4.5): GET /api/auth/csrf-token → POST /api/auth/login
+  (X-CSRF-Token, Referer, Origin) → запросы → POST /api/auth/logout — всегда, и после ошибки. Права учётной записи
+  в «По Делу»: полномочия «Ведёт структуру компании» (org.manage) и «Ведёт учётные записи» (users.manage),
+  участник (просмотр) выделенного списка задач; роль администратора не нужна.
+Подключения, сохранённые до режима ключа (без mode), работают служебной учётной записью (stored_config).
 
 «Синхронизировать структуру»:
-- GET /api/org/export (podelu.org-structure) → dashboards.org-structure → элемент входящих набора «Структура
-  компании» (план и применение — движок org_transfer; «применять сразу» — по правилу «Подключение» × «Структура
-  компании»).
+- структура: GET /api/integrations/v1/org/export (ключ; у руководителей — userId) или /api/org/export (сессия) —
+  podelu.org-structure → dashboards.org-structure → элемент входящих набора «Структура компании» (план
+  и применение — движок org_transfer; «применять сразу» — по правилу «Подключение» × «Структура компании»).
   Подразделения сопоставляются по пути, их внешний ID — ключ подразделения в «По Делу»; типы уровней, которых
   нет в настройках структуры, заменяются типом по умолчанию; настройки структуры «По Делу» не применяются;
-- GET /api/users/export?format=json&inactive=0 (podelu.employees) и GET /api/users/admin/all (id сотрудников) →
-  строки быстрой загрузки, источник podelu (ctx.plans.org_list): сопоставление по id «По Делу» (external_id
-  сотрудника с org_source = podelu), затем по email; новые сотрудники — «Без доступа» (без пароля); роли,
-  полномочия и активность из «По Делу» не переносятся. Применение — по правилу «Подключение» × «Сотрудники»
-  и только когда структура уже совпадает с «По Делу» (иначе — план без записи). «Отключать отсутствующих» —
-  отключаются сотрудники, пришедшие из «По Делу» (org_source = podelu), которых нет среди активных в выгрузке;
-  служебная учётная запись подключения и сотрудники других источников не отключаются.
+  руководитель с userId, уже пришедший из «По Делу», находится по нему, даже если его email в «По Делу» сменился;
+- сотрудники: GET /api/integrations/v1/users/export?format=json&inactive=0 (ключ; у каждой записи userId) или
+  /api/users/export?format=json&inactive=0 и /api/users/admin/all (сессия: id сотрудников) → строки быстрой
+  загрузки, источник podelu (ctx.plans.org_list): сопоставление по id «По Делу» (external_id сотрудника
+  с org_source = podelu), затем по email; новые сотрудники — «Без доступа» (без пароля); роли, полномочия
+  и активность из «По Делу» не переносятся. Применение — по правилу «Подключение» × «Сотрудники» и только когда
+  структура уже совпадает с «По Делу» (иначе — план без записи). «Отключать отсутствующих» — отключаются
+  сотрудники, пришедшие из «По Делу» (org_source = podelu), которых нет среди активных в выгрузке; служебная
+  учётная запись подключения (в режиме сессии) и сотрудники других источников не отключаются.
 
-Пароль привязан к обоим адресам (secret_url: «адрес → адрес для запросов сервера»): изменили любой из них —
-пароль вводится заново.
+Ключ и пароль привязаны к обоим адресам (secret_url: «адрес → адрес для запросов сервера»): изменили любой
+из них — секрет вводится заново.
 
-«Забрать данные из задач»: задачи списка data_list (и меток data_tags) с вложениями → файлы задачи и её
-результатов (только Excel, CSV, JSON) → «Входящие» с source_ref podelu:<задача>:<вложение>:<sha256>;
-повтор (ctx.inbox.seen) не скачивается; у элемента — пояснение «Задача «<название>» · <кто положил файл>»;
-задача отмечается комментарием «Файл «…» принят в «Дашборды»: <статус>» (и ссылкой на «Входящие», если задан
-PUBLIC_URL). Курсор (ctx.state): since — самое позднее updatedAt задач списка, tasks — число вложений и SHA-256 уже
-забранных файлов по задачам: загрузка вложения в «По Делу» не меняет updatedAt задачи, поэтому задача берётся
-и тогда, когда изменилось число её вложений.
+«Забрать данные из задач»: файлы задач (только Excel, CSV, JSON) → «Входящие» с source_ref
+podelu:<задача>:<вложение>:<sha256>; повтор (ctx.inbox.seen) не скачивается; у элемента — пояснение «Задача
+«<название>» · <кто положил файл>»; задача отмечается комментарием «Файл «…» принят в «Дашборды»: <статус>»
+(и ссылкой на «Входящие», если задан PUBLIC_URL).
+- ключ: GET /api/integrations/v1/tasks?hasAttachments=1&updatedSince=<since>&cursor=…&limit=200 (необязательно
+  listId — один из списков ключа, по умолчанию все списки ключа; tags — при одной метке) — задачи по возрастанию
+  activityAt; файл задачи меняет activityAt, поэтому курсор (ctx.state) — только since: самое позднее activityAt
+  обработанной задачи, оно сохраняется после каждой задачи (предел частоты или сбой посреди запуска — следующий
+  запуск продолжит с места остановки). Файлы задачи — GET …/tasks/<id>/attachments (с sha256: уже забранные не
+  скачиваются), содержимое — …/attachments/<id>/content; кто положил файл — по выгрузке сотрудников (один раз
+  за запуск, если у ключа есть users.read); отметка — POST …/tasks/<id>/comments (без повтора);
+  403 comments_disabled — предупреждение. Файлы результатов поручений API ключей не отдаёт;
+- сессия: задачи списка data_list (и меток data_tags) с вложениями → файлы задачи и её результатов. Курсор:
+  since — самое позднее updatedAt задач списка, tasks — число вложений и SHA-256 уже забранных файлов по задачам:
+  загрузка вложения в «По Делу» до 1.4.5 не меняет updatedAt задачи, поэтому задача берётся и тогда, когда
+  изменилось число её вложений.
 """
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 from ...core.config import settings
 from ...models import InboxRule, name_key
@@ -43,13 +63,19 @@ from ...services.inbox import plan_errors
 from ...services.org_import import EMAIL, Row, split_path
 from ...services.org_transfer import FORMAT as STRUCTURE_FORMAT
 from ...services.org_transfer import StructureFormatError
-from ..base import Action, CheckResult, Connector, Field, RunContext, RunResult, register
+from ..base import Action, CheckResult, Connector, Field, Option, RunContext, RunResult, register
 from ..http import IntegrationError
 from .common import (
+    KEY_MODE,
+    MODE_LABELS,
+    SESSION_MODE,
+    KeyApi,
     PartnerSession,
+    connection_mode,
     download_limit,
     inbox_limit,
     is_data_file,
+    iso,
     joined_urls,
     parse_time,
     sha256,
@@ -72,11 +98,31 @@ MAX_TRACKED_TASKS = 5000
 MAX_DETAILS = 50
 NOTE_LIMIT = 500
 
+# --- API ключей интеграций «По Делу» 1.4.5+ (ADR-0058 «По Делу»)
+V1 = "api/integrations/v1"
+KEY_PREFIX = "podelu_"
+SCOPE_ORG, SCOPE_USERS = "org.read", "users.read"
+SCOPE_TASKS, SCOPE_COMMENT = "tasks.attachments.read", "tasks.comment"
+# Подписи областей — как в «По Делу» («Настройки → Интеграции → Ключи интеграций»)
+SCOPE_LABELS = {SCOPE_ORG: "«Структура компании» (org.read)", SCOPE_USERS: "«Сотрудники» (users.read)",
+                SCOPE_TASKS: "«Задачи и вложения» (tasks.attachments.read)",
+                SCOPE_COMMENT: "«Комментарии к задачам» (tasks.comment)"}
+KEYS_PLACE = f"«{TITLE}» → «Настройки → Интеграции → Ключи интеграций»"
+NO_API = (f"По адресу подключения нет API ключей интеграций «{TITLE}» (/{V1}/ping, 404): «{TITLE}» старше 1.4.5 или "
+          f"адрес указан неверно. Обновите «{TITLE}» до 1.4.5 или выберите режим «Служебная учётная запись (для "
+          "версий до 1.4.5)»")
+# Названий списков ключа «По Делу» не отдаёт (только listTitle у задач): не больше стольких запросов на списки
+# без задач среди первой страницы
+MAX_LIST_PROBES = 10
+COMMENT_LIMIT = 10000
+
 
 # ---------------------------------------------------------------- форматы «По Делу» → наши
 
-def structure_bundle(doc: Any) -> dict:
-    """podelu.org-structure версии 1 → dashboards.org-structure версии 1 (набор «Структура компании»)."""
+def structure_bundle(doc: Any, head_emails: dict[str, str] | None = None) -> dict:
+    """podelu.org-structure версии 1 → dashboards.org-structure версии 1 (набор «Структура компании»).
+    head_emails — {id сотрудника «По Делу»: email в «Дашбордах»}: руководитель из API ключей (с userId) находится
+    по нему, даже если email в «По Делу» уже другой."""
     if not isinstance(doc, dict) or doc.get("format") != ORG_FORMAT:
         raise StructureFormatError(f"Это не файл структуры «{TITLE}» (нужен format: {ORG_FORMAT})")
     if doc.get("version") != 1:
@@ -84,12 +130,18 @@ def structure_bundle(doc: Any) -> dict:
     items = doc.get("departments")
     if not isinstance(items, list):
         raise StructureFormatError(f"В файле структуры «{TITLE}» нет списка подразделений")
+    head_emails = head_emails or {}
     departments = []
     for raw in items:
         if not isinstance(raw, dict):
             continue
-        heads = [{"email": str(h.get("email") or "").strip().lower(), "name": "", "primary": bool(h.get("primary"))}
-                 for h in raw.get("heads") or [] if isinstance(h, dict) and h.get("email")]
+        heads = []
+        for h in raw.get("heads") or []:
+            if not isinstance(h, dict):
+                continue
+            email = head_emails.get(str(h.get("userId") or "")) or str(h.get("email") or "")
+            if email.strip():
+                heads.append({"email": email.strip().lower(), "name": "", "primary": bool(h.get("primary"))})
         key = str(raw.get("key") or "")
         departments.append({"key": key, "name": raw.get("name"), "parent": raw.get("parent") or None,
                             "kind": raw.get("kind") or "department", "sort_order": raw.get("sortOrder") or 0,
@@ -145,6 +197,11 @@ def find_list(lists: list, ref: str) -> dict | None:
     return found
 
 
+def list_label(item: dict) -> str:
+    """«Название» списка или его id, если названия «По Делу» не сообщила."""
+    return f"«{item['title']}»" if item.get("title") else str(item.get("id"))
+
+
 def task_note(title: Any, author: str = "") -> str:
     """Пояснение элемента входящих: «Задача «<название>» · <кто положил файл>» (до 500 символов)."""
     tail = f" · {author}" if author else ""
@@ -160,30 +217,71 @@ def comments_allowed(item: dict) -> bool:
     return settings.get("allowComments", True) is not False
 
 
+class UploaderNames:
+    """Имена сотрудников «По Делу» по id для пояснения элемента входящих: выгрузка сотрудников (users.read) —
+    один раз за запуск и только когда понадобилось имя. Без области — без имени."""
+
+    def __init__(self, api: KeyApi, allowed: bool):
+        self.api = api
+        self.allowed = allowed
+        self.names: dict[str, str] | None = None
+
+    def get(self, *user_ids: Any) -> str:
+        if not self.allowed:
+            return ""
+        if self.names is None:
+            self.names = {}
+            try:
+                doc = self.api.get("users/export", params={"format": "json"})
+            except IntegrationError as exc:
+                if exc.code == "rate_limited":
+                    raise
+                doc = {}
+            for e in doc.get("employees") or []:
+                if isinstance(e, dict) and e.get("userId"):
+                    self.names[str(e["userId"])] = " ".join(str(e.get("name") or e.get("email") or "").split())
+        return next((self.names[str(u)] for u in user_ids if u and self.names.get(str(u))), "")
+
+
 # ---------------------------------------------------------------- коннектор
 
 @register
 class PodeluConnector(Connector):
     kind = "podelu"
     title = TITLE
-    description = ("Структура и сотрудники из «По Делу»; данные — вложения задач выделенного списка во «Входящие», "
-                   "задача отмечается комментарием. Вход — служебной учётной записью с полномочиями org.manage и "
-                   "users.manage, участником только выделенного списка")
+    description = ("Структура и сотрудники из «По Делу»; данные — вложения задач списков с данными во «Входящие», "
+                   "задача отмечается комментарием. Подключение — ключом интеграции «По Делу» 1.4.5 и новее "
+                   "(области org.read, users.read, tasks.attachments.read, tasks.comment) или, для более ранних "
+                   "версий, служебной учётной записью с полномочиями org.manage и users.manage")
     fields = (
         Field("base_url", "Адрес «По Делу»", "url", required=True, placeholder="https://podelu.company.ru",
               hint="Адрес, по которому сотрудники открывают «По Делу»"),
         Field("server_url", "Адрес для запросов сервера", "url", placeholder="http://host.docker.internal:5000",
               hint="Необязательно: если сервер «Дашбордов» видит «По Делу» по другому адресу (например, оба в Docker "
-                   "на одной машине). Пароль привязан к обоим адресам: изменили любой — введите пароль заново"),
+                   "на одной машине). Ключ и пароль привязаны к обоим адресам: изменили любой — введите их заново"),
+        Field("mode", "Режим подключения", "select", required=True, default=KEY_MODE,
+              options=(Option(KEY_MODE, "Ключ интеграции (По Делу 1.4.5 и новее)"),
+                       Option(SESSION_MODE, "Служебная учётная запись (для версий до 1.4.5)")),
+              hint="Рекомендуется ключ интеграции: у «Дашбордов» свой ключ только с нужными областями, без входа "
+                   "учётной записью. Служебная учётная запись — для «По Делу» до 1.4.5, где ключей для других "
+                   "систем нет"),
+        Field("key", "Ключ интеграции", "password", required=True, secret=True, placeholder="podelu_…",
+              show_if={"mode": (KEY_MODE,)},
+              hint="Выпускает администратор «По Делу»: «Настройки → Интеграции → Ключи интеграций» — система "
+                   "«Дашборды», код dashboards, области «Структура компании» (org.read), «Сотрудники» (users.read), "
+                   "«Задачи и вложения» (tasks.attachments.read), «Комментарии к задачам» (tasks.comment) и списки "
+                   "задач с данными. Ключ показывается один раз"),
         Field("login", "Служебная учётная запись", required=True, placeholder="dashboards-sync",
+              show_if={"mode": (SESSION_MODE,)},
               hint="Логин или email в «По Делу»: полномочия «Ведёт структуру компании» и «Ведёт учётные записи», "
                    "участник (просмотр) списка с данными; роль администратора не нужна"),
-        Field("password", "Пароль", "password", required=True, secret=True),
+        Field("password", "Пароль", "password", required=True, secret=True, show_if={"mode": (SESSION_MODE,)}),
         Field("verify_tls", "Проверять TLS-сертификат", "bool", default=True,
               hint="Выключите только для самоподписанного или корпоративного сертификата"),
         Field("data_list", "Список задач с данными", placeholder="Данные для дашбордов",
-              hint="Идентификатор или название списка «По Делу», в задачи которого кладут выгрузки; доступные "
-                   "списки — в результате проверки подключения"),
+              hint="Ключ интеграции: необязательно — id или название одного из списков ключа; пусто — все списки "
+                   "ключа. Служебная учётная запись: id или название списка, в задачи которого кладут выгрузки "
+                   "(учётная запись — его участник). Списки — в результате проверки подключения"),
         Field("data_tags", "Метки задач", "list",
               hint="Необязательно: только задачи с одной из этих меток"),
         Field("create_missing_units", "Создавать недостающие подразделения", "bool", default=True,
@@ -193,14 +291,15 @@ class PodeluConnector(Connector):
               hint="Сотрудники, пришедшие из «По Делу», которых там больше нет среди активных, отключаются"),
         Field("mark_processed", "Отмечать задачу комментарием", "bool", default=True,
               hint="Комментарий в задаче: «Файл «…» принят в «Дашборды»: <статус>» (со ссылкой на «Входящие», если "
-                   "на сервере задан PUBLIC_URL); в списке должны быть разрешены комментарии"),
+                   "на сервере задан PUBLIC_URL); в списке должны быть разрешены комментарии, ключу нужна область "
+                   "«Комментарии к задачам» (tasks.comment)"),
     )
     actions = (
         Action("sync", "Синхронизировать структуру",
                "Подразделения и сотрудники из «По Делу»: план и применение по правилам «Входящих» "
                "(источник «Подключение», наборы «Структура компании» и «Сотрудники»)"),
         Action("pull", "Забрать данные из задач",
-               "Новые вложения задач выделенного списка — во «Входящие»; задача отмечается комментарием"),
+               "Новые вложения задач списков с данными — во «Входящие»; задача отмечается комментарием"),
     )
     url_field = "base_url"
     order = 10
@@ -212,36 +311,76 @@ class PodeluConnector(Connector):
         "users_unchanged": "сотрудников без изменений", "users_deactivate": "сотрудников отключить",
         "users_departments": "подразделений для сотрудников", "users_errors": "ошибок у сотрудников",
         "users_skipped": "сотрудников пропущено",
-        # «Забрать данные из задач»
-        "tasks": "задач в списке", "candidates": "задач с новыми вложениями", "comments": "задач отмечено",
-        "comment_errors": "не удалось отметить",
+        # «Забрать данные из задач»: tasks — задачи списка (сессия) или задачи с изменившимися файлами (ключ)
+        "tasks": "задач просмотрено", "candidates": "задач с новыми вложениями", "comments": "задач отмечено",
+        "comment_errors": "не удалось отметить", "comments_disabled": "не отмечено: комментарии выключены",
     }
-    # Пароль уходит на адрес для запросов сервера (если он задан): привязка — к обоим адресам
+    # Ключ и пароль уходят на адрес для запросов сервера (если он задан): привязка — к обоим адресам в обоих режимах
     secret_url_fields = ("base_url", "server_url")
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
+        config = dict(config or {})
+        if not config.get("mode"):
+            # Новое подключение — по ключу; запрос с логином служебной учётной записи и без режима — как раньше
+            config["mode"] = connection_mode(config)
         out = super().validate_config(config)
         if out.get("server_url") == out.get("base_url"):
             out["server_url"] = None
         return out
 
     @classmethod
+    def stored_config(cls, config: dict | None) -> dict:
+        """Подключение, сохранённое до режима ключа (без mode), — служебная учётная запись."""
+        out = super().stored_config(config)
+        if out.get("mode") not in MODE_LABELS:
+            out["mode"] = connection_mode(out)
+        return out
+
+    @classmethod
     def secret_url(cls, config: dict) -> str:
         return joined_urls(config.get("base_url"), config.get("server_url"))
 
-    # --- сессия
+    @property
+    def url(self) -> str | None:
+        """Запросы — на адрес для запросов сервера, если он задан."""
+        return self.config.get("server_url") or self.config.get("base_url")
+
+    @property
+    def mode(self) -> str:
+        return connection_mode(self.config)
+
+    # --- сессия и ключ
     def session(self) -> PartnerSession:
-        url = self.config.get("server_url") or self.config.get("base_url")
-        if not url:
+        if not self.url:
             raise IntegrationError("Не задан адрес «По Делу»", code="config")
-        return PartnerSession(url, kind=self.kind, title=TITLE, login=self.config.get("login") or "",
+        return PartnerSession(self.url, kind=self.kind, title=TITLE, login=self.config.get("login") or "",
                               password=self.secrets.get("password") or "", csrf_path="api/auth/csrf-token",
                               verify=bool(self.config.get("verify_tls", True)), detailed=self.detailed,
                               max_bytes=download_limit())
 
+    def key_api(self) -> KeyApi:
+        key = (self.secrets.get("key") or "").strip()
+        if not key.startswith(KEY_PREFIX):
+            raise IntegrationError(f"Ключ интеграции «{TITLE}» начинается с {KEY_PREFIX} — проверьте ключ",
+                                   code="config")
+        client = self.http(headers={"Authorization": f"Bearer {key}"}, cookies=False, max_bytes=download_limit())
+        return KeyApi(client, title=TITLE, prefix=V1, place=KEYS_PLACE, no_api=NO_API)
+
+    @staticmethod
+    def key_info(ping: dict) -> tuple[list[str], list[str]]:
+        """(области ключа, списки ключа) из ответа /ping."""
+        scopes = [str(s) for s in ping.get("scopes") or [] if isinstance(s, str)]
+        lists = [str(x) for x in ping.get("listIds") or [] if x not in (None, "")]
+        return scopes, lists
+
     # --- проверка
     def check(self) -> CheckResult:
+        if self.mode == KEY_MODE:
+            return self.check_key()
+        return self.check_session()
+
+    def check_session(self) -> CheckResult:
         with self.session() as s:
             user = s.user
             can = rights(user)
@@ -277,7 +416,7 @@ class PodeluConnector(Connector):
                                 "users.manage")
         name = user.get("name") or user.get("login") or self.config.get("login")
         details = {
-            "version": version, "user": {"login": user.get("login"), "name": user.get("name")},
+            "mode": SESSION_MODE, "version": version, "user": {"login": user.get("login"), "name": user.get("name")},
             "admin": can["admin"], "capabilities": [r for r in (ORG_RIGHT, USERS_RIGHT) if can[r]],
             "departments": departments, "missing": missing, "warnings": warnings,
             "lists": [{"id": x.get("id"), "title": x.get("title")} for x in lists if isinstance(x, dict)],
@@ -296,6 +435,81 @@ class PodeluConnector(Connector):
         message = ", ".join(parts) + (f". Внимание: {'; '.join(warnings)}" if warnings else "")
         return CheckResult(True, message, details)
 
+    def check_key(self) -> CheckResult:
+        """Ключ: версия, название и области ключа, списки ключа (названия — по задачам), чего не хватает
+        включённым возможностям. Проверка успешна, если работает хотя бы одно действие: ключ может быть выпущен
+        только для структуры или только для файлов задач (второе подключение «По Делу» со своим ключом)."""
+        ref = (self.config.get("data_list") or "").strip()
+        mark = bool(self.config.get("mark_processed", True))
+        with self.key_api() as api:
+            ping = api.ping("podelu")
+            scopes, list_ids = self.key_info(ping)
+            departments = None
+            if SCOPE_ORG in scopes:
+                departments = len(api.get("org/export").get("departments") or [])
+            lists = self._key_lists(api, scopes, list_ids)
+        version = str(ping.get("version") or "")
+        key = ping.get("key") if isinstance(ping.get("key"), dict) else {}
+        key_name = api.key_name or "без названия"
+        missing: list[str] = []
+        problems: list[str] = []
+        if SCOPE_ORG not in scopes:
+            missing.append(f"область {SCOPE_LABELS[SCOPE_ORG]} — для «Синхронизировать структуру»")
+        if SCOPE_USERS not in scopes:
+            missing.append(f"область {SCOPE_LABELS[SCOPE_USERS]} — для сотрудников в «Синхронизировать структуру»")
+        files = SCOPE_TASKS in scopes and bool(list_ids)
+        if not files:
+            missing.append(f"область {SCOPE_LABELS[SCOPE_TASKS]} со списками задач — для «Забрать данные из задач»")
+        if mark and SCOPE_COMMENT not in scopes:
+            missing.append(f"область {SCOPE_LABELS[SCOPE_COMMENT]} — для «Отмечать задачу комментарием»")
+        chosen = find_list(lists, ref) if ref else None
+        if ref and chosen is None and files:
+            problems.append(f"доступ ключа к списку «{ref}» — выберите список для ключа или оставьте «Список задач "
+                            "с данными» пустым (тогда берутся все списки ключа)")
+        ok = not problems and (files or (SCOPE_ORG in scopes and SCOPE_USERS in scopes))
+        details = {
+            "mode": KEY_MODE, "version": version, "key": {"name": api.key_name, "app": key.get("app")},
+            "scopes": scopes, "departments": departments, "lists": lists,
+            "data_list": chosen, "missing": [*problems, *missing],
+        }
+        where = f"«{TITLE}» {version}".strip() if version else f"«{TITLE}»"
+        lacking = "; ".join([*problems, *missing])
+        if not ok:
+            return CheckResult(False, f"Ключ «{key_name}» принят в {where}, но не хватает: {lacking} — {KEYS_PLACE}",
+                               details)
+        parts = [f"Подключено к {where} по ключу «{key_name}»"]
+        if departments is not None:
+            parts.append(f"подразделений: {departments}")
+        if chosen:
+            parts.append(f"список {list_label(chosen)}")
+        elif files:
+            parts.append(f"списки ключа: {', '.join(list_label(x) for x in lists)}")
+        message = ", ".join(parts)
+        if missing:
+            message += f". Не хватает: {lacking} — добавьте ключу: {KEYS_PLACE}"
+        return CheckResult(True, message, details)
+
+    def _key_lists(self, api: KeyApi, scopes: list[str], list_ids: list[str]) -> list[dict]:
+        """Списки ключа [{id, title}]: названий «По Делу» не отдаёт — они берутся из задач (listTitle): первая
+        страница задач всех списков ключа, затем по задаче из каждого списка без названия (не больше
+        MAX_LIST_PROBES запросов). Список без задач — без названия."""
+        titles: dict[str, str] = {}
+
+        def collect(page: dict) -> None:
+            for task in page.get("items") or []:
+                if isinstance(task, dict) and task.get("listId") and task.get("listTitle"):
+                    titles.setdefault(str(task["listId"]), str(task["listTitle"]))
+
+        if SCOPE_TASKS in scopes and list_ids:
+            collect(api.get("tasks", params={"limit": PAGE_SIZE}))
+            for list_id in [i for i in list_ids if i not in titles][:MAX_LIST_PROBES]:
+                try:
+                    collect(api.get("tasks", params={"listId": list_id, "limit": 1}))
+                except IntegrationError as exc:
+                    if exc.code != "not_found":     # список удалён в «По Делу» — без названия
+                        raise
+        return [{"id": list_id, "title": titles.get(list_id)} for list_id in list_ids]
+
     # --- действия
     def run(self, action: str, ctx: RunContext) -> RunResult:
         self.action(action)
@@ -306,6 +520,38 @@ class PodeluConnector(Connector):
     # ================================================================ структура и сотрудники
 
     def sync(self, ctx: RunContext) -> RunResult:
+        if self.mode == KEY_MODE:
+            exported, employees, ids, keep = self._export_key()
+        else:
+            exported, employees, ids, keep = self._export_session()
+        # Сеть закончилась (сессия закрыта) — дальше только движки «Дашбордов»
+        snap = org.build_snapshot(ctx.db)
+        head_emails = {p.external_id: p.email for p in snap.people.values()
+                       if p.org_source == "podelu" and p.external_id and p.email}
+        try:
+            bundle = structure_bundle(exported, head_emails)
+        except StructureFormatError as exc:
+            raise IntegrationError(f"«{TITLE}» вернула неожиданную выгрузку структуры: {exc.detail}",
+                                   code="bad_response") from None
+        if not isinstance(employees, dict) or employees.get("format") != EMPLOYEES_FORMAT:
+            raise IntegrationError(f"«{TITLE}» вернула неожиданную выгрузку сотрудников (нужен format: "
+                                   f"{EMPLOYEES_FORMAT})", code="bad_response")
+        notes: list[str] = []
+        counters: dict[str, int] = {}
+        structure = self._structure(ctx, bundle, notes, counters)
+        team = self._employees(ctx, employees, ids, structure, notes, counters, keep)
+        message = f"{structure['text']}. {team['text']}"
+        details = {"mode": self.mode, "structure": {k: v for k, v in structure.items() if k != "text"},
+                   "employees": {k: v for k, v in team.items() if k != "text"}}
+        if notes:
+            details["notes"] = notes[:MAX_DETAILS]
+        errors = [*structure.get("errors", []), *team.get("errors", [])]
+        if errors or team.get("skipped"):
+            return RunResult.partial(message, "; ".join(errors[:5]), counters=counters, details=details)
+        return RunResult.ok(message, counters=counters, details=details)
+
+    def _export_session(self) -> tuple[Any, Any, dict[str, str], set[str]]:
+        """Выгрузки служебной учётной записью: (структура, сотрудники, {email: id «По Делу»}, служебные логины)."""
         with self.session() as s:
             can = rights(s.user)
             missing = [RIGHT_LABELS[r] for r in (ORG_RIGHT, USERS_RIGHT) if not can[r]]
@@ -316,28 +562,26 @@ class PodeluConnector(Connector):
             exported = s.get_json("api/org/export", denied=NO_ORG)
             employees = s.get_json("api/users/export", params={"format": "json", "inactive": "0"}, denied=NO_USERS)
             people = s.get_json("api/users/admin/all", kind=list, denied=NO_USERS)
-        # Сеть закончилась (выход выполнен) — дальше только движки «Дашбордов»
-        try:
-            bundle = structure_bundle(exported)
-        except StructureFormatError as exc:
-            raise IntegrationError(f"«{TITLE}» вернула неожиданную выгрузку структуры: {exc.detail}",
-                                   code="bad_response") from None
-        if not isinstance(employees, dict) or employees.get("format") != EMPLOYEES_FORMAT:
-            raise IntegrationError(f"«{TITLE}» вернула неожиданную выгрузку сотрудников (нужен format: "
-                                   f"{EMPLOYEES_FORMAT})", code="bad_response")
-        notes: list[str] = []
-        counters: dict[str, int] = {}
-        structure = self._structure(ctx, bundle, notes, counters)
-        team = self._employees(ctx, employees, people, structure, notes, counters, account)
-        message = f"{structure['text']}. {team['text']}"
-        details = {"structure": {k: v for k, v in structure.items() if k != "text"},
-                   "employees": {k: v for k, v in team.items() if k != "text"}}
-        if notes:
-            details["notes"] = notes[:MAX_DETAILS]
-        errors = [*structure.get("errors", []), *team.get("errors", [])]
-        if errors or team.get("skipped"):
-            return RunResult.partial(message, "; ".join(errors[:5]), counters=counters, details=details)
-        return RunResult.ok(message, counters=counters, details=details)
+        ids = {str(p.get("email") or "").strip().lower(): str(p.get("id")) for p in people
+               if isinstance(p, dict) and p.get("id") and p.get("email") and not p.get("isSystem")}
+        return exported, employees, ids, self._service_account(account)
+
+    def _export_key(self) -> tuple[Any, Any, dict[str, str], set[str]]:
+        """Выгрузки по ключу (org.read, users.read): у сотрудников и руководителей — userId; служебной учётной
+        записи нет — исключать из сотрудников и из отключения некого."""
+        with self.key_api() as api:
+            scopes, _lists = self.key_info(api.ping("podelu"))
+            missing = [SCOPE_LABELS[s] for s in (SCOPE_ORG, SCOPE_USERS) if s not in scopes]
+            if missing:
+                raise IntegrationError(f"У ключа «{api.key_name}» нет областей: {', '.join(missing)} — добавьте их "
+                                       f"ключу: {KEYS_PLACE}", code="insufficient_scope",
+                                       short=f"У ключа интеграции «{TITLE}» не хватает областей доступа")
+            exported = api.get("org/export")
+            employees = api.get("users/export", params={"format": "json", "inactive": "0"})
+        records = employees.get("employees") if isinstance(employees, dict) else None
+        ids = {str(e.get("email") or "").strip().lower(): str(e["userId"]) for e in records or []
+               if isinstance(e, dict) and e.get("userId") and e.get("email")}
+        return exported, employees, ids, set()
 
     def _structure(self, ctx: RunContext, bundle: dict, notes: list[str], counters: dict) -> dict:
         kinds = org_admin.get_settings(ctx.db)["unit_kinds"]
@@ -391,11 +635,10 @@ class PodeluConnector(Connector):
         out["errors"] = [f"структура: {e}" for e in errors[:5]]
         return {**out, "text": f"Структура: не применена — {status_text(item)} (элемент входящих №{item.id})"}
 
-    def _employees(self, ctx: RunContext, document: dict, people: list, structure: dict, notes: list[str],
-                   counters: dict, account: dict) -> dict:
+    def _employees(self, ctx: RunContext, document: dict, ids: dict[str, str], structure: dict, notes: list[str],
+                   counters: dict, keep: set[str]) -> dict:
         snap = org.build_snapshot(ctx.db)
-        rows, skipped = self.rows(document, people, snap, notes, org_admin.get_settings(ctx.db)["max_depth"],
-                                  account)
+        rows, skipped = self.rows(document, ids, snap, notes, org_admin.get_settings(ctx.db)["max_depth"], keep)
         if not rows:
             message = f"выгрузка сотрудников «{TITLE}» пуста — сотрудники не синхронизируются"
             return {"summary": {}, "applied": False, "skipped": skipped[:MAX_DETAILS], "errors": [message],
@@ -410,7 +653,6 @@ class PodeluConnector(Connector):
                       "«Входящие» → «Правила»)")
         apply = not reason
         deactivate = bool(self.config.get("deactivate_missing"))
-        keep = self._service_account(account)
         result = ctx.plans.org_list(rows, apply=apply, create_missing=True, deactivate_missing=deactivate,
                                     keep=keep)
         errors: list[str] = []
@@ -448,14 +690,13 @@ class PodeluConnector(Connector):
             return {**out, "reason": reason, "text": f"Сотрудники: план — {plan_numbers}; не применено: {reason}"}
         return {**out, "text": f"Сотрудники: не применены — {'; '.join(errors) or 'в плане ошибки'}"}
 
-    def rows(self, document: dict, people: list, snap: org.OrgSnapshot, notes: list[str], max_depth: int,
-             account: dict | None = None) -> tuple[list[Row], list]:
-        """Записи podelu.employees → строки быстрой загрузки (источник podelu). Строки, которые движок отверг бы
-        целиком (нет email, нет подразделения у нового, путь глубже предела), пропускаются с пояснением;
-        служебная учётная запись подключения сотрудником не считается."""
-        service = self._service_account(account)
-        ids = {str(p.get("email") or "").strip().lower(): str(p.get("id")) for p in people
-               if isinstance(p, dict) and p.get("id") and p.get("email") and not p.get("isSystem")}
+    def rows(self, document: dict, ids: dict[str, str], snap: org.OrgSnapshot, notes: list[str], max_depth: int,
+             service: set[str] | None = None) -> tuple[list[Row], list]:
+        """Записи podelu.employees → строки быстрой загрузки (источник podelu). ids — {email: id «По Делу»}.
+        Строки, которые движок отверг бы целиком (нет email, нет подразделения у нового, путь глубже предела),
+        пропускаются с пояснением; служебная учётная запись подключения (service — логин и email) сотрудником не
+        считается."""
+        service = service or set()
         by_external = {p.external_id: p for p in snap.people.values() if p.org_source == "podelu" and p.external_id}
         by_email: dict[str, list] = {}
         for p in snap.people.values():
@@ -516,6 +757,176 @@ class PodeluConnector(Connector):
     # ================================================================ данные из задач
 
     def pull(self, ctx: RunContext) -> RunResult:
+        if self.mode == KEY_MODE:
+            return self.pull_key(ctx)
+        return self.pull_session(ctx)
+
+    def pull_key(self, ctx: RunContext) -> RunResult:
+        """Файлы задач списков ключа (или выбранного списка) по курсору activityAt — см. описание модуля."""
+        ref = (self.config.get("data_list") or "").strip()
+        tags = [t for t in self.config.get("data_tags") or [] if t]
+        counters = {"tasks": 0, "candidates": 0, "files": 0, "added": 0, "seen": 0, "skipped_type": 0,
+                    "too_large": 0, "comments": 0, "comment_errors": 0, "comments_disabled": 0}
+        details: list[dict] = []
+        notes: list[str] = []
+        comment_errors: list[str] = []
+        stopped = ""
+        state = ctx.state
+        with self.key_api() as api:
+            scopes, list_ids = self.key_info(api.ping("podelu"))
+            if SCOPE_TASKS not in scopes or not list_ids:
+                raise IntegrationError(f"У ключа «{api.key_name}» нет области {SCOPE_LABELS[SCOPE_TASKS]} со списками "
+                                       f"задач — добавьте её и списки с данными: {KEYS_PLACE}",
+                                       code="insufficient_scope",
+                                       short=f"У ключа интеграции «{TITLE}» нет доступа к задачам")
+            chosen = None
+            if ref:
+                lists = [{"id": ref, "title": None}] if ref in list_ids else self._key_lists(api, scopes, list_ids)
+                chosen = find_list(lists, ref)
+                if chosen is None:
+                    raise IntegrationError(f"Список «{ref}» не открыт ключу «{api.key_name}» — выберите его для ключа "
+                                           f"({KEYS_PLACE}) или оставьте «Список задач с данными» пустым: тогда "
+                                           "берутся все списки ключа", code="not_found")
+            scope = {"lists": [chosen["id"]] if chosen else sorted(list_ids), "tags": sorted(tags)}
+            if state.get("mode") != KEY_MODE:
+                state.clear()           # курсор служебной учётной записи (updatedAt и вложения) здесь не годится
+            previous = state.get("scope") if isinstance(state.get("scope"), dict) else {}
+            if previous.get("tags") != scope["tags"] or set(scope["lists"]) - set(previous.get("lists") or []):
+                state.pop("since", None)    # новый список или другие метки — задачи берутся с начала
+            state.update(mode=KEY_MODE, scope=scope)
+            params: dict[str, Any] = {"hasAttachments": "1", "limit": PAGE_SIZE}
+            if chosen:
+                params["listId"] = chosen["id"]
+            if len(tags) == 1:
+                params["tags"] = tags[0]   # у «По Делу» метки через запятую — все сразу; «одна из» — отбором здесь
+            if state.get("since"):
+                params["updatedSince"] = state["since"]
+            mark = bool(self.config.get("mark_processed", True))
+            if mark and SCOPE_COMMENT not in scopes:
+                mark = False
+                notes.append(f"у ключа нет области {SCOPE_LABELS[SCOPE_COMMENT]} — задачи не отмечаются")
+            names = UploaderNames(api, SCOPE_USERS in scopes)
+            silent: set[str] = set()       # списки, где владелец отключил комментарии
+            titles: dict[str, str] = {}
+            done: set[str] = set()
+            try:
+                for _page in range(MAX_PAGES):
+                    page = api.get("tasks", params=params)
+                    for task in page.get("items") or []:
+                        if not isinstance(task, dict) or not task.get("id"):
+                            continue
+                        task_id, list_id = str(task["id"]), str(task.get("listId") or "")
+                        if task.get("listTitle"):
+                            titles[list_id] = str(task["listTitle"])
+                        wanted = not tags or set(tags) & set(task.get("tags") or [])
+                        if wanted and task_id not in done:
+                            done.add(task_id)
+                            counters["tasks"] += 1
+                            lines = self._key_task_files(ctx, api, task, names, counters, details)
+                            if lines and mark and list_id not in silent:
+                                self._key_comment(api, task, lines, counters, comment_errors, notes, silent, titles)
+                        moment = parse_time(task.get("activityAt"))
+                        if moment is not None and (parse_time(state.get("since")) or moment) <= moment:
+                            state["since"] = iso(moment)    # задача обработана — следующий запуск начнёт с неё
+                    cursor = page.get("nextCursor")
+                    if not cursor:
+                        break
+                    params["cursor"] = cursor
+                else:
+                    notes.append(f"просмотрено {MAX_PAGES * PAGE_SIZE} задач — остальные заберёт следующий запуск")
+            except IntegrationError as exc:
+                if exc.code != "rate_limited":
+                    raise
+                stopped = exc.message(self.detailed)
+        if chosen:
+            label = f"Список {list_label({**chosen, 'title': titles.get(chosen['id']) or chosen.get('title')})}"
+        else:
+            label = f"Списки ключа «{api.key_name}» ({len(list_ids)})"
+        message = (f"{label}: задач с новыми вложениями {counters['candidates']}, файлов во «Входящие» "
+                   f"{counters['added']}, уже забранных {counters['seen']}")
+        if counters["skipped_type"] or counters["too_large"]:
+            message += f", пропущено {counters['skipped_type'] + counters['too_large']} (не данные или слишком большие)"
+        result_details: dict[str, Any] = {
+            "mode": KEY_MODE, "lists": [{"id": i, "title": titles.get(i)} for i in scope["lists"]],
+            "files": details[:MAX_DETAILS]}
+        if notes:
+            result_details["notes"] = notes[:MAX_DETAILS]
+        if stopped:
+            result_details["stopped"] = stopped
+            return RunResult.partial(f"{message}; остановлено: {stopped} — следующий запуск продолжит с места "
+                                     "остановки", stopped, counters=counters, details=result_details)
+        if comment_errors:
+            result_details["comment_errors"] = comment_errors[:10]
+            return RunResult.partial(message + f"; не удалось отметить задач: {counters['comment_errors']}",
+                                     comment_errors[0], counters=counters, details=result_details)
+        if counters["comments_disabled"]:
+            message += f"; не отмечено задач: {counters['comments_disabled']} (комментарии выключены)"
+        return RunResult.ok(message, counters=counters, details=result_details)
+
+    def _key_task_files(self, ctx: RunContext, api: KeyApi, task: dict, names: UploaderNames, counters: dict,
+                        details: list) -> list[str]:
+        """Новые файлы задачи → «Входящие» (уже забранные — по sha256 из списка файлов, без скачивания); строки
+        комментария-отметки."""
+        task_id = str(task["id"])
+        path = f"tasks/{quote(task_id, safe='')}/attachments"
+        lines: list[str] = []
+        for attachment in api.get(path).get("items") or []:
+            if not isinstance(attachment, dict) or not attachment.get("id"):
+                continue
+            att_id, name = str(attachment["id"]), str(attachment.get("fileName") or "файл")
+            counters["files"] += 1
+            if not is_data_file(name):
+                counters["skipped_type"] += 1
+                continue
+            if int(attachment.get("size") or 0) > inbox_limit():
+                counters["too_large"] += 1
+                details.append({"file": name, "task": task.get("title"), "status": "пропущен: больше INBOX_MAX_MB"})
+                continue
+            listed = str(attachment.get("sha256") or "").lower()
+            if listed and ctx.inbox.seen(f"podelu:{task_id}:{att_id}:{listed}") is not None:
+                counters["seen"] += 1
+                continue
+            content = api.request("GET", f"{path}/{quote(att_id, safe='')}/content").content
+            digest = sha256(content)
+            ref = f"podelu:{task_id}:{att_id}:{digest}"
+            if digest != listed and ctx.inbox.seen(ref) is not None:
+                counters["seen"] += 1
+                continue
+            author = names.get(attachment.get("uploadedBy"), task.get("createdBy"))
+            item = ctx.inbox.add(content, name, source_ref=ref, content_type=str(attachment.get("mimeType") or ""),
+                                 note=task_note(task.get("title"), author))
+            counters["added"] += 1
+            counters[f"status_{item.status}"] = counters.get(f"status_{item.status}", 0) + 1
+            status = status_text(item)
+            lines.append(f"Файл «{name}» принят в «Дашборды»: {status}")
+            details.append({"item": item.id, "file": name, "status": status})
+        if lines:
+            counters["candidates"] += 1
+            if settings.public_url:
+                lines.append(f"Входящие данные: {settings.public_url}/inbox")
+        return lines
+
+    def _key_comment(self, api: KeyApi, task: dict, lines: list[str], counters: dict, errors: list[str],
+                     notes: list[str], silent: set[str], titles: dict[str, str]) -> None:
+        """Отметка задачи комментарием системы (tasks.comment; POST без повтора). Владелец списка отключил
+        комментарии (403 comments_disabled) — предупреждение, задачи этого списка дальше не отмечаются."""
+        task_id, list_id = str(task["id"]), str(task.get("listId") or "")
+        try:
+            api.post(f"tasks/{quote(task_id, safe='')}/comments", {"text": "\n".join(lines)[:COMMENT_LIMIT]})
+            counters["comments"] += 1
+        except IntegrationError as exc:
+            if exc.code == "rate_limited":
+                raise
+            if exc.code == "comments_disabled":
+                counters["comments_disabled"] += 1
+                silent.add(list_id)
+                where = f"«{titles[list_id]}»" if titles.get(list_id) else list_id
+                notes.append(f"в списке {where} владелец отключил комментарии — задачи не отмечаются")
+                return
+            counters["comment_errors"] += 1
+            errors.append(f"«{task.get('title')}»: {exc.message(self.detailed)}")
+
+    def pull_session(self, ctx: RunContext) -> RunResult:
         ref = (self.config.get("data_list") or "").strip()
         if not ref:
             raise IntegrationError("Не выбран список задач с данными — укажите его в настройках подключения (доступные "
@@ -531,6 +942,8 @@ class PodeluConnector(Connector):
                 raise IntegrationError(f"Список «{ref}» в «{TITLE}» не найден или недоступен — служебная учётная "
                                        "запись должна быть участником списка", code="not_found")
             state = ctx.state
+            for stale in ("mode", "scope"):     # курсор режима ключа (activityAt) здесь не годится
+                state.pop(stale, None)
             if state.get("list") != chosen["id"]:
                 state.pop("since", None)
                 state.pop("tasks", None)
@@ -573,7 +986,8 @@ class PodeluConnector(Connector):
                    f"«Входящие» {counters['added']}, уже забранных {counters['seen']}")
         if counters["skipped_type"] or counters["too_large"]:
             message += f", пропущено {counters['skipped_type'] + counters['too_large']} (не данные или слишком большие)"
-        result_details: dict[str, Any] = {"list": {"id": chosen["id"], "title": chosen.get("title")},
+        result_details: dict[str, Any] = {"mode": SESSION_MODE,
+                                          "list": {"id": chosen["id"], "title": chosen.get("title")},
                                           "files": details[:MAX_DETAILS]}
         if self.config.get("mark_processed", True) and not mark:
             result_details["notes"] = [f"в списке «{chosen.get('title')}» выключены комментарии — задачи не "
@@ -655,4 +1069,3 @@ class PodeluConnector(Connector):
             except IntegrationError:
                 names[key] = key
         return names[key]
-

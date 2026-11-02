@@ -1,11 +1,16 @@
 """«Пульс проекта»: проекты → вычисляемые у нас показатели сквозного отчёта по подразделениям (ADR-0011).
 
-Подключение — только чтение:
-- служебная учётная запись «Пульса» (сейчас): GET /api/auth/csrf → POST /api/auth/login (X-CSRF-Token, Referer,
-  Origin) → GET /api/health/ready, /api/directions, /api/projects → POST /api/auth/logout (всегда);
-- ключ интеграции (Bearer puls_…, без cookie): GET /api/integration/v1/ping и /api/integration/v1/projects — когда
-  «Пульс» поддержит несколько ключей (сейчас ключ один и занят «По Делу»). В этом режиме «Пульс» не отдаёт число
-  заблокированных задач и id направлений: показатель puls.blocked не пишется, направления сопоставляются по названию.
+Подключение — только чтение, два режима (настройка mode):
+- ключ интеграции (key, по умолчанию; «Пульс» 0.6.0 и новее, ADR-0011 там): Bearer puls_…, без cookie и CSRF;
+  GET /api/integration/v1/ping (версия, название и права ключа), /directions (направления с числом проектов),
+  /projects?limit=200 (больше API не отдаёт, листания нет). Права ключа: projects.read («Проекты и планы») —
+  обязательно; projects.stats («Показатели проектов») — у проектов ещё inwork, blocked и directionInfo {id, name}:
+  без него puls.blocked не пишется, а направления сопоставляются только по названию. Ключ выпускает администратор
+  «Пульса»: «Интеграции → Ключи доступа», система «Дашборды компании»; предел — 120 запросов в минуту на ключ;
+- служебная учётная запись «Пульса» (session; для версий до 0.6.0): GET /api/auth/csrf → POST /api/auth/login
+  (X-CSRF-Token, Referer, Origin) → GET /api/health/ready, /api/directions, /api/projects → POST /api/auth/logout
+  (всегда).
+Подключения, сохранённые без режима, работают служебной учётной записью (stored_config).
 
 «Обновить показатели проектов» за текущий месяц (по TIMEZONE): проект относится к подразделению по сопоставлению
 «направление → подразделение» (направление — id или название, подразделение — код или путь), несопоставленный —
@@ -35,15 +40,37 @@ from ...services.inbox import plan_errors
 from ...services.org_import import split_path
 from ...services.reports import IndicatorDef
 from ..base import Action, CheckResult, Connector, Field, Option, RunContext, RunResult, register
-from ..http import HttpClient, IntegrationError
-from .common import ANY_STATUS, PartnerSession, partner_error, rule_lines
+from ..http import IntegrationError
+from .common import (
+    KEY_MODE,
+    MODE_LABELS,
+    SESSION_MODE,
+    KeyApi,
+    PartnerSession,
+    connection_mode,
+    rule_lines,
+)
 
 TITLE = "Пульс проекта"
 COMMENT = "из «Пульса проекта»"
 SOON_DAYS = 14
 SOON_PROGRESS = 80
 MAX_DETAILS = 50
-MODES = {"session": "служебная учётная запись", "key": "ключ интеграции"}
+# --- API ключей интеграций «Пульса» 0.6.0+ (ADR-0011 «Пульса»)
+V1 = "api/integration/v1"
+KEY_PREFIX = "puls_"
+SCOPE_READ, SCOPE_STATS = "projects.read", "projects.stats"
+# Подписи прав — как в «Пульсе» («Интеграции → Ключи доступа»)
+SCOPE_LABELS = {SCOPE_READ: "«Проекты и планы» (projects.read)", SCOPE_STATS: "«Показатели проектов» (projects.stats)"}
+KEYS_PLACE = "«Пульс» → «Интеграции → Ключи доступа»"
+NO_API = ("По адресу подключения нет API ключей интеграций «Пульса» (/api/integration/v1/ping, 404): «Пульс» старше "
+          "0.6.0 или адрес указан неверно. Обновите «Пульс» до 0.6.0 или выберите режим «Служебная учётная запись (для "
+          "версий до 0.6.0)»")
+# /projects отдаёт не больше 200 проектов и не листается
+PROJECTS_MAX = 200
+NO_STATS = (f"у ключа нет права {SCOPE_LABELS[SCOPE_STATS]}: «Пульс» не отдаёт задачи «в работе» и «заблокировано» "
+            "и id направлений — puls.blocked не обновляется, направления сопоставляются только по названию")
+LIMITED = (f"возможно, проектов больше {PROJECTS_MAX} — показатели посчитаны по первым {PROJECTS_MAX}")
 
 
 @dataclass(frozen=True)
@@ -183,17 +210,13 @@ class Project:
 
     @classmethod
     def from_key(cls, raw: dict) -> Project:
-        return cls(raw.get("id"), str(raw.get("title") or ""), None, raw.get("direction") or None,
-                   _int(raw.get("total")), _int(raw.get("done")), None, _int(raw.get("overdue")),
+        """Проект API ключа: с правом projects.stats — ещё blocked и directionInfo {id, name} (направление по id);
+        без него — направление только названием, заблокированных задач нет (None)."""
+        info = raw.get("directionInfo") if isinstance(raw.get("directionInfo"), dict) else {}
+        return cls(raw.get("id"), str(raw.get("title") or ""), info.get("id"),
+                   info.get("name") or raw.get("direction") or None, _int(raw.get("total")), _int(raw.get("done")),
+                   _int(raw.get("blocked")) if "blocked" in raw else None, _int(raw.get("overdue")),
                    float(raw.get("progress") or 0), _day(raw.get("end")), raw.get("nextMilestone"))
-
-
-def _error_code(resp) -> str:
-    try:
-        data = resp.json()
-    except (ValueError, UnicodeDecodeError):
-        return ""
-    return str(data.get("error") or "") if isinstance(data, dict) else ""
 
 
 def today_local() -> date:
@@ -248,27 +271,34 @@ class PulsConnector(Connector):
     title = TITLE
     description = ("Проекты «Пульса проекта» → показатели сквозного отчёта по подразделениям (сопоставление "
                    "«направление → подразделение»): проекты в работе, просроченные, заблокированные задачи, средний "
-                   "прогресс и доля проектов в срок; светофор проекта выводится в «Дашбордах»")
+                   "прогресс и доля проектов в срок; светофор проекта выводится в «Дашбордах». Подключение — ключом "
+                   "интеграции «Пульса» 0.6.0 и новее (права projects.read и projects.stats) или, для более ранних "
+                   "версий, служебной учётной записью только для чтения")
     fields = (
         Field("base_url", "Адрес «Пульса проекта»", "url", required=True, placeholder="https://puls.company.ru"),
-        Field("mode", "Режим подключения", "select", default="session",
-              options=(Option("session", "Служебная учётная запись"),
-                       Option("key", "Ключ интеграции (Bearer puls_…)")),
-              hint="Ключ интеграции будет доступен, когда «Пульс» поддержит несколько ключей: сейчас ключ один и "
-                   "занят «По Делу»"),
-        Field("login", "Служебная учётная запись", required=True, show_if={"mode": ("session",)},
-              hint="Только чтение: доступ к нужным направлениям (роль «Наблюдатель» с правами на направления или "
-                   "администратор)"),
-        Field("password", "Пароль", "password", required=True, secret=True, show_if={"mode": ("session",)}),
-        Field("api_key", "Ключ интеграции", "password", required=True, secret=True, show_if={"mode": ("key",)},
-              placeholder="puls_…"),
+        Field("mode", "Режим подключения", "select", required=True, default=KEY_MODE,
+              options=(Option(KEY_MODE, "Ключ интеграции (Пульс 0.6.0 и новее)"),
+                       Option(SESSION_MODE, "Служебная учётная запись (для версий до 0.6.0)")),
+              hint="Рекомендуется ключ интеграции: у «Дашбордов» свой ключ только для чтения проектов, без входа "
+                   "учётной записью. Служебная учётная запись — для «Пульса» до 0.6.0, где ключей для других систем "
+                   "нет"),
+        Field("api_key", "Ключ интеграции", "password", required=True, secret=True, show_if={"mode": (KEY_MODE,)},
+              placeholder="puls_…",
+              hint="Выпускает администратор «Пульса»: «Интеграции → Ключи доступа» → «Выпустить ключ» — система "
+                   "«Дашборды компании», права «Проекты и планы» (projects.read) и «Показатели проектов» "
+                   "(projects.stats). Ключ показывается один раз"),
+        Field("login", "Служебная учётная запись", required=True, show_if={"mode": (SESSION_MODE,)},
+              hint="Для «Пульса» до 0.6.0. Только чтение: доступ к нужным направлениям (роль «Наблюдатель» с правами "
+                   "на направления или администратор)"),
+        Field("password", "Пароль", "password", required=True, secret=True, show_if={"mode": (SESSION_MODE,)}),
         Field("verify_tls", "Проверять TLS-сертификат", "bool", default=True,
               hint="Выключите только для самоподписанного или корпоративного сертификата"),
         Field("directions", "Направление → подразделение", "text",
               placeholder="Внедрение = PROJ\n7 = АЛМИ Партнер / Техническая дирекция",
-              hint="По строке на направление: «направление = подразделение»; направление — название или id, "
-                   "подразделение — код или путь через «/». Проекты несопоставленных направлений относятся к корню "
-                   "структуры; список направлений — в результате проверки"),
+              hint="По строке на направление: «направление = подразделение»; направление — название или id (id — "
+                   "по ключу с правом projects.stats или служебной учётной записью), подразделение — код или путь "
+                   "через «/». Проекты несопоставленных направлений относятся к корню структуры; список направлений "
+                   "— в результате проверки"),
     )
     actions = (Action("indicators", "Обновить показатели проектов",
                       "Проекты в работе, просроченные, заблокированные задачи, средний прогресс и доля проектов в "
@@ -276,13 +306,25 @@ class PulsConnector(Connector):
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
+        config = dict(config or {})
+        if not config.get("mode"):
+            # Новое подключение — по ключу; запрос с логином служебной учётной записи и без режима — как раньше
+            config["mode"] = connection_mode(config)
         out = super().validate_config(config)
         parse_mapping(out.get("directions"))
         return out
 
+    @classmethod
+    def stored_config(cls, config: dict | None) -> dict:
+        """Подключение, сохранённое без режима, — служебная учётная запись (так оно и работало)."""
+        out = super().stored_config(config)
+        if out.get("mode") not in MODE_LABELS:
+            out["mode"] = connection_mode(out)
+        return out
+
     @property
     def mode(self) -> str:
-        return self.config.get("mode") or "session"
+        return connection_mode(self.config)
 
     # --- чтение «Пульса»
     def session(self) -> PartnerSession:
@@ -291,51 +333,58 @@ class PulsConnector(Connector):
                               csrf_path="api/auth/csrf",
                               verify=bool(self.config.get("verify_tls", True)), detailed=self.detailed)
 
-    def key_client(self) -> HttpClient:
-        key = self.secrets.get("api_key") or ""
-        if not key.startswith("puls_"):
-            raise IntegrationError("Ключ интеграции «Пульса» начинается с puls_ — проверьте ключ", code="config")
-        return self.http(headers={"Authorization": f"Bearer {key}"}, cookies=False)
+    def key_api(self) -> KeyApi:
+        key = (self.secrets.get("api_key") or "").strip()
+        if not key.startswith(KEY_PREFIX):
+            raise IntegrationError(f"Ключ интеграции «Пульса» начинается с {KEY_PREFIX} — проверьте ключ",
+                                   code="config")
+        client = self.http(headers={"Authorization": f"Bearer {key}"}, cookies=False)
+        return KeyApi(client, title=TITLE, prefix=V1, place=KEYS_PLACE, no_api=NO_API)
 
-    def _key_get(self, client: HttpClient, path: str, params: dict | None = None) -> dict:
-        resp = client.request("GET", path, params=params, expect=ANY_STATUS)
-        if resp.status == 401:
-            raise IntegrationError(f"«{TITLE}» не принял ключ интеграции (401) — выпустите ключ в «Пульсе» "
-                                   "(Администрирование → Интеграции) и введите его заново", code="auth", status=401,
-                                   short=f"«{TITLE}» не принял ключ интеграции")
-        if resp.status == 404 and not _error_code(resp):
-            # 404 без кода ошибки — у «Пульса» нет API интеграции (соглашение «По Делу» ↔ «Пульс»)
-            raise IntegrationError(f"В «{TITLE}» нет API интеграции ({'/' + path}, 404) — нужна версия «Пульса» с "
-                                   "ключами интеграции или режим «Служебная учётная запись»", code="not_found",
-                                   status=404, short=f"В «{TITLE}» нет API интеграции")
-        if resp.status != 200:
-            raise partner_error(TITLE, resp, path)
-        return client.parse(resp, dict)
-
-    def load(self) -> tuple[list[Project], list[dict], dict]:
-        """(проекты, направления [{id, name}], сведения о версии и учётной записи)."""
-        if self.mode == "key":
-            with self.key_client() as client:
-                ping = self._key_get(client, "api/integration/v1/ping")
-                if ping.get("app") != "puls":
-                    raise IntegrationError(f"Ключ принят, но отвечает не «{TITLE}» (app: {ping.get('app')}) — "
-                                           "проверьте адрес", code="bad_response")
-                data = self._key_get(client, "api/integration/v1/projects", {"limit": 200})
-            raw = [p for p in data.get("projects") or [] if isinstance(p, dict)]
-            projects = [Project.from_key(p) for p in raw]
-            names = sorted({p.direction for p in projects if p.direction}, key=str.casefold)
-            info = {"version": str(ping.get("version") or ""), "mode": "key", "limited": len(raw) >= 200}
-            return projects, [{"id": None, "name": n} for n in names], info
+    def load(self, *, projects: bool = True) -> tuple[list[Project], list[dict], dict]:
+        """(проекты, направления [{id, name} — у ключа ещё projects: число проектов], сведения о версии, режиме,
+        учётной записи или ключе). projects=False — без проектов (проверке по ключу хватает числа проектов из
+        направлений)."""
+        if self.mode == KEY_MODE:
+            return self.load_key(projects=projects)
         with self.session() as s:
             ready = s.get_json("api/health/ready")
             directions = [d for d in s.get_json("api/directions", kind=list) if isinstance(d, dict)]
             raw = [p for p in s.get_json("api/projects", kind=list) if isinstance(p, dict)]
             user = s.user
         names = {d.get("id"): str(d.get("name") or "") for d in directions}
-        info = {"version": str(ready.get("version") or ""), "schema": ready.get("schema"), "mode": "session",
+        info = {"version": str(ready.get("version") or ""), "schema": ready.get("schema"), "mode": SESSION_MODE,
                 "user": {"login": user.get("login"), "name": user.get("name"), "role": user.get("role")}}
         return [Project.from_session(p, names) for p in raw], \
             [{"id": d.get("id"), "name": str(d.get("name") or "")} for d in directions], info
+
+    def load_key(self, *, projects: bool = True) -> tuple[list[Project], list[dict], dict]:
+        """Ключ: /ping (версия, название и права), /directions, /projects?limit=200 (без листания)."""
+        with self.key_api() as api:
+            ping = api.ping("puls")
+            version = str(ping.get("version") or "")
+            key = ping.get("key") if isinstance(ping.get("key"), dict) else {}
+            if not isinstance(key.get("scopes"), list):
+                # «Пульс» 0.5.x: ключ один (для «По Делу»), прав и направлений у API нет
+                raise IntegrationError(f"«{TITLE}» {version} не сообщает права ключа — это версия до 0.6.0, где ключ "
+                                       "интеграции один и выдан «По Делу». Обновите «Пульс» до 0.6.0 или выберите "
+                                       "режим «Служебная учётная запись (для версий до 0.6.0)»", code="no_api",
+                                       short=f"В «{TITLE}» нет ключей интеграций для других систем")
+            scopes = [str(s) for s in key["scopes"]]
+            if SCOPE_READ not in scopes:
+                raise IntegrationError(f"У ключа «{api.key_name}» нет права {SCOPE_LABELS[SCOPE_READ]} — добавьте его "
+                                       f"ключу: {KEYS_PLACE}", code="insufficient_scope",
+                                       short=f"У ключа интеграции «{TITLE}» нет доступа к проектам")
+            listed = api.get("directions")
+            raw = [p for p in api.get("projects", params={"limit": PROJECTS_MAX}).get("projects") or []
+                   if isinstance(p, dict)] if projects else []
+        directions = [{"id": d.get("id"), "name": str(d.get("name") or ""), "projects": _int(d.get("projects"))}
+                      for d in listed.get("directions") or [] if isinstance(d, dict)]
+        without = _int(listed.get("withoutDirection"))
+        info = {"version": version, "mode": KEY_MODE, "key": {"name": api.key_name, "scopes": scopes},
+                "stats": SCOPE_STATS in scopes, "total": sum(d["projects"] for d in directions) + without,
+                "without_direction": without, "limited": len(raw) >= PROJECTS_MAX}
+        return [Project.from_key(p) for p in raw], directions, info
 
     # --- сопоставление
     def mapping(self, snap: org.OrgSnapshot, problems: list[str]) -> list[tuple[str, int]]:
@@ -365,10 +414,23 @@ class PulsConnector(Connector):
         return any((d["id"] is not None and direction == str(d["id"])) or name_key(direction) == name_key(d["name"])
                    for d in directions)
 
+    def _id_lines(self, directions: list[dict]) -> list[str]:
+        """Строки сопоставления по id направления, которые без права projects.stats не сработают (у проектов нет
+        id направления): подсказка — название направления."""
+        out = []
+        for number, direction, _unit in parse_mapping(self.config.get("directions")):
+            by_id = next((d for d in directions if d["id"] is not None and direction == str(d["id"])), None)
+            if by_id and not any(name_key(direction) == name_key(d["name"]) for d in directions):
+                out.append(f"строка {number} («{direction}»): без права projects.stats направление сопоставляется "
+                           f"только по названию — укажите «{by_id['name']}»")
+        return out
+
     # --- проверка
     def check(self) -> CheckResult:
-        projects, directions, info = self.load()
+        projects, directions, info = self.load(projects=self.mode != KEY_MODE)
+        key_mode = info["mode"] == KEY_MODE
         problems: list[str] = []
+        warnings: list[str] = []
         try:
             with core_db.SessionLocal() as db:
                 snap = org.build_snapshot(db)
@@ -384,27 +446,44 @@ class PulsConnector(Connector):
         for d in directions:
             probe = Project(None, "", d["id"], d["name"], 0, 0, None, 0, 0, None)
             unit_id = self.unit_of(probe, mapping)
-            count = sum(1 for p in projects if (d["id"] is not None and p.direction_id == d["id"])
-                        or (d["id"] is None and p.direction == d["name"]))
-            listed.append({**d, "projects": count, "department": paths.get(unit_id) if unit_id else None})
+            count = d["projects"] if "projects" in d else \
+                sum(1 for p in projects if (d["id"] is not None and p.direction_id == d["id"])
+                    or (d["id"] is None and p.direction == d["name"]))
+            listed.append({"id": d["id"], "name": d["name"], "projects": count,
+                           "department": paths.get(unit_id) if unit_id else None})
         unmapped = [d["name"] for d in listed if not d["department"]]
+        total = info["total"] if key_mode else len(projects)
+        if key_mode:
+            if not info["stats"]:
+                warnings.append(NO_STATS)
+                problems.extend(self._id_lines(directions))
+            if total > PROJECTS_MAX:
+                warnings.append(f"проектов в «Пульсе» {total}, а API отдаёт не больше {PROJECTS_MAX} — показатели "
+                                f"будут посчитаны по первым {PROJECTS_MAX}")
+            key = info["key"]
+            who = f"«{key['name']}», права: {', '.join(key['scopes']) or 'нет'}" if key["name"] else \
+                f"права: {', '.join(key['scopes']) or 'нет'}"
+        else:
+            who = info.get("user", {}).get("name") or info.get("user", {}).get("login")
         version = f" {info['version']}" if info.get("version") else ""
-        who = info.get("user", {}).get("name") or info.get("user", {}).get("login")
-        message = (f"Подключено к «{TITLE}»{version} ({MODES[info['mode']]}{f' {who}' if who else ''}): проектов "
-                   f"{len(projects)}, направлений {len(directions)}, сопоставлено {len(directions) - len(unmapped)}")
+        message = (f"Подключено к «{TITLE}»{version} ({MODE_LABELS[info['mode']]}{f' {who}' if who else ''}): "
+                   f"проектов {total}, направлений {len(directions)}, сопоставлено {len(directions) - len(unmapped)}")
         if unmapped:
             message += f"; без подразделения (в корень структуры): {', '.join(unmapped[:10])}"
-        if info.get("limited"):
-            problems.append("в режиме ключа «Пульс» отдаёт не больше 200 проектов")
+        if warnings:
+            message += ". Внимание: " + "; ".join(warnings)
         if problems:
             message += ". Проверьте: " + "; ".join(problems)
-        return CheckResult(True, message, {**info, "projects": len(projects), "directions": listed,
-                                           "unmapped": unmapped, "problems": problems})
+        details = {**info, "projects": total, "directions": listed, "unmapped": unmapped, "problems": problems}
+        if key_mode:
+            details["warnings"] = warnings
+        return CheckResult(True, message, details)
 
     # --- запуск
     def run(self, action: str, ctx: RunContext) -> RunResult:
         self.action(action)
         projects, directions, info = self.load()
+        key_mode = info["mode"] == KEY_MODE
         today = today_local()
         period = f"{today:%Y-%m}"
         notes: list[str] = []
@@ -417,6 +496,8 @@ class PulsConnector(Connector):
         for _number, direction, _unit in parse_mapping(self.config.get("directions")):
             if not self._known(direction, directions):
                 notes.append(f"направления «{direction}» нет в «Пульсе»")
+        if key_mode and not info["stats"]:
+            notes.extend(self._id_lines(directions))
         lights = {"green": 0, "yellow": 0, "red": 0, "gray": 0}
         flagged = []
         for project in projects:
@@ -439,19 +520,21 @@ class PulsConnector(Connector):
                 notes.append(f"показатель {key} {'выключен' if not ind.is_active else 'вычисляемый'} — не обновляется")
                 continue
             usable[key] = ind
-        # Ограничения режима ключа — сведения, а не ошибка настройки: запуск от них не становится «частичным»
+        # Ограничения ключа — сведения, а не ошибка настройки: запуск от них не становится «частичным»
         limits: list[str] = []
-        if info["mode"] == "key":
+        if key_mode and not info["stats"]:
             usable.pop("puls.blocked", None)
-            limits.append("в режиме ключа «Пульс» не отдаёт заблокированные задачи — puls.blocked не обновляется")
-        if info.get("limited"):
-            limits.append("в режиме ключа «Пульс» отдаёт не больше 200 проектов — показатели могут быть неполными")
+            limits.append(NO_STATS)
+        if key_mode and info["limited"]:
+            limits.append(LIMITED)
         rows = self._rows(snap, [u for u in order if u in targets], projects, root, usable, period, today, notes)
         mapped = sum(1 for p in projects if p.unit is not None)
         counters = {"projects": len(projects), "mapped": mapped, "unmapped": len(projects) - mapped,
                     "units": len({r["department"] for r in rows}), "indicators_created": len(created),
                     **{f"projects_{k}": v for k, v in lights.items()}}
         details: dict = {"period": period, "mode": info["mode"], "flagged": flagged[:MAX_DETAILS]}
+        if key_mode:
+            details.update(key=info["key"], stats=info["stats"])
         if created:
             details["indicators_created"] = created
         if notes:
@@ -481,7 +564,8 @@ class PulsConnector(Connector):
         if created:
             message += f"; созданы показатели: {', '.join(created)}"
         if limits:
-            message += f". {'; '.join(limits).capitalize()}"
+            text = "; ".join(limits)
+            message += f". {text[:1].upper()}{text[1:]}"
         if notes:
             return RunResult.partial(message, "; ".join(notes[:5]), counters=counters, details=details)
         return RunResult.ok(message, counters=counters, details=details)

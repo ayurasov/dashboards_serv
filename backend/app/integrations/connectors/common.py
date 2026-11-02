@@ -1,5 +1,12 @@
-"""Общее для коннекторов «По Делу», «Пульс проекта» и «Почтовый ящик»: сессия служебной учётной записи
-Flask-приложения партнёра, понятные ошибки его ответов, отбор файлов данных и подписи статусов входящих.
+"""Общее для коннекторов «По Делу», «Пульс проекта» и «Почтовый ящик»: режим подключения партнёра (ключ
+интеграции или служебная учётная запись), API партнёра по ключу, сессия служебной учётной записи Flask-приложения
+партнёра, понятные ошибки его ответов, отбор файлов данных и подписи статусов входящих.
+
+Ключ интеграции (KeyApi) — «По Делу» 1.4.5+ (/api/integrations/v1, ADR-0058 там) и «Пульс» 0.6.0+
+(/api/integration/v1, ADR-0011 там): у каждой системы свой ключ со своими областями (правами); запрос —
+с Authorization: Bearer <ключ>, без cookie и CSRF; ошибки — {"error", "message"}: 401 unauthorized, 403 key_revoked /
+insufficient_scope / comments_disabled, 404 (на /ping — у партнёра нет API ключей: версия старше), 429 — предел
+частоты на ключ. Ключ — секрет подключения: клиент каркаса вычищает его (и заголовок Authorization) из текстов.
 
 Сессия партнёра (PartnerSession) — как вход браузера и как синхронизация структуры в «Пульсе» (ADR-0009 там):
 GET <csrf> → POST /api/auth/login {login, password} с заголовками X-CSRF-Token, Referer и Origin → cookie
@@ -28,6 +35,19 @@ if TYPE_CHECKING:
 
 # Любой ответ, кроме перенаправлений (их HttpClient превращает в ошибку сам): статус разбирает вызывающий
 ANY_STATUS = tuple(s for s in range(200, 600) if not 300 <= s < 400)
+# Режимы подключения «По Делу» и «Пульса»: ключ интеграции (по умолчанию) и служебная учётная запись (старые версии)
+KEY_MODE, SESSION_MODE = "key", "session"
+MODE_LABELS = {KEY_MODE: "ключ интеграции", SESSION_MODE: "служебная учётная запись"}
+
+
+def connection_mode(config: dict | None) -> str:
+    """Режим подключения партнёра: key или session. Без режима — настройки, сохранённые до ключей интеграций, или
+    запрос API, который его не передал: служебная учётная запись, если задан её логин, иначе ключ интеграции."""
+    config = config or {}
+    mode = config.get("mode")
+    if mode in MODE_LABELS:
+        return mode
+    return SESSION_MODE if config.get("login") else KEY_MODE
 # Файлы, которые могут оказаться набором входящих (Excel, CSV, JSON); картинки, PDF и архивы не берутся
 DATA_EXTENSIONS = (".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt", ".json")
 
@@ -163,6 +183,99 @@ def partner_error(title: str, resp: HttpResponse, path: str, *, login: bool = Fa
                                 status=status, short=f"«{title}» вернула ошибку {status}")
     return IntegrationError(f"«{title}» вернула ошибку {status} ({where}){suffix}", code="http_error", status=status,
                             short=f"«{title}» вернула ошибку {status}")
+
+
+# ---------------------------------------------------------------- API партнёра по ключу интеграции
+
+def key_error(title: str, resp: HttpResponse, path: str, *, key: str = "", place: str = "", no_api: str = "",
+              ping: bool = False) -> IntegrationError:
+    """Ошибка ответа API ключей интеграций партнёра ({"error", "message"}) — словами партнёра, где они понятны.
+    key — название ключа у партнёра (из /ping), place — где у партнёра выпускают ключи; no_api — текст «у партнёра
+    нет API ключей» для 404 на /ping (ping=True) и 404 без кода ошибки."""
+    data = _body(resp)
+    code = data.get("error") if isinstance(data.get("error"), str) else ""
+    message = str(data.get("message") or "")[:300] if isinstance(data.get("message"), str) else ""
+    status, where = resp.status, "/" + path.lstrip("/")
+    named = f"Ключ «{key}»" if key else "Ключ интеграции"
+    there = f": {place}" if place else ""
+    if status == 401:
+        detail = f"«{title}» не приняла ключ интеграции (401)" + (
+            f": {message}" if message else f" — проверьте ключ или выпустите новый{there}")
+        return IntegrationError(detail, code="auth", status=401, short=f"«{title}» не приняла ключ интеграции")
+    if status == 403 and code == "key_revoked":
+        return IntegrationError(f"{named} отозван администратором «{title}» — выпустите ключ заново{there} и введите "
+                                "его в подключении", code="key_revoked", status=403,
+                                short=f"Ключ интеграции отозван администратором «{title}»")
+    if status == 403 and code == "insufficient_scope":
+        reason = message or f"У ключа нет нужной области доступа ({where})"
+        return IntegrationError(f"{reason} — добавьте её ключу{there}", code="insufficient_scope", status=403,
+                                short=f"У ключа интеграции «{title}» не хватает прав")
+    if status == 403 and code == "comments_disabled":
+        return IntegrationError(message or "Комментарии в списке отключены его владельцем", code="comments_disabled",
+                                status=403)
+    if status == 404 and no_api and (ping or not code):
+        return IntegrationError(no_api, code="no_api", status=404, short=f"В «{title}» нет API ключей интеграций")
+    if status == 404:
+        return IntegrationError(f"«{title}»: {message or 'не найдено'} ({where}, 404)", code="not_found", status=404,
+                                short=f"«{title}»: {message or 'не найдено'}")
+    if status == 429:
+        return IntegrationError(f"{named} превысил лимит частоты запросов «{title}» (429) — повторите позже",
+                                code="rate_limited", status=429,
+                                short=f"Ключ интеграции превысил лимит частоты запросов «{title}»")
+    if status == 400:
+        return IntegrationError(f"«{title}» отклонила запрос ({where}, 400): {message or 'неверный запрос'}",
+                                code="bad_request", status=400, short=f"«{title}» отклонила запрос")
+    return partner_error(title, resp, path)
+
+
+class KeyApi:
+    """API партнёра по ключу интеграции (Bearer, без cookie и CSRF):
+
+        with KeyApi(client, title="По Делу", prefix="api/integrations/v1", place=…, no_api=…) as api:
+            api.ping("podelu")              # название ключа — в api.key_name (для текстов ошибок)
+            api.get("tasks", params={…})
+
+    Ответ не из ok — key_error. POST при 429/503 не повторяется (правило HttpClient): повтор мог бы выполнить
+    действие у партнёра дважды."""
+
+    def __init__(self, client: HttpClient, *, title: str, prefix: str, place: str = "", no_api: str = ""):
+        self.client = client
+        self.title = title
+        self.prefix = prefix.strip("/")
+        self.place = place
+        self.no_api = no_api
+        self.key_name = ""
+
+    def __enter__(self) -> KeyApi:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.client.close()
+
+    def request(self, method: str, path: str, *, params: dict | None = None, json: Any = None,
+                ok: tuple[int, ...] = (200,), ping: bool = False) -> HttpResponse:
+        full = f"{self.prefix}/{path.lstrip('/')}"
+        resp = self.client.request(method, full, params=params, json=json, expect=ANY_STATUS)
+        if resp.status in ok:
+            return resp
+        raise key_error(self.title, resp, full, key=self.key_name, place=self.place, no_api=self.no_api, ping=ping)
+
+    def get(self, path: str, *, params: dict | None = None, kind: type | tuple[type, ...] = dict,
+            ping: bool = False) -> Any:
+        return self.client.parse(self.request("GET", path, params=params, ping=ping), kind)
+
+    def post(self, path: str, body: Any, *, kind: type | tuple[type, ...] = dict) -> Any:
+        return self.client.parse(self.request("POST", path, json=body, ok=(200, 201)), kind)
+
+    def ping(self, app: str) -> dict:
+        """GET /ping: ключ действует; ответ — от нужного партнёра (app), название ключа запоминается."""
+        data = self.get("ping", ping=True)
+        if data.get("app") != app:
+            raise IntegrationError(f"Ключ принят, но по адресу подключения отвечает не «{self.title}» (app: "
+                                   f"{str(data.get('app'))[:40]}) — проверьте адрес", code="bad_response")
+        key = data.get("key") if isinstance(data.get("key"), dict) else {}
+        self.key_name = " ".join(str(key.get("name") or "").split())[:100]
+        return data
 
 
 # ---------------------------------------------------------------- сессия служебной учётной записи

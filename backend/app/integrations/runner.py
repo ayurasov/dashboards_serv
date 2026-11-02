@@ -65,8 +65,8 @@ def owner(integration_id: int | None) -> str:
 
 
 def url_of(cls: type[Connector], config: dict) -> str:
-    """Адрес привязки секретов подключения (Connector.secret_url)."""
-    return cls.secret_url(config or {})
+    """Адрес привязки секретов подключения (Connector.secret_url по Connector.stored_config)."""
+    return cls.secret_url(cls.stored_config(config))
 
 
 def _secrets_of(connector: Connector | None, extra: dict | None = None) -> tuple[str, ...]:
@@ -103,9 +103,10 @@ def stored_secrets(row: Integration, cls: type[Connector] | None = None) -> dict
 
 def connector_for(row: Integration, *, detailed: bool = True, config: dict | None = None,
                   secrets: dict | None = None) -> Connector:
-    """Экземпляр коннектора записи. config/secrets — несохранённые значения (проверка перед сохранением)."""
+    """Экземпляр коннектора записи. config/secrets — несохранённые значения (проверка перед сохранением);
+    сохранённые настройки — в нынешнем виде (Connector.stored_config)."""
     cls = base.get(row.kind)
-    config = row.config if config is None else config
+    config = cls.stored_config(row.config) if config is None else config
     if secrets is None:
         try:
             secrets = stored_secrets(row, cls)

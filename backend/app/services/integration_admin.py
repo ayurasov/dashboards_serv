@@ -95,7 +95,8 @@ def integration_out(db: Session, row: Integration, user: User | None = None) -> 
         if cls else None
     running = runner.is_running(row, now)
     return {
-        "id": row.id, "kind": row.kind, "name": row.name, "enabled": row.enabled, "config": row.config or {},
+        "id": row.id, "kind": row.kind, "name": row.name, "enabled": row.enabled,
+        "config": cls.stored_config(row.config) if cls else (row.config or {}),
         "has_secret": bool(row.secret_encrypted), "secret_fields": _secret_fields(row),
         "secret_bound_url": row.secret_bound_url or None, "secret_problem": secret_problem,
         "schedule": runner.schedule_out(row), "schedule_label": runner.schedule_label(row.schedule, cls),
@@ -142,10 +143,11 @@ def _check_name(db: Session, name: str, exclude: int | None = None) -> str:
 
 
 def _stored_config(cls: type[Connector], row: Integration) -> dict:
-    """Сохранённые настройки без полей, которых у коннектора больше нет (переименованы или убраны в новой
+    """Сохранённые настройки в нынешнем виде (Connector.stored_config: поле, появившееся позже, — со значением,
+    сохраняющим прежнее поведение) без полей, которых у коннектора больше нет (переименованы или убраны в новой
     версии): иначе их не удалось бы сохранить заново («Неизвестная настройка»)."""
     known = cls.config_keys()
-    return {k: v for k, v in (row.config or {}).items() if k in known}
+    return {k: v for k, v in cls.stored_config(row.config).items() if k in known}
 
 
 def _snapshot(row: Integration) -> dict:

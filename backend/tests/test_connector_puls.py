@@ -1,10 +1,13 @@
-"""Коннектор «Пульс проекта» против поддельного «Пульса» (настоящий HTTP-сервер в потоке): вход служебной учётной
-записью (CSRF, выход всегда), готовность и версия, направления для сопоставления, режим ключа интеграции (Bearer,
-без cookie), расчёт показателей проектов по подразделениям, светофор проекта, создание показателей каталога,
-запись значений движком загрузки, ошибки."""
+"""Коннектор «Пульс проекта» против поддельного «Пульса» (настоящий HTTP-сервер в потоке): ключ интеграции
+(«Пульс» 0.6.0: Bearer без cookie, права projects.read и projects.stats, направления с числом проектов, inwork,
+blocked и directionInfo, не больше 200 проектов, отзыв, 429, старый «Пульс» без ключей), вход служебной учётной
+записью (CSRF, выход всегда), готовность и версия, направления для сопоставления, расчёт показателей проектов
+по подразделениям, светофор проекта, создание показателей каталога, запись значений движком загрузки, ошибки,
+ключ не попадает наружу."""
 from __future__ import annotations
 
 import json
+import logging
 import secrets as pysecrets
 from datetime import date
 
@@ -16,7 +19,8 @@ from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer, Request
 
 PASSWORD = "Пароль-пульса-7"
-KEY = "puls_" + "k" * 43
+KEY = "puls_" + "Kp4Zr" * 9
+V1 = "/api/integration/v1"
 COOKIE = "puls_session"
 TODAY = date(2026, 11, 2)
 MAPPING = "Внедрение = PROJ\n2 = АЛМИ Партнер / Техническая дирекция / ИТ-служба"
@@ -56,12 +60,16 @@ class FakePuls:
             ("POST", "/api/auth/logout", self.logout), ("GET", "/api/health/ready", self.ready),
             ("GET", "/api/directions", self.guarded(lambda r: (200, self.directions))),
             ("GET", "/api/projects", self.guarded(lambda r: (200, self.projects))),
-            ("GET", "/api/integration/v1/ping", self.keyed(lambda r: (200, {"ok": True, "app": "puls",
-                                                                           "name": "Пульс Проекта",
-                                                                           "version": "0.6.0"}))),
-            ("GET", "/api/integration/v1/projects", self.keyed(self.v1_projects)),
+            ("GET", f"{V1}/ping", self.keyed(self.v1_ping)),
+            ("GET", f"{V1}/projects", self.keyed(self.v1_projects, "projects.read")),
+            ("GET", f"{V1}/directions", self.keyed(self.v1_directions, "projects.read")),
         ):
             server.route(method, path, handler)
+        # Ключи интеграций 0.6.0: у каждой системы свой ключ и права; отозванный ключ — как неверный (401);
+        # budget — сколько запросов по ключу ещё до 429
+        self.keys = {KEY: {"name": "Дашборды компании", "scopes": ["projects.read", "projects.stats"],
+                           "revoked": False}}
+        self.budget: int | None = None
 
     def sid(self, request: Request) -> str | None:
         for part in (request.headers.get("cookie") or "").split(";"):
@@ -117,25 +125,57 @@ class FakePuls:
             return handler(request)
         return wrapper
 
-    def keyed(self, handler):
+    def keyed(self, handler, scope=None):
+        """Как integration_key_required «Пульса»: действующий ключ, право, предел частоты на ключ."""
         def wrapper(request):
-            if request.headers.get("authorization") != f"Bearer {KEY}":
-                return 401, {"error": "unauthorized", "message": "Нужен действующий ключ «Пульса»"}
             assert "cookie" not in request.headers, "режим ключа — без cookie"
-            return handler(request)
+            if self.budget is not None:
+                if self.budget <= 0:
+                    return 429, {"error": "too_many_requests", "message": "Слишком много попыток — подождите минуту"}, \
+                        {"Retry-After": "0"}
+                self.budget -= 1
+            header = request.headers.get("authorization") or ""
+            key = self.keys.get(header[7:]) if header.startswith("Bearer ") else None
+            if key is None or key["revoked"]:
+                return 401, {"error": "unauthorized",
+                             "message": "Нужен действующий ключ «Пульса» (Authorization: Bearer puls_…) — его "
+                                        "выпускает администратор «Пульса»: Администрирование → Интеграции → Ключи "
+                                        "доступа"}
+            if scope and scope not in key["scopes"]:
+                return 403, {"error": "insufficient_scope", "message": f"У ключа «{key['name']}» нет права {scope}"}
+            return handler(request, key)
         return wrapper
 
-    def v1_projects(self, request):
+    def v1_ping(self, request, key):
+        return 200, {"ok": True, "app": "puls", "name": "Пульс Проекта", "version": "0.6.0",
+                     "key": {"name": key["name"], "scopes": list(key["scopes"])}}
+
+    def v1_projects(self, request, key):
         names = {d["id"]: d["name"] for d in self.directions}
+        stats = "projects.stats" in key["scopes"]
+        limit = max(1, min(200, int((request.query.get("limit") or ["50"])[0])))
         out = []
-        for p in self.projects:
+        for p in self.projects[:limit]:
             s = p.get("stats") or {}
-            out.append({"id": p["id"], "title": p["title"], "subtitle": "", "direction": names.get(p["directionId"]),
-                        "path": f"/projects/{p['id']}", "progress": s.get("progress", 0), "start": s.get("start"),
-                        "end": s.get("end"), "overdue": s.get("overdue", 0), "total": s.get("total", 0),
-                        "done": s.get("done", 0), "planId": s.get("planId"), "planTitle": s.get("planTitle"),
-                        "nextMilestone": None})
+            data = {"id": p["id"], "title": p["title"], "subtitle": "", "direction": names.get(p["directionId"]),
+                    "path": f"/projects/{p['id']}", "progress": s.get("progress", 0), "start": s.get("start"),
+                    "end": s.get("end"), "overdue": s.get("overdue", 0), "total": s.get("total", 0),
+                    "done": s.get("done", 0), "planId": s.get("planId"), "planTitle": s.get("planTitle"),
+                    "nextMilestone": None}
+            if stats:
+                data.update(inwork=s.get("inwork", 0), blocked=s.get("blocked", 0), updatedAt="2026-11-01T10:00:00Z",
+                            directionInfo={"id": p["directionId"], "name": names[p["directionId"]]}
+                            if p["directionId"] in names else None, planWindow=None)
+            out.append(data)
         return 200, {"projects": out, "userFound": None}
+
+    def v1_directions(self, request, key):
+        counts: dict = {}
+        for p in self.projects:
+            counts[p["directionId"]] = counts.get(p["directionId"], 0) + 1
+        return 200, {"directions": [{"id": d["id"], "name": d["name"], "color": d.get("color", "gray"), "position": i,
+                                     "projects": counts.get(d["id"], 0)} for i, d in enumerate(self.directions)],
+                     "withoutDirection": counts.get(None, 0), "userFound": None}
 
 
 @pytest.fixture()
@@ -179,9 +219,14 @@ def _values(db) -> dict[tuple[str, str], IndicatorValue]:
 def test_kind_and_mapping_validation(admin, fake):
     meta = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}["puls"]
     fields = {f["key"]: f for f in meta["fields"]}
-    assert [o["value"] for o in fields["mode"]["options"]] == ["session", "key"]
-    assert "когда «Пульс» поддержит несколько ключей" in fields["mode"]["hint"]
+    mode = fields["mode"]
+    assert mode["default"] == "key" and [(o["value"], o["label"]) for o in mode["options"]] == [
+        ("key", "Ключ интеграции (Пульс 0.6.0 и новее)"), ("session", "Служебная учётная запись (для версий до 0.6.0)")]
+    assert not any("поддержит несколько ключей" in (f["hint"] or "") for f in meta["fields"])
     assert fields["api_key"]["secret"] and fields["api_key"]["show_if"] == {"mode": ["key"]}
+    for text in ("«Интеграции → Ключи доступа»", "«Дашборды компании»", "projects.read", "projects.stats"):
+        assert text in fields["api_key"]["hint"], text
+    assert fields["login"]["show_if"] == {"mode": ["session"]} and "до 0.6.0" in fields["login"]["hint"]
     assert meta["actions"][0]["label"] == "Обновить показатели проектов"
     bad = admin.post("/api/integrations", json={"kind": "puls", "config": {"base_url": fake.server.url, "login": "svc",
                                                                            "directions": "Внедрение PROJ"},
@@ -238,26 +283,6 @@ def test_check_failures(admin, fake):
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert not check["ok"] and "вернула ошибку 503" in check["message"]
     assert fake.logouts == 2, "выход — и когда «Пульс» не готов"
-
-
-def test_key_mode_check_uses_bearer_without_cookies(admin, fake):
-    item = _create(admin, fake, mode="key", login=None, secrets={"api_key": KEY}, directions="Внедрение = PROJ")
-    check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert check["ok"], check
-    assert check["message"].startswith("Подключено к «Пульс проекта» 0.6.0 (ключ интеграции): проектов 6, "
-                                       "направлений 3, сопоставлено 1")
-    assert fake.logins == 0 and not any(r.path.startswith("/api/auth/") for r in fake.server.requests)
-    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"api_key": "puls_wrong"}})
-    check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert not check["ok"] and "не принял ключ интеграции (401)" in check["message"]
-    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"api_key": "not-a-key"}})
-    check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert not check["ok"] and "начинается с puls_" in check["message"]
-    fake.server.routes.pop(("GET", "/api/integration/v1/ping"))
-    fake.server.route("GET", "/api/integration/v1/ping", lambda r: (404, b"<html>Not Found</html>"))
-    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"api_key": KEY}})
-    check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert not check["ok"] and "нет API интеграции" in check["message"]
 
 
 # ---------------------------------------------------------------- показатели
@@ -335,16 +360,6 @@ def test_run_skips_disabled_indicator_and_bad_mapping(admin, fake, db):
     assert "строка 3 («Маркетинг»): подразделение «NOPE» не найдено" in notes
 
 
-def test_run_key_mode_without_blocked(admin, fake, db):
-    item = _create(admin, fake, mode="key", login=None, secrets={"api_key": KEY}, directions="Внедрение = PROJ")
-    run = _run(admin, item)
-    assert run["status"] == "ok", "ограничение режима ключа — сведения, а не ошибка"
-    assert "puls.blocked не обновляется" in run["message"] and run["summary"]["details"]["limits"]
-    values = _values(db)
-    assert ("PROJ", "puls.blocked") not in values and values[("PROJ", "puls.projects")].value == 2
-    assert values[("ALMI", "puls.projects")].value == 4
-
-
 def test_run_failures_log_out(admin, fake, db):
     item = _create(admin, fake)
     fake.server.route("GET", "/api/projects", lambda r: (500, {"error": "internal", "message": "Сбой"}))
@@ -388,3 +403,193 @@ def test_indicator_name_taken_gets_puls_suffix(admin, fake, db):
     run = _run(admin, _create(admin, fake))
     assert run["status"] == "ok" and run["summary"]["indicators_created"] == 5
     assert db.scalar(select(Indicator.name).where(Indicator.key == "puls.projects")) == "Проекты в работе («Пульс»)"
+
+
+# ================================================================ ключ интеграции («Пульс» 0.6.0)
+
+def _create_key(admin, fake, **config) -> dict:
+    body = {"kind": "puls", "name": "Пульс", "config": {"base_url": fake.server.url, "directions": MAPPING, **config},
+            "secrets": {"api_key": KEY}}
+    response = admin.post("/api/integrations", json=body)
+    assert response.status_code == 201, response.text
+    assert response.json()["config"]["mode"] == "key", "новое подключение — по ключу"
+    return response.json()
+
+
+def test_new_connection_defaults_to_key_and_stored_session_keeps_working(admin, fake, db):
+    bare = admin.post("/api/integrations", json={"kind": "puls", "config": {"base_url": fake.server.url}})
+    assert bare.status_code == 422 and "secrets.api_key" in bare.json()["fields"]
+    legacy = _create(admin, fake)
+    assert legacy["config"]["mode"] == "session", "логин без режима — служебная учётная запись, как раньше"
+    from app.core import db as core_db
+    from app.models import Integration
+
+    stored = {k: v for k, v in legacy["config"].items() if k != "mode"}
+    with core_db.SessionLocal() as session:
+        session.execute(update(Integration).where(Integration.id == legacy["id"]).values(config=stored))
+        session.commit()
+    assert admin.get(f"/api/integrations/{legacy['id']}").json()["config"]["mode"] == "session"
+    assert admin.post(f"/api/integrations/{legacy['id']}/check").json()["ok"]
+    assert _run(admin, {"id": legacy["id"]})["summary"]["details"]["mode"] == "session"
+
+
+def test_key_check_reports_key_rights_and_directions_by_id(admin, fake):
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"], check
+    assert check["message"] == ("Подключено к «Пульс проекта» 0.6.0 (ключ интеграции «Дашборды компании», права: "
+                                "projects.read, projects.stats): проектов 6, направлений 3, сопоставлено 2; без "
+                                "подразделения (в корень структуры): Маркетинг")
+    details = check["details"]
+    assert details["key"] == {"name": "Дашборды компании", "scopes": ["projects.read", "projects.stats"]}
+    assert details["stats"] is True and details["total"] == 6 and details["without_direction"] == 1
+    assert details["directions"] == [
+        {"id": 1, "name": "Внедрение", "projects": 2, "department": "АЛМИ Партнер / Проектная служба"},
+        {"id": 2, "name": "Разработка", "projects": 2,
+         "department": "АЛМИ Партнер / Техническая дирекция / ИТ-служба"},
+        {"id": 3, "name": "Маркетинг", "projects": 1, "department": None}], "направление 2 сопоставлено по id"
+    paths = [r.path for r in fake.server.requests]
+    assert paths == [f"{V1}/ping", f"{V1}/directions"], "проверке хватает числа проектов из направлений"
+    assert all(r.headers["authorization"] == f"Bearer {KEY}" for r in fake.server.requests)
+    assert fake.logins == 0 and KEY not in json.dumps(check, ensure_ascii=False)
+
+
+def test_key_check_without_stats_warns_and_flags_id_lines(admin, fake):
+    fake.keys[KEY]["scopes"] = ["projects.read"]
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"]
+    assert ("Внимание: у ключа нет права «Показатели проектов» (projects.stats): «Пульс» не отдаёт задачи «в работе» "
+            "и «заблокировано» и id направлений — puls.blocked не обновляется, направления сопоставляются только по "
+            "названию") in check["message"]
+    assert check["details"]["problems"] == ["строка 2 («2»): без права projects.stats направление сопоставляется "
+                                            "только по названию — укажите «Разработка»"]
+
+
+def test_key_check_failures(admin, fake):
+    item = _create_key(admin, fake)
+    fake.keys[KEY]["revoked"] = True
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "auth"
+    assert check["message"].startswith("«Пульс проекта» не приняла ключ интеграции (401): Нужен действующий ключ "
+                                       "«Пульса»"), "отозванный ключ «Пульс» не отличает от неверного"
+    fake.keys[KEY].update(revoked=False, scopes=[])
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["message"] == ("У ключа «Дашборды компании» нет права «Проекты и планы» "
+                                                    "(projects.read) — добавьте его ключу: «Пульс» → «Интеграции → "
+                                                    "Ключи доступа»")
+    fake.keys[KEY]["scopes"] = ["projects.read", "projects.stats"]
+    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"api_key": "not-a-key"}})
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["message"] == "Ключ интеграции «Пульса» начинается с puls_ — проверьте ключ"
+    admin.patch(f"/api/integrations/{item['id']}", json={"secrets": {"api_key": KEY}})
+    fake.budget = 0
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "rate_limited"
+    assert check["message"] == ("Ключ интеграции превысил лимит частоты запросов «Пульс проекта» (429) — повторите "
+                                "позже")
+    fake.budget = 1
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["message"].startswith("Ключ «Дашборды компании» превысил лимит частоты"), "после ping — по названию"
+    fake.budget = None
+    # «Пульс» 0.5.x: ключ один (для «По Делу»), прав в ответе ping нет
+    fake.server.route("GET", f"{V1}/ping", fake.keyed(lambda r, key: (200, {"ok": True, "app": "puls",
+                                                                            "name": "Пульс Проекта",
+                                                                            "version": "0.5.1"})))
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert not check["ok"] and check["details"]["code"] == "no_api" and "0.5.1" in check["message"]
+    assert "выберите режим «Служебная учётная запись (для версий до 0.6.0)»" in check["message"]
+    # Ещё старше — API ключей нет вовсе (404: и без кода, и «Не найдено» Flask)
+    for answer in ((404, b"<html>Not Found</html>"), (404, {"error": "not_found", "message": "Не найдено"})):
+        fake.server.route("GET", f"{V1}/ping", lambda r, a=answer: a)
+        check = admin.post(f"/api/integrations/{item['id']}/check").json()
+        assert not check["ok"] and check["details"]["code"] == "no_api"
+        assert "«Пульс» старше 0.6.0 или адрес указан неверно" in check["message"]
+
+
+def test_run_key_mode_with_stats_matches_session_values(admin, fake, db):
+    item = _create_key(admin, fake)
+    run = _run(admin, item)
+    assert run["status"] == "ok", run
+    summary = run["summary"]
+    assert summary["projects"] == 6 and summary["mapped"] == 4 and summary["projects_yellow"] == 2
+    assert "limits" not in summary["details"] and summary["details"]["stats"] is True
+    assert "puls.blocked не обновляется" not in run["message"]
+    values = _values(db)
+    expected = {("PROJ", "puls.projects"): 2, ("PROJ", "puls.overdue"): 1, ("PROJ", "puls.blocked"): 1,
+                ("PROJ", "puls.progress"): 50, ("IT", "puls.projects"): 1, ("IT", "puls.on_time_share"): 100,
+                ("ALMI", "puls.projects"): 4, ("ALMI", "puls.blocked"): 1, ("ALMI", "puls.progress"): 45}
+    for cell, value in expected.items():
+        assert values[cell].value == value, cell
+    flagged = {f["project"]: f for f in summary["details"]["flagged"]}
+    assert flagged["Внедрение А"]["reason"] == "заблокированных задач: 1", "blocked — из projects.stats"
+    query = next(r.query for r in fake.server.requests if r.path == f"{V1}/projects")
+    assert query == {"limit": ["200"]}
+    assert fake.logins == 0
+
+
+def test_run_key_mode_maps_by_direction_id_only_with_stats(admin, fake, db):
+    fake.directions[1]["name"] = "Разработка ПО"     # id тот же — сопоставление «2 = …» по id не ломается
+    item = _create_key(admin, fake)
+    run = _run(admin, item)
+    assert run["status"] == "ok" and _values(db)[("IT", "puls.projects")].value == 1
+    fake.keys[KEY]["scopes"] = ["projects.read"]
+    run = _run(admin, item)
+    assert run["status"] == "partial", "строка по id без projects.stats не работает — это нужно поправить"
+    assert run["summary"]["mapped"] == 2 and run["summary"]["details"]["notes"] == [
+        "строка 2 («2»): без права projects.stats направление сопоставляется только по названию — укажите "
+        "«Разработка ПО»"]
+    assert "Без права" not in run["message"] and "У ключа нет права «Показатели проектов»" in run["message"]
+
+
+def test_run_key_mode_without_stats_skips_blocked(admin, fake, db):
+    fake.keys[KEY]["scopes"] = ["projects.read"]
+    item = _create_key(admin, fake, directions="Внедрение = PROJ")
+    run = _run(admin, item)
+    assert run["status"] == "ok", "ограничение ключа — сведения, а не ошибка"
+    assert run["summary"]["details"]["limits"][0].startswith("у ключа нет права «Показатели проектов»")
+    assert "puls.blocked не обновляется" in run["message"]
+    values = _values(db)
+    assert ("PROJ", "puls.blocked") not in values and values[("PROJ", "puls.projects")].value == 2
+    assert values[("ALMI", "puls.projects")].value == 4
+    flagged = {f["project"]: f for f in run["summary"]["details"]["flagged"]}
+    assert "Внедрение А" not in flagged, "без числа заблокированных задач светофор — только по срокам"
+    assert flagged["Внедрение Б"]["light"] == "red"
+
+
+def test_key_mode_warns_about_200_projects(admin, fake, db):
+    fake.projects += [_project(100 + n, f"Проект {n}", 3, total=2, done=1, progress=50, end="2027-06-30")
+                      for n in range(244)]
+    item = _create_key(admin, fake)
+    check = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert check["ok"] and "проектов в «Пульсе» 250, а API отдаёт не больше 200 — показатели будут посчитаны по " \
+        "первым 200" in check["message"]
+    run = _run(admin, item)
+    assert run["status"] == "ok" and run["summary"]["projects"] == 200
+    assert run["message"].endswith(". Возможно, проектов больше 200 — показатели посчитаны по первым 200")
+    assert run["summary"]["details"]["limits"] == ["возможно, проектов больше 200 — показатели посчитаны по первым 200"]
+
+
+def test_puls_key_never_logged_stored_or_returned(admin, fake, db, caplog):
+    from app.models import AuditEntry, Integration, IntegrationRun
+
+    caplog.set_level(logging.DEBUG)
+    item = _create_key(admin, fake)
+    responses = [admin.post(f"/api/integrations/{item['id']}/check").text]
+    runs = [_run(admin, item)]
+    fake.keys[KEY]["revoked"] = True
+    runs.append(_run(admin, item))
+    responses.append(admin.post(f"/api/integrations/{item['id']}/check").text)
+    assert runs[1]["status"] == "error"
+    responses += [json.dumps(runs, ensure_ascii=False), admin.get(f"/api/integrations/{item['id']}").text,
+                  admin.get(f"/api/integrations/{item['id']}/runs").text]
+    db.expire_all()
+    row = db.get(Integration, item["id"])
+    stored = [row.last_error, json.dumps(row.state, ensure_ascii=False), json.dumps(row.config, ensure_ascii=False)]
+    for run in db.scalars(select(IntegrationRun).where(IntegrationRun.integration_id == item["id"])):
+        stored += [run.message, run.error, json.dumps(run.summary, ensure_ascii=False)]
+    stored += [f"{e.summary} {json.dumps(e.after, ensure_ascii=False)}"
+               for e in db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "integration"))]
+    for where, content in (("журнал сервера", caplog.text), *(("ответ API", t) for t in responses),
+                           *(("база", t) for t in stored)):
+        assert KEY not in content and KEY[5:] not in content, f"{where}: {content[:300]}"
