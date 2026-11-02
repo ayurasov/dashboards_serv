@@ -27,7 +27,7 @@
 | [CHANGELOG](CHANGELOG.md), [история версий](docs/versions.md), [для администраторов](docs/versions_admin.md), release notes [0.4.0](docs/release-notes/v0.4.0.md), [0.3.0](docs/release-notes/v0.3.0.md), [0.2.0](docs/release-notes/v0.2.0.md) | все |
 | [Архитектурные решения (ADR)](docs/architecture) | разработчики |
 | [Регламенты](docs/runbooks): [обновление до 0.4.0](docs/runbooks/upgrade-to-0.4.0.md), [до 0.3.0](docs/runbooks/upgrade-to-0.3.0.md), [до 0.2.0](docs/runbooks/upgrade-to-0.2.0.md), до 0.1.0, [неполадки интеграций и входящих данных](docs/runbooks/integrations-troubleshooting.md), миграции, резервное копирование | эксплуатация |
-| Нагрузочная проверка: [0.3.0](docs/performance/load-test-0.3.0.md), [0.2.0](docs/performance/load-test-0.2.0.md), [0.1.0](docs/performance/load-test-0.1.0.md) | эксплуатация, разработчики |
+| Нагрузочная проверка: [0.4.0](docs/performance/load-test-0.4.0.md), [0.3.0](docs/performance/load-test-0.3.0.md), [0.2.0](docs/performance/load-test-0.2.0.md), [0.1.0](docs/performance/load-test-0.1.0.md) | эксплуатация, разработчики |
 | OpenAPI — `/api/docs` работающего сервера; приём файлов по API — `/api/inbound/v1` (руководство администратора, раздел «Приём файлов по API») | интеграторы |
 
 ## Стек
