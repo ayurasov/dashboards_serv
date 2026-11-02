@@ -4,7 +4,12 @@
 #   docker compose run --rm app python -m app.cli org-sync --ad --apply
 #   python -m app.cli worker — сервис worker в docker-compose.yml (ждёт, пока app обновит схему)
 set -e
-cd /app/backend
+cd "$(dirname "$0")"
+# docker-compose.yml передаёт WEB_CONCURRENCY всегда, пустой — «по умолчанию». Gunicorn сам читает эту
+# переменную как число ещё до gunicorn.conf.py и с пустой строкой не запускается — пустую убираем.
+if [ -z "${WEB_CONCURRENCY:-}" ]; then
+  unset WEB_CONCURRENCY
+fi
 if [ "$#" -gt 0 ]; then
   exec "$@"
 fi

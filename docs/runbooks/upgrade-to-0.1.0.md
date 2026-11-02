@@ -5,15 +5,16 @@
 ## Перед обновлением
 
 1. Объявите окно обслуживания (5–15 минут).
-2. Сохраните копию базы:
+2. Остановите старую версию (`docker compose down` в её папке — контейнер `dashboards_serv` занимает порт) и сохраните копии базы вне папки проекта. Имя тома начинается с имени папки проекта: `docker volume ls | grep db_data` (для папки `dashboards` — `dashboards_db_data`):
    ```bash
-   docker run --rm -v dashboards_serv_db_data:/data -v "$PWD":/backup alpine cp /data/hr_dashboard.db /backup/hr_dashboard-before-0.1.0.db
+   mkdir -p ~/dashboards-backup && git rev-parse HEAD > ~/dashboards-backup/old-commit.txt && cp .env ~/dashboards-backup/env-old
+   docker run --rm -v dashboards_db_data:/data -v ~/dashboards-backup:/backup alpine sh -c "cp /data/hr_dashboard.db /backup/hr_dashboard-original.db && cp /data/hr_dashboard.db /backup/hr_dashboard-work.db"
    ```
 3. Запишите контрольные числа (в старой версии или через `sqlite3`): число пользователей, месяцев службы персонала (`month_records`), недель отчёта ТП (`tp_report_rows`), заявок Naumen (`naumen_tickets`), партнёрств (`partnerships`).
 
 ## Обновление
 
-См. «Руководство по развёртыванию», раздел «Обновление до 0.1.0 с версий до 0.1.0» — вариант А (остаться на SQLite) или Б (перейти на PostgreSQL, рекомендуется).
+См. «Руководство по развёртыванию», раздел «Обновление до 0.1.0 с версий до 0.1.0»: код новой версии — в чистой папке (`git clone` в папку с тем же именем: оставшиеся файлы старой версии, например `frontend/src/router.js`, ломают сборку интерфейса), новый `.env`, сборка образа и перенос копии базы в PostgreSQL. Команды с копией базы в смонтированной папке выполняются с `-u root` — иначе «attempt to write a readonly database».
 
 Миграция `0012_v0_1_0_schema` выполняется автоматически и пишет в журнал `Схема базы обновлена: 0011_naumen_tickets → 0012_v0_1_0_schema`. База без истории Alembic распознаётся по таблицам прежней версии и сначала помечается ревизией `0011_naumen_tickets` (`WARNING … без истории миграций`).
 
@@ -26,10 +27,11 @@
 
 ## Откат
 
-Откат миграции 0012 не поддерживается. Остановите приложение, верните прежний образ и файл базы из копии:
+Откат миграции 0012 не поддерживается, но старый том не меняется — переносится копия базы. Верните прежнюю папку и код:
 
 ```bash
 docker compose down
-docker run --rm -v dashboards_serv_db_data:/data -v "$PWD":/backup alpine cp /backup/hr_dashboard-before-0.1.0.db /data/hr_dashboard.db
-git checkout <прежний коммит> && docker compose up -d --build
+cd .. && mv dashboards dashboards-new && mv dashboards-old dashboards && cd dashboards
+git checkout $(cat ~/dashboards-backup/old-commit.txt) && cp ~/dashboards-backup/env-old .env
+docker compose up -d --build
 ```

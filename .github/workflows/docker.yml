@@ -1,0 +1,43 @@
+name: Docker
+
+# Сборка образа и запуск docker-compose.yml так, как на сервере: .env из .env.example с пустыми значениями по
+# умолчанию, три контейнера (db, app, worker), проверка здоровья и входа. Ловит ошибки, которых не видно в
+# тестах без контейнеров (точка входа, переменные окружения, права в томах).
+
+on:
+  push:
+    branches: [main, "v*.*.*"]
+  pull_request:
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: .env по умолчанию
+        run: |
+          cp .env.example .env
+          sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$(openssl rand -hex 32)/" .env
+          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env
+          sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=Admin-12345/" .env
+      - name: Сборка и запуск
+        run: |
+          docker compose build
+          docker compose up -d --wait --wait-timeout 180
+      - name: Проверка
+        run: |
+          docker compose ps
+          curl -sf http://127.0.0.1:8000/api/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          curl -sf -o /dev/null http://127.0.0.1:8000/
+          curl -sf -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"Admin-12345"}' -o /dev/null
+          test "$(docker compose ps worker --format '{{.State}}')" = "running"
+          docker compose logs worker | grep -q "Планировщик запущен"
+      - name: Журналы
+        if: always()
+        run: docker compose logs --tail=200
+      - name: Остановка
+        if: always()
+        run: docker compose down -v

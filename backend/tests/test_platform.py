@@ -136,7 +136,7 @@ def test_pdf_respects_access(login):
 def test_health_and_version(client):
     health = client.get("/api/health").json()
     assert health["status"] == "ok" and health["schema"]["current"] == health["schema"]["head"]
-    assert client.get("/api/version").json()["version"] == "0.4.0"
+    assert client.get("/api/version").json()["version"] == "0.4.1"
 
 
 def test_system_info(admin):
@@ -165,7 +165,7 @@ def test_security_headers(client):
 
 def test_openapi_is_generated(client):
     schema = client.get("/api/openapi.json").json()
-    assert schema["info"]["version"] == "0.4.0"
+    assert schema["info"]["version"] == "0.4.1"
     assert "/api/hr/analytics/dashboard" in schema["paths"] and "/api/tp/naumen/import" in schema["paths"]
     for path in ("/api/access/meta", "/api/access/profiles/{profile_id}", "/api/users/{user_id}/grant-access",
                  "/api/auth/config", "/api/system/ldap", "/api/system/ldap/test"):

@@ -1,13 +1,13 @@
 ---
 title: "Дашборды компании — руководство по развёртыванию"
-subtitle: "Версия 0.4.0"
+subtitle: "Версия 0.4.1"
 date: "Ноябрь 2026"
 lang: ru
 ---
 
 # О документе
 
-Руководство описывает установку, настройку, обновление и обслуживание «Дашбордов компании» версии 0.4.0: состав системы, требования к серверу, запуск в Docker, переменные окружения (в том числе часовой пояс, вход по учётной записи домена, синхронизацию с Active Directory, входящие данные и интеграции), планировщик, папку «Входящие», сетевой доступ к системам компании и шифрование секретов подключений, миграции базы данных, резервное копирование, обновление до 0.4.0, 0.3.0 и 0.2.0, проверку производительности и диагностику.
+Руководство описывает установку, настройку, обновление и обслуживание «Дашбордов компании» версии 0.4.1: состав системы, требования к серверу, запуск в Docker, переменные окружения (в том числе часовой пояс, вход по учётной записи домена, синхронизацию с Active Directory, входящие данные и интеграции), планировщик, папку «Входящие», сетевой доступ к системам компании и шифрование секретов подключений, миграции базы данных, резервное копирование, обновление до 0.4.1, 0.4.0, 0.3.0 и 0.2.0, переход с версий до 0.1.0, проверку производительности и диагностику.
 
 Документ предназначен для системных администраторов и инженеров эксплуатации. Работа с интерфейсом описана в «Руководстве пользователя», администрирование учётных записей, доступа, структуры компании и служб — в «Руководстве администратора».
 
@@ -80,7 +80,7 @@ worker (app.cli worker) ──────────────────�
 ```bash
 git clone https://github.com/ayurasov/dashboards_serv.git
 cd dashboards_serv
-git checkout v0.4.0
+git checkout v0.4.1
 ```
 
 ## Шаг 2. Конфигурация
@@ -127,7 +127,7 @@ docker compose logs -f app
 curl -s http://127.0.0.1:8000/api/health
 ```
 
-Ответ `{"status": "ok", "version": "0.4.0", "database": "ok", "schema": {"current": "0016_integrations", "head": "0016_integrations"}}` означает, что сервер работает, база доступна и схема актуальна. Статус `degraded` (код 503) — схема базы не совпадает с версией приложения: проверьте журнал миграций.
+Ответ `{"status": "ok", "version": "0.4.1", "database": "ok", "schema": {"current": "0016_integrations", "head": "0016_integrations"}}` означает, что сервер работает, база доступна и схема актуальна. Статус `degraded` (код 503) — схема базы не совпадает с версией приложения: проверьте журнал миграций.
 
 Откройте `http://<сервер>:8000` и войдите под учётной записью администратора. Документация API (OpenAPI) доступна по адресу `/api/docs`. Планировщик проверяется на странице **Входящие данные → Папка**: блок «Планировщик» — «Работает» с отметкой не старше минуты, состояние папки — «Работает».
 
@@ -289,7 +289,7 @@ DEMO_DATA=true docker compose up -d --build
 
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
-| `WEB_CONCURRENCY` | 2 × ядра + 1 (не больше 9) | Число рабочих процессов |
+| `WEB_CONCURRENCY` | 2 × ядра + 1 (не больше 9) | Число рабочих процессов; пусто — по умолчанию (в 0.4.0 пустое значение мешало запуску в Docker — задайте число или обновитесь до 0.4.1) |
 | `DB_POOL_SIZE` | `5` | Постоянных соединений с базой на процесс |
 | `DB_MAX_OVERFLOW` | `4` | Дополнительных соединений на процесс при пике |
 | `DB_POOL_TIMEOUT` | `30` | Ожидание свободного соединения, с |
@@ -625,6 +625,20 @@ docker compose logs -f app worker
 
 Миграции применятся при старте приложения; планировщик дождётся новой схемы и продолжит работу. Откат версии делается восстановлением резервной копии, сделанной перед обновлением.
 
+## Обновление до 0.4.1
+
+Версия 0.4.1 исправляет запуск в Docker с `.env` по умолчанию. `docker-compose.yml` передаёт `WEB_CONCURRENCY` всегда, пустой — «по умолчанию», а gunicorn читает эту переменную как число ещё до `gunicorn.conf.py`: в 0.4.0 с пустым значением сервер падал при старте (`ValueError: invalid literal for int() with base 10: ''` в `docker compose logs app`), контейнер `app` не становился здоровым, а `worker` не запускался («dependency failed to start: container …-app-1 is unhealthy»). Теперь точка входа контейнера убирает пустую переменную, и действует значение по умолчанию — 2 × ядра + 1, не больше 9. Схема базы, интерфейс и настройки не меняются; если в 0.4.0 вы задали число в `.env` как обход, его можно оставить.
+
+```bash
+docker compose exec -T db pg_dump -U dashboards -d dashboards -Fc > before-0.4.1.dump
+git fetch && git checkout v0.4.1
+docker compose up -d --build
+docker compose ps                          # app — healthy, worker — running
+curl -s http://127.0.0.1:8000/api/health   # "version": "0.4.1"
+```
+
+Подробно — `docs/runbooks/upgrade-to-0.4.1.md`. Откат — `git checkout v0.4.0 && docker compose up -d --build` с числом в `WEB_CONCURRENCY`.
+
 ## Обновление до 0.4.0
 
 Версия 0.4.0 добавляет входящие данные — папку «Входящие» на сервере, загрузку, приём файлов по API с ключом, план и применение — и интеграции с системами компании: «По Делу», «Пульс проекта», Jira, Confluence, Bitrix24, почтовым ящиком Exchange и 1С. Схему меняет миграция `0016_integrations`; она только добавляет таблицы, существующие данные не меняются:
@@ -775,29 +789,55 @@ git checkout v0.1.0 && docker compose up -d --build
 
 ## Обновление до 0.1.0 с версий до 0.1.0
 
-Версия 0.1.0 — первая версия продукта; прежние версии («Dashboards API 1.1») хранили данные в SQLite в томе `db_data`. Миграция `0012_v0_1_0_schema` перестраивает все таблицы с переносом данных; дальше при том же старте применяются 0013–0016. Установки до 0.1.0 обновляются сразу до 0.4.0.
+Версия 0.1.0 — первая версия продукта; прежние версии («Dashboards API 1.1») хранили данные в SQLite в томе `db_data` и работали в одном контейнере `dashboards_serv`. Миграция `0012_v0_1_0_schema` перестраивает все таблицы с переносом данных; дальше при том же старте применяются 0013–0016. Установки до 0.1.0 обновляются сразу до 0.4.1 с переходом на PostgreSQL. Ниже — проверенный порядок; 10–20 минут, данные старой версии не меняются (переносится копия).
 
-1. **Сделайте копию тома** со старой базой:
+Имя тома Docker начинается с имени папки, из которой запускался `docker compose`: для папки `/home/user/dashboards` это `dashboards_db_data`, для `dashboards_serv` — `dashboards_serv_db_data`. Узнайте своё: `docker volume ls | grep db_data`. В командах ниже — `dashboards_db_data`, папка проекта `dashboards` и папка резервных копий `~/dashboards-backup` вне папки проекта.
+
+1. **Остановите старую версию и сохраните копии базы.** В папке старой версии — её контейнер `dashboards_serv` занимает порт приложения, с ним новая версия не запустится:
 
    ```bash
-   docker run --rm -v dashboards_serv_db_data:/data -v "$PWD":/backup alpine cp /data/hr_dashboard.db /backup/hr_dashboard-before-0.1.0.db
+   docker compose down
+   mkdir -p ~/dashboards-backup && git rev-parse HEAD > ~/dashboards-backup/old-commit.txt
+   cp .env ~/dashboards-backup/env-old
+   docker run --rm -v dashboards_db_data:/data -v ~/dashboards-backup:/backup alpine sh -c "cp /data/hr_dashboard.db /backup/hr_dashboard-original.db && cp /data/hr_dashboard.db /backup/hr_dashboard-work.db"
    ```
 
-2. **Вариант А — остаться на SQLite.** В `.env` задайте `DATABASE_URL=sqlite:////data/hr_dashboard.db` и подключите старый том к сервису `app` (раздел `volumes: - db_data:/data`). При старте база будет обновлена на месте.
-
-3. **Вариант Б — перейти на PostgreSQL (рекомендуется).** Обновите копию старой базы, затем перенесите данные:
+2. **Получите 0.4.1 в чистой папке.** `git checkout` сам удаляет файлы старой версии, но если папку обновляли копированием или распаковкой архива, они остаются — например, `frontend/src/router.js` подменяет новый `frontend/src/router/index.js`, и сборка интерфейса падает с «Missing export» (`routeService`). Надёжнее склонировать заново в папку с тем же именем — тогда имена томов не меняются:
 
    ```bash
-   # обновить копию SQLite до актуальной схемы
-   docker compose run --rm --no-deps -w /app/backend --entrypoint python -v "$PWD":/backup -e DATABASE_URL=sqlite:////backup/hr_dashboard-before-0.1.0.db app -m app.cli migrate
-   # создать схему в PostgreSQL и перенести данные
+   cd .. && mv dashboards dashboards-old
+   git clone --branch v0.4.1 https://github.com/ayurasov/dashboards_serv.git dashboards
+   cd dashboards
+   ```
+
+3. **Создайте `.env`** (раздел «Шаг 2. Конфигурация»; прежний `.env` не подходит — в нём нет PostgreSQL) и соберите образ:
+
+   ```bash
+   docker compose build
+   ```
+
+4. **Перенесите данные в PostgreSQL.** Рабочая копия старой базы обновляется до актуальной схемы, затем её строки переносятся в PostgreSQL. Команды, которые пишут в копию базы в смонтированной папке, выполняются от `root` (`-u root`): пользователь контейнера `app` не может писать в папку сервера — без этого «attempt to write a readonly database».
+
+   ```bash
+   docker compose run --rm --no-deps -u root -v ~/dashboards-backup:/backup -e DATABASE_URL=sqlite:////backup/hr_dashboard-work.db --entrypoint python app -m app.cli migrate
    docker compose up -d db
-   docker compose run --rm -w /app/backend --entrypoint python app -m app.cli migrate
-   docker compose run --rm -w /app/backend --entrypoint python -v "$PWD":/backup app scripts/sqlite_to_postgres.py /backup/hr_dashboard-before-0.1.0.db
+   docker compose run --rm --entrypoint python app -m app.cli migrate
+   docker compose run --rm -u root -v ~/dashboards-backup:/backup --entrypoint python app scripts/sqlite_to_postgres.py /backup/hr_dashboard-work.db
    docker compose up -d
    ```
 
-4. **Проверьте** после входа: месяцы службы персонала, недели отчёта ТП, число заявок Naumen и партнёрств на странице «О системе».
+   Первая команда пишет «Схема базы обновлена: 0011_naumen_tickets → 0016_integrations», перенос — «Готово: данные перенесены». Пользователи переносятся с прежними логинами и паролями — администратор из `ADMIN_PASSWORD` в `.env` создаётся, только если пользователей нет. Если пароль администратора неизвестен: `docker compose exec app python -m app.cli reset-password admin` (выводит временный пароль).
+
+5. **Проверьте**: `docker compose ps` — `app` в состоянии healthy, `worker` — running; `/api/health` — `"status": "ok"`; после входа на странице «О системе» — месяцы службы персонала, недели отчёта ТП, число заявок Naumen и партнёрств, как в старой версии.
+
+**Откат.** Старый том `dashboards_db_data` не меняется — достаточно вернуть прежнюю папку и код:
+
+```bash
+docker compose down
+cd .. && mv dashboards dashboards-new && mv dashboards-old dashboards && cd dashboards
+git checkout $(cat ~/dashboards-backup/old-commit.txt) && cp ~/dashboards-backup/env-old .env
+docker compose up -d --build
+```
 
 Что меняется для пользователей при обновлении с версий до 0.1.0:
 
