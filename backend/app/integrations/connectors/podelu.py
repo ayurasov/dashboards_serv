@@ -6,8 +6,9 @@ POST /api/auth/login (X-CSRF-Token, Referer, Origin) → запросы → POST
 (users.manage), участник (просмотр) выделенного списка задач; роль администратора не нужна.
 
 «Синхронизировать структуру»:
-- GET /api/org/export (podelu.org-structure) → dashboards.org-structure → элемент входящих набора «Структура»
-  (план и применение — движок org_transfer; «применять сразу» — по правилу «Подключение» × «Структура»).
+- GET /api/org/export (podelu.org-structure) → dashboards.org-structure → элемент входящих набора «Структура
+  компании» (план и применение — движок org_transfer; «применять сразу» — по правилу «Подключение» × «Структура
+  компании»).
   Подразделения сопоставляются по пути, их внешний ID — ключ подразделения в «По Делу»; типы уровней, которых
   нет в настройках структуры, заменяются типом по умолчанию; настройки структуры «По Делу» не применяются;
 - GET /api/users/export?format=json&inactive=0 (podelu.employees) и GET /api/users/admin/all (id сотрудников) →
@@ -75,7 +76,7 @@ NOTE_LIMIT = 500
 # ---------------------------------------------------------------- форматы «По Делу» → наши
 
 def structure_bundle(doc: Any) -> dict:
-    """podelu.org-structure версии 1 → dashboards.org-structure версии 1 (набор «Структура»)."""
+    """podelu.org-structure версии 1 → dashboards.org-structure версии 1 (набор «Структура компании»)."""
     if not isinstance(doc, dict) or doc.get("format") != ORG_FORMAT:
         raise StructureFormatError(f"Это не файл структуры «{TITLE}» (нужен format: {ORG_FORMAT})")
     if doc.get("version") != 1:
@@ -197,11 +198,24 @@ class PodeluConnector(Connector):
     actions = (
         Action("sync", "Синхронизировать структуру",
                "Подразделения и сотрудники из «По Делу»: план и применение по правилам «Входящих» "
-               "(источник «Подключение», наборы «Структура» и «Сотрудники»)"),
+               "(источник «Подключение», наборы «Структура компании» и «Сотрудники»)"),
         Action("pull", "Забрать данные из задач",
                "Новые вложения задач выделенного списка — во «Входящие»; задача отмечается комментарием"),
     )
     url_field = "base_url"
+    order = 10
+    counter_labels = {
+        # «Синхронизировать структуру»: план структуры и сотрудников (structure_item — номер элемента, не счётчик)
+        "structure_create": "подразделений: новых", "structure_update": "подразделений: изменений",
+        "structure_heads": "руководителей назначить", "structure_errors": "ошибок в структуре",
+        "users_create": "сотрудников: новых", "users_update": "сотрудников: изменений",
+        "users_unchanged": "сотрудников без изменений", "users_deactivate": "сотрудников отключить",
+        "users_departments": "подразделений для сотрудников", "users_errors": "ошибок у сотрудников",
+        "users_skipped": "сотрудников пропущено",
+        # «Забрать данные из задач»
+        "tasks": "задач в списке", "candidates": "задач с новыми вложениями", "comments": "задач отмечено",
+        "comment_errors": "не удалось отметить",
+    }
     # Пароль уходит на адрес для запросов сервера (если он задан): привязка — к обоим адресам
     secret_url_fields = ("base_url", "server_url")
 

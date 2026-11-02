@@ -90,6 +90,9 @@ def subject_rules(text: str | None) -> list[tuple[str, str]]:
 @register
 class ExchangeConnector(Connector):
     kind = "exchange"
+    order = 60
+    counter_labels = {"messages": "писем", "processed": "писем от разрешённых отправителей",
+                      "skipped_sender": "писем других отправителей"}
     title = TITLE
     description = ("Вложения писем выделенной папки почтового ящика → «Входящие» (отправитель из разрешённого "
                    "списка); письмо помечается прочитанным и переносится. Exchange Server (EWS), Microsoft 365 "
@@ -114,7 +117,9 @@ class ExchangeConnector(Connector):
               hint="Необязательно: другой адрес — для национальных облаков Microsoft"),
         Field("login_url", "Адрес входа Microsoft", "url", placeholder=LOGIN_URL, show_if={"mode": ("graph",)}),
         # IMAP
-        Field("imap_host", "Сервер IMAP", required=True, show_if={"mode": ("imap",)}, placeholder="imap.company.ru"),
+        Field("imap_host", "Сервер IMAP", required=True, show_if={"mode": ("imap",)}, placeholder="imap.company.ru",
+              hint="Соединение с почтовым сервером — напрямую: прокси HTTPS_PROXY / HTTP_PROXY к IMAP не применяется "
+                   "(он только для EWS и Microsoft Graph), серверу «Дашбордов» нужен прямой доступ к порту IMAP"),
         Field("imap_port", "Порт", "int", default=993, min=1, max=65535, show_if={"mode": ("imap",)}),
         Field("imap_ssl", "SSL/TLS", "bool", default=True, show_if={"mode": ("imap",)},
               hint="Выключено — обычное соединение с переходом на STARTTLS, если сервер его поддерживает"),

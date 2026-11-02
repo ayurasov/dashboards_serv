@@ -284,6 +284,8 @@ class Search:
 @register
 class JiraConnector(Connector):
     kind = "jira"
+    order = 30
+    counter_labels = {"issues": "задач Jira", **{key: f"задач: {text}" for key, text in PROBLEMS.items()}}
     title = "Jira"
     description = ("Показатели сквозного отчёта по JQL: число задач или сумма поля (оценка, остаток, затраты — "
                    "в часах) по подразделениям, помесячно; признаки качества данных — как в Burndown. Cloud — email "
@@ -411,13 +413,13 @@ class JiraConnector(Connector):
         parts = [written.text(preview), f"задач Jira: {len(quality.issues)}", quality.text()]
         if targets.created:
             parts.append("созданы показатели: " + ", ".join(f"«{k}»" for k in targets.created))
-        if targets.pending:
-            head = "при записи будут созданы показатели" if preview else "не созданы показатели без значений"
-            parts.append(f"{head}: " + ", ".join(f"«{k}»" for k in targets.pending))
-        counters = {**written.counters(), "issues": len(quality.issues), **quality.counters(),
+        pending = metrics.Pending.of(cells, targets, units, preview=preview,
+                                     room=metrics.SAMPLE_ROWS - len(written.sample))
+        parts += pending.parts
+        counters = {**written.counters(), **pending.counters, "issues": len(quality.issues), **quality.counters(),
                     "indicators_created": len(targets.created), "errors": len(errors)}
-        details = {"months": [m.key for m in months], "values": written.sample, "problems": quality.samples(),
-                   "requests": stats}
+        details = {"months": [m.key for m in months], "values": written.sample + pending.sample,
+                   "problems": quality.samples(), "requests": stats}
         if errors:
             details["errors"] = errors[:50]
         message = " · ".join(parts)

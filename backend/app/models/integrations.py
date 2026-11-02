@@ -24,7 +24,8 @@ from ..core.db import Base, utcnow
 from .core import TimestampMixin
 
 RUN_TRIGGERS = ("manual", "schedule", "webhook", "folder", "cli")
-RUN_STATUSES = ("running", "ok", "partial", "error")
+# interrupted — запуск прерван: процесс остановился посреди запуска (app/integrations/runner.py, RUNNING_TIMEOUT)
+RUN_STATUSES = ("running", "ok", "partial", "error", "interrupted")
 INBOX_SOURCES = ("folder", "upload", "api", "integration")
 INBOX_STATUSES = ("received", "recognized", "pending", "applied", "rejected", "error", "duplicate")
 # «Живые» элементы: по ним распознаётся повтор файла (один и тот же набор и SHA-256)
@@ -52,8 +53,12 @@ class Integration(TimestampMixin, Base):
     # Секретные поля настроек одним зашифрованным значением (app/core/secrets.py) и адрес привязки
     secret_encrypted: Mapped[str | None] = mapped_column(Text)
     secret_bound_url: Mapped[str | None] = mapped_column(String(500))
-    # {"mode": "interval", "minutes": 60, "actions": [...]} · {"mode": "daily", "time": "06:30", ...} · {}
-    schedule: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Записи расписания (не больше 5): [{"mode": "interval", "minutes": 30, "actions": [...]},
+    # {"mode": "daily", "time": "06:30", "weekdays": [1, 5], "actions": [...]}]; [] — вручную. Прежний вид — один
+    # объект {"mode": …} или {} — читается как одна запись (runner.entries_of)
+    schedule: Mapped[Any] = mapped_column(JSON, default=list)
+    # Следующий запуск каждой записи (ISO-время UTC, по порядку записей) и ближайший из них
+    next_runs: Mapped[list[str | None]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     # Состояние коннектора между запусками: курсоры, отметки обработанного
     state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -165,6 +170,10 @@ class InboundKey(Base):
     issued_by: Mapped[str] = mapped_column(String(100), default="")
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Ограничение частоты (INBOUND_RATE_LIMIT в минуту) — общее для всех процессов: начало текущего окна и число
+    # вызовов в нём, одним атомарным UPDATE (integration_admin.hit_rate_limit)
+    rate_window_start: Mapped[datetime | None] = mapped_column(DateTime)
+    rate_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

@@ -26,9 +26,10 @@ const themeTitle = computed(() => ({ light: 'Светлая тема', dark: 'Т
 function cycleTheme() {
   app.setTheme({ system: 'light', light: 'dark', dark: 'system' }[app.theme])
 }
-// «?» — раздел руководства о странице; руководство администратора открывается только администратору
+// «?» — раздел руководства о странице; руководство администратора — администратору и тем, у кого есть любое
+// полномочие администрирования (они открывают страницы администрирования: «Интеграции», «Пользователи»…)
 const adminGuide = computed(() => route.meta.guideKind === 'admin')
-const showGuide = computed(() => !!route.meta.guide && (!adminGuide.value || auth.isAdmin))
+const showGuide = computed(() => !!route.meta.guide && (!adminGuide.value || auth.canReadAdminGuide))
 const guideLink = computed(() => ({ path: adminGuide.value ? '/guide/admin' : '/guide', hash: route.meta.guide ? `#${route.meta.guide}` : '' }))
 </script>
 
@@ -50,7 +51,7 @@ const guideLink = computed(() => ({ path: adminGuide.value ? '/guide/admin' : '/
       <span v-if="route.path === '/'" class="crumb current">Обзор</span>
     </nav>
     <div class="spacer" />
-    <router-link v-if="showGuide" :to="guideLink" class="tb-btn" title="Справка по этой странице">
+    <router-link v-if="showGuide" :to="guideLink" class="tb-btn" title="Справка по этой странице" aria-label="Справка по этой странице" data-testid="page-help">
       <AppIcon name="help" :size="17" />
     </router-link>
     <button class="tb-btn" type="button" :title="`${themeTitle} — переключить`" @click="cycleTheme">

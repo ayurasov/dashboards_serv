@@ -3,12 +3,13 @@ import { computed, useId } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import RichText from '@/components/ui/RichText.vue'
 import ToggleSwitch from '@/components/admin/ToggleSwitch.vue'
-import { allowedHostsHint, fieldVisible, isJsonField, isMonospace, jsonRows, parseJsonField } from '@/domain/integrations'
+import { allowedHostsHint, fieldVisible, isChoiceField, isJsonField, isMonospace, isWideField, jsonRows, parseJsonField } from '@/domain/integrations'
 
 /**
  * Форма настроек подключения по описанию полей вида (GET /api/integrations/kinds → fields): типы
  * string · text · url · password · int · bool · select · multiselect · list · time · json, show_if, подсказки,
- * заполнители, значения по умолчанию, обязательность. Секретные поля сервер не возвращает: сохранённый
+ * заполнители, значения по умолчанию, обязательность. Выбор из 2–4 вариантов с длинными подписями («Тип
+ * подключения») — списком переключателей, остальные длинные списки — на всю ширину: подпись не обрезается. Секретные поля сервер не возвращает: сохранённый
  * секрет — «задан» с «Заменить» и «Очистить».
  */
 const props = defineProps({
@@ -73,6 +74,19 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
         <small v-if="errorOf(f)" class="error">{{ errorOf(f) }}</small>
       </fieldset>
 
+      <!-- один из 2–4 вариантов с длинными подписями -->
+      <fieldset v-else-if="isChoiceField(f)" class="sf-field sf-choice" :data-field="f.key">
+        <legend>{{ f.label }}<span v-if="f.required" class="req" aria-hidden="true">*</span></legend>
+        <div class="choice-list" role="radiogroup" :aria-label="f.label">
+          <label v-for="o in f.options" :key="o.value" class="choice" :class="{ on: values[f.key] === o.value, invalid: errorOf(f) }">
+            <input type="radio" :name="idOf(f)" :value="o.value" :checked="values[f.key] === o.value" :data-testid="`choice-${f.key}-${o.value}`" @change="setValue(f.key, o.value)" />
+            <span>{{ o.label }}</span>
+          </label>
+        </div>
+        <RichText v-if="f.hint" :text="f.hint" compact :limit="160" />
+        <small v-if="errorOf(f)" class="error">{{ errorOf(f) }}</small>
+      </fieldset>
+
       <!-- секрет: задан / заменить / очистить -->
       <div v-else-if="f.secret" class="sf-field sf-secret" :data-field="f.key">
         <label :for="idOf(f)" class="sf-label">{{ f.label }}<span v-if="f.required" class="req" aria-hidden="true">*</span><span class="lock"><AppIcon name="lock" :size="12" />секрет</span></label>
@@ -100,7 +114,7 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
       </div>
 
       <!-- остальные типы -->
-      <div v-else class="sf-field" :class="{ wide: f.type === 'text' || f.type === 'list' || f.type === 'url' || f.type === 'json' }" :data-field="f.key">
+      <div v-else class="sf-field" :class="{ wide: isWideField(f) }" :data-field="f.key">
         <label :for="idOf(f)" class="sf-label">{{ f.label }}<span v-if="f.required" class="req" aria-hidden="true">*</span></label>
         <select v-if="f.type === 'select'" :id="idOf(f)" class="select" :class="{ invalid: errorOf(f) }" :value="values[f.key]" :required="f.required"
                 @change="setValue(f.key, $event.target.value)">
@@ -144,7 +158,14 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
 <style scoped>
 .schema-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
 .sf-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.sf-field.wide, .sf-secret, .sf-multi, .none { grid-column: 1 / -1; }
+.sf-field .select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.sf-field.wide, .sf-secret, .sf-multi, .sf-choice, .none { grid-column: 1 / -1; }
+.choice-list { display: flex; flex-direction: column; gap: 4px; }
+.choice { display: flex; align-items: flex-start; gap: 9px; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius); font-size: var(--fs-sm); line-height: 1.4; cursor: pointer; overflow-wrap: anywhere; }
+.choice input { margin-top: 2px; flex: 0 0 auto; accent-color: var(--accent); }
+.choice.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.choice.invalid { border-color: var(--light-red); }
+.choice:focus-within { box-shadow: 0 0 0 3px var(--focus); }
 .sf-label, legend { display: flex; align-items: center; gap: 4px; font-size: var(--fs-sm); font-weight: 560; color: var(--text-2); padding: 0; }
 legend { margin-bottom: 5px; }
 .req { color: var(--brand); font-weight: 700; }

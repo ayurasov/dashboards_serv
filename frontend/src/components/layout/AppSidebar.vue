@@ -29,7 +29,7 @@ const groups = computed(() => app.dashboards
 // ожидающих в профиле (/api/auth/me → inbox), отдельных запросов меню не делает
 const showInbox = computed(() => auth.inbox)
 
-const helpItems = computed(() => HELP_NAV.filter((i) => !i.admin || auth.isAdmin))
+const helpItems = computed(() => HELP_NAV.filter((i) => (i.adminGuide ? auth.canReadAdminGuide : !i.admin || auth.isAdmin)))
 const adminItems = computed(() => ADMIN_NAV.filter((i) => (i.admin ? auth.isAdmin : auth.hasCapability(i.capability))))
 
 function isActive(item) {

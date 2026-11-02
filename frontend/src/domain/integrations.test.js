@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  allowedHostsHint, bindingChanges, bindingFields, checkDetails, checkHint, curlExample, fieldVisible, healthInfo, initialSecrets, initialValues,
-  intervalText, isLongText, isMonospace, jsonRows, jsonText, kindIcon, normalizeUrl, parseJsonField, pingExample, quoted, richBlocks, richPreview, rebindSecrets, runCounters, runCountersText, runDuration, runStatus,
-  rateLimitText, scheduleDraft, scheduleErrors, scheduleLabel, schedulePayload, settingsPayload, shortError, toConfigValue, toFormValue,
-  toggleWeekday, urlChanged, validateSettings, visibleFields,
+  MAX_SCHEDULES, SCOPES, adminOnlyFor, allowedHostsHint, bindingChanges, bindingFields, canAddSchedule, checkDetails, checkHint, currentError, curlExample,
+  entryLabel, fieldVisible, healthInfo, initialSecrets, initialValues, intervalText, isLongText, isMonospace, isWideField, jsonRows, jsonText, kindIcon,
+  newScheduleEntry, normalizeUrl, parseJsonField, pingExample, quoted, richBlocks, richPreview, rebindSecrets, runCounters, runCountersText, runDuration,
+  runStatus, rateLimitText, scheduleDraft, scheduleEntries, scheduleErrors, scheduleLabel, schedulePayload, scheduledActions, settingsPayload, shortError,
+  sortIntegrations, toConfigValue, toFormValue, toggleWeekday, urlChanged, validateSettings, visibleFields,
 } from './integrations'
 
 // Вид подключения в форме ответа /api/integrations/kinds
@@ -187,13 +188,27 @@ describe('проверка формы', () => {
 })
 
 describe('расписание', () => {
-  it('подпись — как на сервере', () => {
+  it('подпись — как на сервере: одна запись и несколько с действиями', () => {
     expect(scheduleLabel(null)).toBe('Вручную')
     expect(scheduleLabel({ mode: 'off' })).toBe('Вручную')
+    expect(scheduleLabel([])).toBe('Вручную')
     expect(scheduleLabel({ mode: 'interval', minutes: 60 })).toBe('Каждые 60 мин')
+    expect(scheduleLabel([{ mode: 'interval', minutes: 60 }])).toBe('Каждые 60 мин')
     expect(scheduleLabel({ mode: 'daily', time: '06:30', weekdays: [] })).toBe('В 06:30 ежедневно')
     expect(scheduleLabel({ mode: 'daily', time: '06:30', weekdays: [5, 1] })).toBe('В 06:30 (пн, пт)')
     expect(scheduleLabel({ mode: 'daily', time: '06:30', weekdays: [1, 2, 3, 4, 5, 6, 7] })).toBe('В 06:30 ежедневно')
+    const two = [{ mode: 'daily', time: '06:00', weekdays: [], actions: ['sync'] }, { mode: 'interval', minutes: 30, actions: ['pull'] }]
+    expect(scheduleLabel(two, KIND)).toBe('В 06:00 ежедневно — Синхронизировать; Каждые 30 мин — Забрать данные')
+    expect(entryLabel({ mode: 'interval', minutes: 30 })).toBe('Каждые 30 мин')
+  })
+
+  it('записи: список 0.4.0 и прежний вид — один объект; вручную — пусто', () => {
+    expect(scheduleEntries({ mode: 'interval', minutes: 5, actions: ['pull'] })).toEqual([{ mode: 'interval', minutes: 5, actions: ['pull'] }])
+    expect(scheduleEntries({})).toEqual([])
+    expect(scheduleEntries({ mode: 'off' })).toEqual([])
+    expect(scheduleEntries(null)).toEqual([])
+    expect(scheduleEntries([{ mode: 'daily', time: '06:00' }, { mode: 'off' }, null])).toEqual([{ mode: 'daily', time: '06:00' }])
+    expect(scheduledActions([{ mode: 'daily', time: '06:00', actions: ['sync'] }, { mode: 'interval', minutes: 30, actions: ['pull', 'sync'] }])).toEqual(['sync', 'pull'])
   })
 
   it('интервал словами', () => {
@@ -206,22 +221,41 @@ describe('расписание', () => {
     expect(intervalText(2880)).toBe('каждые 2 суток')
   })
 
-  it('черновик: действия — сохранённые или первое по расписанию; лишние убираются', () => {
-    expect(scheduleDraft(null, KIND)).toEqual({ mode: 'off', minutes: '60', time: '06:00', weekdays: [], actions: ['pull'] })
+  it('черновик: записи по порядку; действия — сохранённые или первое по расписанию; лишние убираются', () => {
+    expect(scheduleDraft(null, KIND)).toEqual([])
     expect(scheduleDraft({ mode: 'daily', time: '07:15', weekdays: [5, 1], actions: ['sync', 'manual'] }, KIND))
-      .toEqual({ mode: 'daily', minutes: '60', time: '07:15', weekdays: [1, 5], actions: ['sync'] })
+      .toEqual([{ mode: 'daily', minutes: '60', time: '07:15', weekdays: [1, 5], actions: ['sync'] }])
+    const fromApi = [{ mode: 'interval', minutes: 30, actions: ['pull'], label: 'Каждые 30 мин', next_run_at: '2026-11-02T10:00:00' }, { mode: 'daily', time: '06:00', weekdays: [], actions: [] }]
+    expect(scheduleDraft(fromApi, KIND)).toEqual([
+      { mode: 'interval', minutes: '30', time: '06:00', weekdays: [], actions: ['pull'] },
+      { mode: 'daily', minutes: '60', time: '06:00', weekdays: [], actions: ['pull'] },
+    ])
   })
 
-  it('проверка и тело запроса', () => {
-    const draft = scheduleDraft({ mode: 'interval', minutes: 3 }, KIND)
-    expect(scheduleErrors(draft, KIND)).toEqual({ 'schedule.minutes': 'Целое число минут от 5 до 10\u00a0080 (неделя)' })
-    expect(scheduleErrors({ ...draft, minutes: '30', actions: [] }, KIND)).toEqual({ 'schedule.actions': 'Выберите хотя бы одно действие' })
-    expect(scheduleErrors({ mode: 'daily', time: '6:00', actions: ['pull'] }, KIND)).toEqual({ 'schedule.time': 'Время в формате ЧЧ:ММ' })
-    expect(scheduleErrors({ mode: 'interval', minutes: '30', actions: [] }, { actions: [{ key: 'x', schedulable: false }] })).toEqual({ schedule: 'У этого подключения нет действий по расписанию' })
-    expect(scheduleErrors({ mode: 'off' }, KIND)).toEqual({})
-    expect(schedulePayload({ ...draft, minutes: ' 30 ' })).toEqual({ mode: 'interval', minutes: 30, actions: ['pull'] })
-    expect(schedulePayload({ mode: 'daily', time: '06:00', weekdays: [5, 1, 5], actions: ['pull', 'sync'] })).toEqual({ mode: 'daily', time: '06:00', weekdays: [1, 5], actions: ['pull', 'sync'] })
-    expect(schedulePayload({ mode: 'off', actions: ['pull'] })).toEqual({ mode: 'off' })
+  it('«Добавить расписание»: через интервал 60 минут, действие — ещё не занятое другими записями; не больше 5', () => {
+    const first = newScheduleEntry(KIND, [])
+    expect(first).toEqual({ mode: 'interval', minutes: '60', time: '06:00', weekdays: [], actions: ['pull'] })
+    expect(newScheduleEntry(KIND, [first]).actions).toEqual(['sync'])
+    expect(newScheduleEntry(KIND, [first, { ...first, actions: ['sync'] }]).actions).toEqual(['pull'])
+    const full = Array.from({ length: MAX_SCHEDULES }, () => first)
+    expect(MAX_SCHEDULES).toBe(5)
+    expect(canAddSchedule(full.slice(1), KIND)).toBe(true)
+    expect(canAddSchedule(full, KIND)).toBe(false)
+    expect(canAddSchedule([], { actions: [{ key: 'x', schedulable: false }] })).toBe(false)
+  })
+
+  it('проверка записей (поля — как в ошибках сервера) и тело запроса — список', () => {
+    const [draft] = scheduleDraft({ mode: 'interval', minutes: 3 }, KIND)
+    expect(scheduleErrors([draft], KIND)).toEqual({ 'schedule.0.minutes': 'Целое число минут от 5 до 10\u00a0080 (неделя)' })
+    expect(scheduleErrors([{ ...draft, minutes: '30' }, { ...draft, minutes: '30', actions: [] }], KIND)).toEqual({ 'schedule.1.actions': 'Выберите хотя бы одно действие' })
+    expect(scheduleErrors([{ mode: 'daily', time: '6:00', actions: ['pull'] }], KIND)).toEqual({ 'schedule.0.time': 'Время в формате ЧЧ:ММ' })
+    expect(scheduleErrors([{ mode: 'interval', minutes: '30', actions: [] }], { actions: [{ key: 'x', schedulable: false }] })).toEqual({ schedule: 'У этого подключения нет действий по расписанию' })
+    expect(scheduleErrors([], KIND)).toEqual({})
+    expect(scheduleErrors(Array.from({ length: 6 }, () => ({ ...draft, minutes: '30' })), KIND)).toEqual({ schedule: 'Не больше 5 расписаний у подключения' })
+    expect(schedulePayload([{ ...draft, minutes: ' 30 ' }])).toEqual([{ mode: 'interval', minutes: 30, actions: ['pull'] }])
+    expect(schedulePayload([{ mode: 'daily', time: '06:00', weekdays: [5, 1, 5], actions: ['pull', 'sync'] }, { ...draft, minutes: '45' }]))
+      .toEqual([{ mode: 'daily', time: '06:00', weekdays: [1, 5], actions: ['pull', 'sync'] }, { mode: 'interval', minutes: 45, actions: ['pull'] }])
+    expect(schedulePayload([])).toEqual([])
     expect(toggleWeekday([1, 5], 3)).toEqual([1, 3, 5])
     expect(toggleWeekday([1, 3, 5], 3)).toEqual([1, 5])
   })
@@ -235,17 +269,25 @@ describe('состояние и журнал запусков', () => {
     expect(healthInfo('что-то').label).toBe('Не проверено')
     expect(runStatus({ status: 'partial', status_label: 'Частично' })).toEqual({ label: 'Частично', tone: 'yellow' })
     expect(runStatus({ status: 'ok' })).toEqual({ label: 'Успешно', tone: 'green' })
+    expect(runStatus({ status: 'interrupted', status_label: 'Запуск прерван' })).toEqual({ label: 'Запуск прерван', tone: 'gray' })
+    expect(runStatus({ status: 'interrupted' }).label).toBe('Запуск прерван')
   })
 
-  it('счётчики сводки: известные — подписями, items — числом элементов, вложенное не показывается', () => {
+  it('счётчики сводки: подписи вида подключения (counter_labels), без подписи — не показываются', () => {
     const summary = { taken: 2, applied: 1, custom_thing: 3, items: [4, 5], details: { notes: ['x'] }, flag: true }
     expect(runCounters(summary)).toEqual([
-      { key: 'taken', label: 'взято', value: 2 }, { key: 'applied', label: 'применено', value: 1 },
-      { key: 'custom_thing', label: 'custom thing', value: 3 }, { key: 'items', label: 'элементов входящих', value: 2 },
+      { key: 'taken', label: 'взято файлов', value: 2 }, { key: 'applied', label: 'применено', value: 1 },
+      { key: 'items', label: 'элементов входящих', value: 2 },
+    ])
+    const labels = { tasks: 'задач в списке', candidates: 'задач с новыми вложениями', overspent: 'задач: затрачено больше оценки' }
+    expect(runCounters({ tasks: 4, candidates: 1, overspent: 2, structure_item: 17, remaining: 3 }, { labels })).toEqual([
+      { key: 'tasks', label: 'задач в списке', value: 4 }, { key: 'candidates', label: 'задач с новыми вложениями', value: 1 },
+      { key: 'overspent', label: 'задач: затрачено больше оценки', value: 2 },
     ])
     expect(runCountersText({ files: 1200 })).toBe('файлов: 1\u00a0200')
+    expect(runCountersText({ tasks: 3 }, labels)).toBe('задач в списке: 3')
     expect(runCounters({ taken: 0, errors: 1 })).toEqual([{ key: 'errors', label: 'ошибок', value: 1 }])
-    expect(runCounters({ taken: 0 }, { zeros: true })).toEqual([{ key: 'taken', label: 'взято', value: 0 }])
+    expect(runCounters({ taken: 0 }, { zeros: true })).toEqual([{ key: 'taken', label: 'взято файлов', value: 0 }])
     expect(quoted('Jira')).toBe('«Jira»')
     expect(quoted('Папка «Входящие»')).toBe('Папка «Входящие»')
     expect(runCounters(null)).toEqual([])
@@ -272,6 +314,39 @@ describe('состояние и журнал запусков', () => {
     ])
     expect(kindIcon('jira')).toBe('ticket')
     expect(kindIcon('новое')).toBe('plug')
+  })
+})
+
+describe('ошибка, порядок видов, только администратор, области ключа', () => {
+  it('ошибка карточки — только если новее последнего успеха', () => {
+    expect(currentError({ current_error: '', last_error: 'Старое', last_error_at: '2026-11-01T10:00:00' })).toBe('')
+    expect(currentError({ current_error: 'Нет связи' })).toBe('Нет связи')
+    // сервер без current_error — по отметкам времени
+    expect(currentError({ last_error: 'Старое', last_error_at: '2026-11-01T10:00:00', last_ok_at: '2026-11-01T11:00:00' })).toBe('')
+    expect(currentError({ last_error: 'Новое', last_error_at: '2026-11-01T12:00:00', last_ok_at: '2026-11-01T11:00:00' })).toBe('Новое')
+    expect(currentError({ last_error: 'Впервые', last_error_at: '2026-11-01T12:00:00' })).toBe('Впервые')
+    expect(currentError(null)).toBe('')
+  })
+
+  it('карточки — в порядке видов сервера, внутри вида — по названию', () => {
+    const kinds = [{ kind: 'podelu' }, { kind: 'puls' }, { kind: 'jira' }, { kind: 'folder' }]
+    const list = [{ kind: 'folder', name: 'Папка' }, { kind: 'jira', name: 'Я' }, { kind: 'podelu', name: 'По Делу' }, { kind: 'jira', name: 'Б' }, { kind: 'unknown', name: 'А' }]
+    expect(sortIntegrations(list, kinds).map((i) => i.name)).toEqual(['По Делу', 'Б', 'Я', 'Папка', 'А'])
+  })
+
+  it('вид «только администратор» и области ключа с подписями сервера', () => {
+    expect(adminOnlyFor({ admin_only: true }, false)).toBe(true)
+    expect(adminOnlyFor({ admin_only: true }, true)).toBe(false)
+    expect(adminOnlyFor({ admin_only: false }, false)).toBe(false)
+    expect(SCOPES.find((s) => s.value === 'status').label).toBe('Чтение статусов принятых файлов')
+  })
+
+  it('выбор из списка с длинными подписями — на всю ширину формы', () => {
+    const select = (labels) => ({ type: 'select', options: labels.map((label, n) => ({ value: String(n), label })) })
+    expect(isWideField(select(['Cloud — email и API-токен', 'Server / Data Center — персональный токен (PAT)']))).toBe(true)
+    expect(isWideField(select(['NTLM', 'Basic']))).toBe(false)
+    expect(isWideField({ type: 'url' })).toBe(true)
+    expect(isWideField({ type: 'int' })).toBe(false)
   })
 })
 

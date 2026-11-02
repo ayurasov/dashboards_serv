@@ -34,6 +34,8 @@ export const integrationsApi = {
 
   /** Ключи без значений; rate_limit — сколько запросов в минуту разрешено ключу (INBOUND_RATE_LIMIT). */
   keys: () => api.get('/integrations/keys'),
+  /** Области ключа [{ value, label, hint }] — подписи интерфейс берёт с сервера. */
+  keyScopes: () => api.get('/integrations/keys/scopes'),
   /** { name, scopes: ['files', 'status'] } → ключ с полем key (показывается один раз). */
   issueKey: (body) => api.post('/integrations/keys', body),
   reissueKey: (id) => api.post(`/integrations/keys/${id}/reissue`),

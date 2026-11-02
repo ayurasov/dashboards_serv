@@ -7,13 +7,18 @@ import CheckResult from './CheckResult.vue'
 import { integrationsApi } from '@/api/integrations'
 import { confirm } from '@/composables/useConfirm'
 import { toastOk } from '@/composables/useToast'
-import { healthInfo, kindIcon, quoted, richPreview, runCounters, runStatus, shortError } from '@/domain/integrations'
+import {
+  currentError, entryLabel, healthInfo, kindIcon, quoted, richPreview, runCounters, runStatus, scheduleEntries, scheduledActions, shortError,
+} from '@/domain/integrations'
 import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
 
 /**
- * Карточка подключения: состояние, последний запуск и ошибка, «Включено» (включить можно только после
- * успешной проверки — 409 check_required: объясняем и предлагаем «Проверить»), «Проверить», действия
- * со своей кнопкой «Запустить», расписание; «Настроить», «Журнал запусков», «Удалить».
+ * Карточка подключения: состояние, последний запуск и ошибка (только если новее последнего успеха — старая
+ * остаётся в журнале запусков), «Включено» (включить можно только после успешной проверки — 409
+ * check_required: объясняем и предлагаем «Проверить»), «Проверить», действия со своей кнопкой «Запустить»,
+ * все записи расписания со следующим запуском; «Настроить», «Журнал запусков», «Удалить». Подключение вида
+ * «только администратор» (can_manage: false — Confluence публикует полный отчёт) — только для чтения: состояние,
+ * расписание и журнал видны, менять и запускать нельзя.
  */
 const props = defineProps({
   integration: { type: Object, required: true },
@@ -27,7 +32,12 @@ const health = computed(() => healthInfo(it.value.health))
 const actions = computed(() => k.value.actions || [])
 const lastRun = computed(() => it.value.last_run)
 const actionLabel = (key) => actions.value.find((a) => a.key === key)?.label || key
-const scheduled = computed(() => (it.value.schedule?.mode && it.value.schedule.mode !== 'off' ? it.value.schedule.actions || [] : []))
+const scheduled = computed(() => scheduledActions(it.value.schedule))
+const entries = computed(() => scheduleEntries(it.value.schedule))
+const error = computed(() => currentError(it.value))
+const readOnly = computed(() => it.value.can_manage === false)
+const readOnlyNote = computed(() => k.value.admin_only_note || 'Только администратор')
+const counters = (run) => runCounters(run?.summary, { labels: k.value.counter_labels })
 
 // «Включено»: своё состояние, чтобы переключатель вернулся, если включить нельзя
 const enabled = ref(it.value.enabled)
@@ -114,13 +124,15 @@ async function remove() {
       </div>
       <div class="ic-state">
         <span class="badge" :class="`badge-${health.tone}`" data-testid="integration-health">{{ health.label }}</span>
-        <ToggleSwitch :model-value="enabled" :disabled="busy === 'enable'" label="Включено" :title="enabled ? `Выключить ${quoted(it.name)}` : `Включить ${quoted(it.name)}`" data-testid="integration-enabled" @update:model-value="setEnabled" />
+        <ToggleSwitch :model-value="enabled" :disabled="busy === 'enable' || readOnly" label="Включено" :title="enabled ? `Выключить ${quoted(it.name)}` : `Включить ${quoted(it.name)}`" data-testid="integration-enabled" @update:model-value="setEnabled" />
       </div>
     </header>
 
     <div class="ic-body">
+      <p v-if="readOnly" class="ro-note" data-testid="integration-read-only"><AppIcon name="lock" :size="14" /><span><b>{{ readOnlyNote }}</b> — подключение настраивает и запускает администратор; вам видны состояние, расписание и журнал запусков.</span></p>
+
       <TransferBanner v-if="it.secret_problem" tone="warn" title="Секрет нужно ввести заново" :text="it.secret_problem" data-testid="secret-problem">
-        <template #actions><button type="button" class="btn btn-sm" @click="emit('edit', it)">Настроить</button></template>
+        <template v-if="!readOnly" #actions><button type="button" class="btn btn-sm" @click="emit('edit', it)">Настроить</button></template>
       </TransferBanner>
 
       <TransferBanner v-if="needCheck" tone="info" title="Сначала проверьте подключение" data-testid="check-required"
@@ -141,24 +153,36 @@ async function remove() {
           <dd v-if="lastRun">
             <span class="badge" :class="`badge-${runStatus(lastRun).tone}`">{{ runStatus(lastRun).label }}</span>
             <span>{{ actionLabel(lastRun.action) }} · {{ formatRelative(lastRun.started_at) }}</span>
-            <small :title="formatDateTime(lastRun.started_at)">{{ lastRun.trigger_label }}<template v-if="runCounters(lastRun.summary).length"> · {{ runCounters(lastRun.summary).slice(0, 3).map((c) => `${c.label}: ${formatNumber(c.value)}`).join(', ') }}</template></small>
+            <small :title="formatDateTime(lastRun.started_at)">{{ lastRun.trigger_label }}<template v-if="counters(lastRun).length"> · {{ counters(lastRun).slice(0, 3).map((c) => `${c.label}: ${formatNumber(c.value)}`).join(', ') }}</template></small>
+            <small v-if="lastRun.status === 'interrupted'" class="interrupted" data-testid="run-interrupted">Процесс остановился до окончания запуска (перезапуск или сбой) — подключение можно запустить снова.</small>
           </dd>
           <dd v-else class="muted">ещё не запускалось</dd>
         </div>
-        <div>
+        <div :class="{ 'wide-fact': entries.length > 1 }">
           <dt>Расписание</dt>
-          <dd><span data-testid="integration-schedule">{{ it.schedule_label || 'Вручную' }}</span>
+          <dd v-if="entries.length <= 1"><span data-testid="integration-schedule">{{ it.schedule_label || 'Вручную' }}</span>
             <small v-if="it.enabled && it.next_run_at">следующий запуск {{ formatDateTime(it.next_run_at) }}</small>
-            <small v-else-if="!it.enabled && it.schedule_label && it.schedule_label !== 'Вручную'">выключено — по расписанию не запускается</small>
+            <small v-else-if="!it.enabled && entries.length">выключено — по расписанию не запускается</small>
+          </dd>
+          <dd v-else class="entries-dd">
+            <span class="sr-only" data-testid="integration-schedule">{{ it.schedule_label }}</span>
+            <ul class="entries" data-testid="integration-schedules">
+              <li v-for="(e, n) in entries" :key="n" data-testid="integration-schedule-entry">
+                <b>{{ e.label || entryLabel(e) }}</b>
+                <span class="e-acts">{{ (e.actions || []).map(actionLabel).join(', ') }}</span>
+                <small v-if="it.enabled && e.next_run_at">следующий {{ formatDateTime(e.next_run_at) }}</small>
+              </li>
+            </ul>
+            <small v-if="!it.enabled">выключено — по расписанию не запускается</small>
           </dd>
         </div>
         <div>
           <dt>Проверено</dt>
           <dd><template v-if="it.verified_at">{{ formatRelative(it.verified_at) }}</template><span v-else class="muted">не проверено с текущими настройками</span></dd>
         </div>
-        <div v-if="it.last_error" class="err-fact">
+        <div v-if="error" class="err-fact">
           <dt>Последняя ошибка<template v-if="it.last_error_at"> · {{ formatRelative(it.last_error_at) }}</template></dt>
-          <dd class="err" :title="it.last_error" data-testid="integration-error">{{ shortError(it.last_error) }}</dd>
+          <dd class="err" :title="error" data-testid="integration-error">{{ shortError(error) }}</dd>
         </div>
       </dl>
 
@@ -171,7 +195,7 @@ async function remove() {
               {{ runStatus(runs[a.key]).label }}<template v-if="runs[a.key].message">: {{ runs[a.key].message }}</template>
             </small>
           </div>
-          <button type="button" class="btn btn-sm" :disabled="!!busy || it.running" :data-testid="`run-${a.key}`" @click="run(a)">
+          <button v-if="!readOnly" type="button" class="btn btn-sm run-btn" :disabled="!!busy || it.running" :data-testid="`run-${a.key}`" @click="run(a)">
             <AppIcon name="play" :size="13" />{{ busy === `run:${a.key}` ? 'Выполняется…' : 'Запустить' }}
           </button>
         </li>
@@ -180,11 +204,13 @@ async function remove() {
     </div>
 
     <footer class="ic-foot">
-      <button type="button" class="btn btn-sm" :disabled="!!busy" data-testid="integration-check" @click="runCheck"><AppIcon name="activity" :size="14" />{{ busy === 'check' ? 'Проверяю…' : 'Проверить' }}</button>
-      <button type="button" class="btn btn-sm" data-testid="integration-edit" @click="emit('edit', it)"><AppIcon name="settings" :size="14" />Настроить</button>
+      <template v-if="!readOnly">
+        <button type="button" class="btn btn-sm" :disabled="!!busy" data-testid="integration-check" @click="runCheck"><AppIcon name="activity" :size="14" />{{ busy === 'check' ? 'Проверяю…' : 'Проверить' }}</button>
+        <button type="button" class="btn btn-sm" data-testid="integration-edit" @click="emit('edit', it)"><AppIcon name="settings" :size="14" />Настроить</button>
+      </template>
       <button type="button" class="btn btn-sm btn-ghost" data-testid="integration-journal" @click="emit('journal', it)"><AppIcon name="history" :size="14" />Журнал запусков</button>
       <span class="spacer" />
-      <button type="button" class="btn btn-sm btn-ghost btn-icon btn-danger" :disabled="!!busy" :aria-label="`Удалить подключение ${quoted(it.name)}`" :title="`Удалить подключение ${quoted(it.name)}`" data-testid="integration-delete" @click="remove"><AppIcon name="trash" :size="14" /></button>
+      <button v-if="!readOnly" type="button" class="btn btn-sm btn-ghost btn-icon btn-danger" :disabled="!!busy" :aria-label="`Удалить подключение ${quoted(it.name)}`" :title="`Удалить подключение ${quoted(it.name)}`" data-testid="integration-delete" @click="remove"><AppIcon name="trash" :size="14" /></button>
     </footer>
   </article>
 </template>
@@ -207,7 +233,18 @@ async function remove() {
 .facts dt { font-size: var(--fs-xs); color: var(--muted); }
 .facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--fs-sm); }
 .facts small { flex-basis: 100%; font-size: var(--fs-xs); color: var(--muted); }
-.err-fact { grid-column: 1 / -1; }
+.err-fact, .wide-fact { grid-column: 1 / -1; }
+.entries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.entries li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; padding: 6px 10px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+.entries b { font-weight: 600; }
+.e-acts { color: var(--text-2); font-size: var(--fs-xs); }
+.entries small { flex-basis: auto; margin-left: auto; }
+.entries-dd > small { margin-top: 2px; }
+.interrupted { color: var(--text-2); }
+.ro-note { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-sm); line-height: 1.45; }
+.ro-note :deep(svg) { flex: 0 0 auto; margin-top: 2px; color: var(--muted); }
+.ro-note b { color: var(--text); font-weight: 620; }
+.run-btn { white-space: nowrap; flex: 0 0 auto; }
 .err { color: color-mix(in srgb, var(--light-red) 82%, var(--text)); overflow-wrap: anywhere; display: -webkit-box !important; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .muted { color: var(--muted); }
 .acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }

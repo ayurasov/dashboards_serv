@@ -8,7 +8,8 @@ import { useAuthStore } from '@/stores/auth'
  * администрирования (org.manage, users.manage, reports.manage, data.manage, integrations.manage);
  * inbox — «Входящие данные»: полномочие data.manage или право применять хотя бы один набор (это
  * знает сервер, см. auth.loadInboxAccess); public — без входа; guide — раздел руководства (якорь заголовка),
- * guideKind: 'admin' — раздел руководства администратора (ссылка «?» видна администратору);
+ * guideKind: 'admin' — раздел руководства администратора (ссылка «?» видна администратору и тем, у кого есть
+ * любое полномочие администрирования); adminGuide — руководство администратора (auth.canReadAdminGuide);
  * parent — раздел над страницей в «хлебных крошках» ({ label, to }).
  */
 const routes = [
@@ -49,21 +50,21 @@ const routes = [
   { path: '/settings/partnership-lights', name: 'partnership-lights', component: () => import('@/views/settings/PartnershipLightSettings.vue'), meta: { service: 'project_product', title: 'Светофор партнёрств', guide: 'настройка-светофора' } },
 
   // Администрирование
-  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { capability: 'users.manage', title: 'Пользователи' } },
-  { path: '/admin/access-profiles', name: 'admin-access-profiles', component: () => import('@/views/admin/AccessProfiles.vue'), meta: { capability: 'users.manage', title: 'Профили доступа' } },
-  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { capability: 'org.manage', title: 'Подразделения' } },
-  { path: '/admin/org-transfer', name: 'admin-org-transfer', component: () => import('@/views/admin/OrgTransfer.vue'), meta: { capability: 'org.manage', title: 'Импорт и экспорт' } },
-  { path: '/admin/indicators', name: 'admin-indicators', component: () => import('@/views/admin/AdminIndicators.vue'), meta: { capability: 'reports.manage', title: 'Показатели' } },
+  { path: '/admin/users', name: 'admin-users', component: () => import('@/views/admin/AdminUsers.vue'), meta: { capability: 'users.manage', title: 'Пользователи', guide: 'пользователи', guideKind: 'admin' } },
+  { path: '/admin/access-profiles', name: 'admin-access-profiles', component: () => import('@/views/admin/AccessProfiles.vue'), meta: { capability: 'users.manage', title: 'Профили доступа', guide: 'доступ-и-профили-доступа', guideKind: 'admin' } },
+  { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { capability: 'org.manage', title: 'Подразделения', guide: 'структура-компании-и-подразделения', guideKind: 'admin' } },
+  { path: '/admin/org-transfer', name: 'admin-org-transfer', component: () => import('@/views/admin/OrgTransfer.vue'), meta: { capability: 'org.manage', title: 'Импорт и экспорт', guide: 'импорт-и-экспорт', guideKind: 'admin' } },
+  { path: '/admin/indicators', name: 'admin-indicators', component: () => import('@/views/admin/AdminIndicators.vue'), meta: { capability: 'reports.manage', title: 'Показатели', guide: 'показатели-и-сквозной-отчёт', guideKind: 'admin' } },
   { path: '/admin/integrations', name: 'admin-integrations', component: () => import('@/views/admin/AdminIntegrations.vue'), meta: { capability: 'integrations.manage', title: 'Интеграции', guide: 'интеграции', guideKind: 'admin' } },
-  { path: '/admin/directory', name: 'admin-directory', component: () => import('@/views/admin/AdminDirectory.vue'), meta: { admin: true, title: 'Вход по домену' } },
-  { path: '/admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { admin: true, title: 'Журнал изменений' } },
-  { path: '/admin/palettes', name: 'admin-palettes', component: () => import('@/views/admin/AdminPalettes.vue'), meta: { admin: true, title: 'Палитры' } },
-  { path: '/admin/system', name: 'admin-system', component: () => import('@/views/admin/AdminSystem.vue'), meta: { admin: true, title: 'О системе' } },
+  { path: '/admin/directory', name: 'admin-directory', component: () => import('@/views/admin/AdminDirectory.vue'), meta: { admin: true, title: 'Вход по домену', guide: 'вход-по-домену-ldap', guideKind: 'admin' } },
+  { path: '/admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { admin: true, title: 'Журнал изменений', guide: 'журнал-изменений', guideKind: 'admin' } },
+  { path: '/admin/palettes', name: 'admin-palettes', component: () => import('@/views/admin/AdminPalettes.vue'), meta: { admin: true, title: 'Палитры', guide: 'палитры', guideKind: 'admin' } },
+  { path: '/admin/system', name: 'admin-system', component: () => import('@/views/admin/AdminSystem.vue'), meta: { admin: true, title: 'О системе', guide: 'о-системе', guideKind: 'admin' } },
 
   // Личное и справка
   { path: '/profile', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { title: 'Профиль', allowPasswordChange: true, guide: 'профиль-и-безопасность' } },
   { path: '/guide', name: 'guide', component: () => import('@/views/GuideView.vue'), meta: { title: 'Руководство пользователя', allowPasswordChange: true } },
-  { path: '/guide/admin', name: 'guide-admin', component: () => import('@/views/GuideView.vue'), meta: { admin: true, title: 'Руководство администратора', guideKind: 'admin' } },
+  { path: '/guide/admin', name: 'guide-admin', component: () => import('@/views/GuideView.vue'), meta: { adminGuide: true, title: 'Руководство администратора', guideKind: 'admin' } },
   { path: '/about', name: 'about', component: () => import('@/views/AboutView.vue'), meta: { title: 'О программе', allowPasswordChange: true } },
   { path: '/no-access', name: 'no-access', component: () => import('@/views/NoAccessView.vue'), meta: { title: 'Нет доступа' } },
 
@@ -110,6 +111,7 @@ router.beforeEach(async (to) => {
   if (!auth.isLoggedIn) return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} }
   if (auth.mustChangePassword && !to.meta.allowPasswordChange) return { name: 'profile', query: { password: 'required' } }
   if (to.meta.admin && !auth.isAdmin) return { name: 'no-access', query: { reason: 'admin' } }
+  if (to.meta.adminGuide && !auth.canReadAdminGuide) return { name: 'no-access', query: { reason: 'admin-guide' } }
   if (to.meta.capability && !auth.hasCapability(to.meta.capability)) return { name: 'no-access', query: { reason: 'capability', capability: to.meta.capability } }
   if (to.meta.inbox && !(await auth.loadInboxAccess())) return { name: 'no-access', query: { reason: 'inbox', page: to.meta.title } }
   const service = routeService(to)

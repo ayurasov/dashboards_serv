@@ -210,6 +210,13 @@ class Pages:
 @register
 class ConfluenceConnector(Connector):
     kind = "confluence"
+    order = 40
+    # Публикует полный сквозной отчёт (как у администратора — финансовые и персональные данные всей компании):
+    # пользователь с integrations.manage без роли администратора не должен выносить его наружу
+    admin_only = True
+    admin_only_reason = "публикует полный сквозной отчёт"
+    counter_labels = {"version": "версия страницы", "created": "страница создана", "units": "подразделений",
+                      "indicators": "показателей", "violations": "нарушений полноты"}
     title = "Confluence"
     description = ("Публикация сквозного отчёта страницей Confluence по расписанию: одна страница, которая "
                    "обновляется, или новая страница каждую неделю; статусы — макросами Confluence. Публикуется "

@@ -14,8 +14,11 @@
 - секреты не выходят в тексты ошибок: значения секретов подключения (secrets), пароль Basic, токен из
   Authorization, логин и пароль в адресе (userinfo) и сегменты пути, равные секрету, заменяются на «…»
   во всех IntegrationError клиента (scrub — и для журнала запуска в runner.py);
-- прокси — из HTTPS_PROXY / HTTP_PROXY окружения сервера (requests берёт их сам); «не проверять
-  сертификат» — только явным параметром verify=False;
+- прокси — из HTTPS_PROXY / HTTP_PROXY окружения сервера (requests берёт их сам) с учётом NO_PROXY (no_proxy):
+  узлы через запятую идут напрямую — «jira.company.ru» и «.company.ru» / «*.company.ru» (домен и поддомены),
+  «10.0.0.0/8», «узел:порт» и «IP:порт», «*» — все (bypass_proxy: requests сам не понимает «IP:порт» и «*.домен»);
+  ошибка соединения через прокси называет его (environ_proxy) — видно, что узел стоит добавить в NO_PROXY;
+  IMAP (mailbox.py) прокси HTTP не использует; «не проверять сертификат» — только явным параметром verify=False;
 - ошибки типизированы (IntegrationError.code) и с двумя текстами: подробный — администратору при
   проверке подключения, краткий — остальным («— сообщите администратору»); из тела ответа
   показываются только поля errorMessages/errors/message/error/detail (до 300 символов);
@@ -23,6 +26,7 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import json as jsonlib
 import logging
 import os
@@ -186,6 +190,67 @@ def host_allowed(host: str, allowed: list[str]) -> bool:
                               for h in allowed)
 
 
+# Явно «без прокси» для requests: ключи со значением None убирают прокси окружения из запроса
+DIRECT = {"http": None, "https": None, "all": None}
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def no_proxy_entries() -> list[str]:
+    raw = os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or ""
+    return [e.strip().lower() for e in re.split(r"[,\s]+", raw) if e.strip()]
+
+
+def bypass_proxy(url: str) -> bool:
+    """Узел адреса попадает в NO_PROXY: «*» — все; «10.0.0.0/8» — сеть; «узел» — он и поддомены; «.домен» и
+    «*.домен» — домен и поддомены; «узел:порт» и «IP:порт» — только этот порт; «[::1]» — адрес IPv6."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host:
+        return False
+    try:
+        port = parts.port or DEFAULT_PORTS.get(parts.scheme.lower())
+    except ValueError:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    for entry in no_proxy_entries():
+        if entry == "*":
+            return True
+        try:
+            network = ipaddress.ip_network(entry.strip("[]"), strict=False)
+        except ValueError:
+            network = None
+        if network is not None:
+            if address is not None and address.version == network.version and address in network:
+                return True
+            continue
+        name, entry_port = entry, None
+        match = re.match(r"^(\[[^\]]+\]|[^:]+):(\d+)$", entry)
+        if match:
+            name, entry_port = match.group(1), int(match.group(2))
+        name = name.strip("[]").removeprefix("*.").lstrip(".")
+        if not name or (entry_port is not None and entry_port != port):
+            continue
+        if host == name or (address is None and host.endswith(f".{name}")):
+            return True
+    return False
+
+
+def environ_proxy(url: str) -> str:
+    """Прокси, через который уйдёт запрос на url (HTTPS_PROXY / HTTP_PROXY / ALL_PROXY окружения) с учётом NO_PROXY;
+    пусто — напрямую. Адрес прокси — без логина и пароля (для текстов ошибок)."""
+    if bypass_proxy(url):
+        return ""
+    proxies = requests.utils.get_environ_proxies(url)  # пусто, если узел попадает в NO_PROXY по правилам requests
+    proxy = requests.utils.select_proxy(url, proxies) if proxies else None
+    if not proxy:
+        return ""
+    parts = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    return f"{parts.scheme}://{parts.hostname or ''}" + (f":{parts.port}" if parts.port else "")
+
+
 def check_base_url(url: str | None, *, kind: str | None = None, title: str = "Адрес") -> str:
     """Адрес подключения: http(s)://узел[:порт][/путь] без «/» в конце; ошибка bad_url или host_not_allowed."""
     text = (url or "").strip().rstrip("/")
@@ -347,6 +412,8 @@ class HttpClient:
         started = time.monotonic()
         self.calls += 1
         try:
+            if bypass_proxy(url):
+                kwargs["proxies"] = dict(DIRECT)
             raw = self.session.request(method, url, timeout=self.timeout, allow_redirects=False, stream=True,
                                        **{k: v for k, v in kwargs.items() if v is not None})
         except requests.exceptions.SSLError as exc:
@@ -354,14 +421,15 @@ class HttpClient:
                                    f"самоподписанный или корпоративный сертификат, включите «Не проверять "
                                    f"сертификат» ({exc})", f"Ошибка TLS-сертификата «{title}»") from None
         except requests.exceptions.ConnectTimeout:
-            raise self.fail("connect_timeout", f"Превышено время ожидания подключения к {self.base_url}",
-                            f"«{title}» не отвечает") from None
+            raise self.fail("connect_timeout", f"Превышено время ожидания подключения к {self.base_url}"
+                                               f"{self._via_proxy(url)}", f"«{title}» не отвечает") from None
         except requests.exceptions.ReadTimeout:
             raise self.fail("read_timeout", f"{self.base_url} не ответил за {self.timeout[1]:.0f} с",
                             f"«{title}» не ответила вовремя — попробуйте ещё раз") from None
         except requests.exceptions.ConnectionError as exc:
-            raise self.fail("connect", f"Не удалось подключиться к {self.base_url}: проверьте адрес и доступность "
-                                       f"сети ({exc})", f"Не удалось подключиться к «{title}»") from None
+            raise self.fail("connect", f"Не удалось подключиться к {self.base_url}{self._via_proxy(url)}: проверьте "
+                                       f"адрес и доступность сети ({exc})",
+                            f"Не удалось подключиться к «{title}»") from None
         except requests.exceptions.RequestException as exc:  # pragma: no cover - прочие ошибки requests
             raise self.fail("connect", f"Ошибка запроса к {self.base_url}: {exc}",
                             f"Ошибка связи с «{title}»") from None
@@ -395,6 +463,12 @@ class HttpClient:
         finally:
             raw.close()
             self.elapsed += time.monotonic() - started
+
+    @staticmethod
+    def _via_proxy(url: str) -> str:
+        proxy = environ_proxy(url)
+        return (f" через прокси {proxy} (HTTPS_PROXY / HTTP_PROXY; если узел доступен напрямую, добавьте его в "
+                f"NO_PROXY)") if proxy else ""
 
     def _too_large(self, url: str) -> IntegrationError:
         mb = self.max_bytes // (1024 * 1024)

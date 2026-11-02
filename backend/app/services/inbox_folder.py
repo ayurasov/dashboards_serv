@@ -1,7 +1,7 @@
 """Папка «Входящие» на сервере (INBOX_DIR, в Docker — том /data/inbox), ADR-0011.
 
 Устройство папки:
-    <INBOX_DIR>/                 корень: набор распознаётся по имени и содержимому файла
+    <INBOX_DIR>/                 корень: набор распознаётся по содержимому файла (имя по шаблону — подсказка)
     <INBOX_DIR>/<набор>/         hr-months, hr-events, tp-weekly, naumen, partnerships, indicators,
                                  structure, employees — набор задан подпапкой
     <INBOX_DIR>/processed/ГГГГ-ММ/  принятые файлы (ожидают подтверждения или применены)
@@ -92,7 +92,10 @@ def status() -> dict:
            "settle_seconds": settings.inbox_settle_seconds, "max_mb": settings.inbox_max_mb,
            "retention_days": settings.inbox_retention_days, "waiting_files": 0,
            "folders": [{"folder": d.key, "dataset": d.key, "label": d.label, "patterns": list(d.patterns)}
-                       for d in datasets.all_datasets()]}
+                       for d in datasets.all_datasets()],
+           # Распознавание файла в корне (inbox_datasets.detect): оценка по содержимому 0–100, совпадение имени с
+           # шаблоном добавляет name_bonus; набор — лучший с оценкой не меньше threshold (одного имени мало)
+           "detect": {"threshold": datasets.DETECT_THRESHOLD, "name_bonus": datasets.PATTERN_BONUS}}
     if root is not None and root.is_dir():
         out["exists"] = True
         out["writable"] = os.access(root, os.W_OK | os.X_OK)

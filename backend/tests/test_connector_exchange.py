@@ -25,6 +25,7 @@ from sqlalchemy import func, select, update
 from app.integrations.connectors.exchange import sender_allowed, senders
 from app.integrations.connectors.mailbox import mutf7
 from app.models import InboxItem, InboxRule, Integration
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer
 from tests.test_inbox import csv_bytes, tp_file
 
@@ -288,7 +289,7 @@ def _create(admin, body) -> dict:
 def _run(admin, item) -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": "fetch"})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "exchange")
 
 
 def _items(db, integration_id) -> dict[str, InboxItem]:

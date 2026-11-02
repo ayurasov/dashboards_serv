@@ -46,7 +46,8 @@ export const ADMIN_NAV = [
 
 export const HELP_NAV = [
   { to: '/guide', label: 'Руководство', icon: 'book' },
-  { to: '/guide/admin', label: 'Руководство администратора', icon: 'shield', admin: true },
+  // Администратору и тем, у кого есть любое полномочие администрирования (auth.canReadAdminGuide)
+  { to: '/guide/admin', label: 'Руководство администратора', icon: 'shield', adminGuide: true },
   { to: '/about', label: 'О программе', icon: 'info' },
 ]
 

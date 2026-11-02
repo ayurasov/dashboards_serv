@@ -531,8 +531,8 @@ class Indicators(Dataset):
 class Structure(Dataset):
     key = "structure"
     label = "Структура компании"
-    description = "Файл структуры dashboards.org-structure (JSON, выгрузка «Структура → Перенос»); подразделения " \
-                  "сопоставляются по пути, отсутствующие в файле не удаляются"
+    description = "Файл структуры dashboards.org-structure (JSON, выгрузка в разделе «Импорт и экспорт»); " \
+                  "подразделения сопоставляются по пути, отсутствующие в файле не удаляются"
     formats = "JSON"
     capability = "org.manage"
     apply_level = None
@@ -567,8 +567,8 @@ class Structure(Dataset):
 class Employees(Dataset):
     key = "employees"
     label = "Сотрудники"
-    description = "Сотрудники: Excel или CSV со столбцом Email (как выгрузка «Структура → Перенос»), или JSON " \
-                  "dashboards.employees; сопоставление по email"
+    description = "Сотрудники: Excel или CSV со столбцом Email (как выгрузка в разделе «Импорт и экспорт»), или " \
+                  "JSON dashboards.employees; сопоставление по email"
     formats = "Excel (.xlsx), CSV, JSON"
     capability = "org.manage"
     apply_level = None

@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 
 from app.models import Department, InboxItem, InboxRule, Integration, User
 from app.services import inbox
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer, Request
 from tests.test_inbox import csv_bytes, tp_file
 
@@ -261,7 +262,7 @@ def _create(admin, fake, **config) -> dict:
 def _run(admin, item, action) -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": action})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "podelu", unlabelled=("structure_item",))
 
 
 def _rules(db, *datasets):
@@ -289,6 +290,10 @@ def test_kind_fields_and_secret_binding_fields(admin):
         "форма предупреждает: смена любого из адресов требует ввести пароль заново"
     assert [a["key"] for a in meta["actions"]] == ["sync", "pull"]
     assert [a["label"] for a in meta["actions"]] == ["Синхронизировать структуру", "Забрать данные из задач"]
+    from app.services import inbox_datasets
+
+    labels = [inbox_datasets.get(k).label for k in ("structure", "employees")]
+    assert f"наборы «{labels[0]}» и «{labels[1]}»" in meta["actions"][0]["description"], "подписи наборов — как есть"
 
 
 def test_password_is_bound_to_both_addresses(admin, fake):

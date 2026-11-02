@@ -16,6 +16,7 @@ from app.integrations.connectors import bitrix24
 from app.integrations.connectors.bitrix24 import Bitrix24Connector
 from app.models import Department, Indicator, IndicatorValue, User
 from app.services import reports
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer
 
 CODE = "abc123secret0042"
@@ -183,7 +184,7 @@ def create(admin, fake, name="Bitrix24", **config) -> dict:
 def run(admin, item, action="sales") -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": action})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "bitrix24")
 
 
 def values(db, key: str) -> dict[tuple[str, str], float]:
@@ -389,11 +390,19 @@ def test_preview_and_currencies(admin, fake, db, people):
     item = create(admin, fake, months=1)
     data = run(admin, item, "preview")
     assert data["status"] == "ok" and data["message"].startswith("План без записи")
-    assert "при записи будут созданы показатели" in data["message"]
+    # Показателей crm.* ещё нет: их значения посчитаны и названы в сообщении (тот же _metrics, что у Jira)
+    pending = data["summary"]["details"]["values"]
+    keys = sorted({v["indicator"] for v in pending})
+    assert keys and all(v["pending"] for v in pending) and data["summary"]["values_pending"] == len(pending)
+    for key in keys:
+        count = sum(1 for v in pending if v["indicator"] == key)
+        assert f"показатель «{key}» будет создан при запуске: значений {count}" in data["message"]
     assert "сложены без пересчёта" in data["message"] and data["summary"]["details"]["currencies"] == \
         {"RUB": 6, "USD": 1}
     assert db.scalar(select(Indicator).where(Indicator.key.like("crm.%"))) is None
     assert db.scalar(select(IndicatorValue).join(Indicator).where(Indicator.key.like("crm.%"))) is None
+    written = run(admin, item)
+    assert written["summary"]["created"] == len(pending), "запуск записывает столько, сколько обещал план"
 
 
 def test_existing_computed_indicator_is_refused(admin, fake, db, people):

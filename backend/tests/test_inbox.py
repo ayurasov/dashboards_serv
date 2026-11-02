@@ -563,6 +563,10 @@ def test_api_rules(admin, login):
     datasets_out = admin.get("/api/inbox/datasets").json()
     naumen = next(d for d in datasets_out["datasets"] if d["key"] == "naumen")
     assert naumen["rules"] == {"folder": True, "api": False, "integration": False}
+    described = {d["key"]: d["description"] for d in datasets_out["datasets"]}
+    assert "«Импорт и экспорт»" in described["structure"] and "«Импорт и экспорт»" in described["employees"], \
+        "раздел называется так же, как в меню"
+    assert not any("Перенос»" in text for text in described.values())
     assert login("hr_head").put("/api/inbox/rules", json={"rules": []}).status_code == 403
 
 

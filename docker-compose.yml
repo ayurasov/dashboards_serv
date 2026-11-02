@@ -57,6 +57,10 @@ services:
       INBOX_MAX_MB: ${INBOX_MAX_MB:-20}
       INBOX_RETENTION_DAYS: ${INBOX_RETENTION_DAYS:-90}
       INBOUND_RATE_LIMIT: ${INBOUND_RATE_LIMIT:-120}
+      # Прокси для подключений по HTTP(S) (Jira, Confluence, «По Делу», «Пульс», Bitrix24, 1С, EWS и Microsoft Graph);
+      # пусто — без прокси. NO_PROXY — узлы без прокси через запятую («.company.ru», «10.0.0.0/8», «localhost»).
+      # IMAP почтового ящика ходит напрямую — прокси HTTP к нему не применяется
+      HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       # Разрешённые узлы подключений: «jira.company.ru» или «.company.ru» (домен и поддомены); пусто — любые

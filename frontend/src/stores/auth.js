@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, setCsrfToken } from '@/api/client'
-import { hasLevel, LEVEL_LABELS, scopeFor, userAccess } from '@/domain/access'
+import { ADMIN_CAPABILITIES, hasLevel, LEVEL_LABELS, scopeFor, userAccess } from '@/domain/access'
 
 export { LEVEL_LABELS }
 
@@ -57,6 +57,12 @@ export const useAuthStore = defineStore('auth', {
     },
     /** Ожидающие элементы, которые пользователь может применить или отклонить. */
     inboxPending: (s) => Number(s.user?.inbox?.pending) || 0,
+    /**
+     * Руководство администратора: администратору и тем, у кого есть любое полномочие администрирования
+     * (org.manage, users.manage, reports.manage, data.manage, integrations.manage) — они открывают страницы
+     * администрирования, и «?» на этих страницах ведёт в него.
+     */
+    canReadAdminGuide: (s) => s.user?.role === 'admin' || ADMIN_CAPABILITIES.some((c) => s.user?.capabilities?.includes(c)),
   },
   actions: {
     setUser(user) {

@@ -168,3 +168,17 @@ def drop_pg_database(admin_engine, name: str, attempts: int = 20) -> None:
             if attempt == attempts - 1:
                 raise
             time.sleep(0.5)
+
+
+def assert_counters_labelled(run: dict, kind: str, *, unlabelled: tuple[str, ...] = ()) -> dict:
+    """Каждый числовой счётчик запуска подписан по-русски (Connector.counter_labels и общие подписи каркаса) — журнал
+    запусков не показывает английских ключей; unlabelled — служебные числа (номер элемента), которые не показываются."""
+    from app.integrations import base
+
+    labels = base.get(kind).all_counter_labels()
+    numbers = {k for k, v in (run.get("summary") or {}).items()
+               if isinstance(v, int | float) and not isinstance(v, bool)}
+    missing = sorted(numbers - set(labels) - set(unlabelled))
+    assert not missing, f"{kind}: счётчики журнала без подписи: {missing}"
+    assert all(label and label == label.strip() and not label.isascii() for label in labels.values()), labels
+    return run

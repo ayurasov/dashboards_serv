@@ -102,7 +102,7 @@ const emptyText = computed(() => {
         <SegmentedControl v-model="filter" :options="PLAN_FILTERS" size="sm" />
       </div>
       <div v-if="visible.length" class="table-wrap bordered scroll-thin">
-        <table class="table table-compact rows">
+        <table class="table table-compact rows" :class="{ 'with-values': hasValues }">
           <thead>
             <tr>
               <th class="num">Строка</th>
@@ -179,14 +179,18 @@ const emptyText = computed(() => {
 .list-inline li { padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface-3); font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
 .list-inline li small { color: var(--muted); }
 .list-inline li.h-pending small { color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
-.bordered { border: 1px solid var(--border); border-radius: 12px; max-height: 420px; }
+/* Таблица плана прокручивается внутри своей рамки (и по горизонтали): колонки не сжимаются ниже читаемой ширины */
+.bordered { border: 1px solid var(--border); border-radius: 12px; max-height: 420px; overflow: auto; max-width: 100%; }
+.rows { min-width: 520px; }
+.rows.with-values { min-width: 680px; }
 .rows td { vertical-align: top; font-size: var(--fs-sm); }
-.line { width: 64px; }
+.line { width: 64px; min-width: 56px; }
+.what { min-width: 200px; }
 .what b { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .what small { display: block; color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
-.val { white-space: nowrap; }
+.val { white-space: nowrap; min-width: 96px; }
 .lbl { display: none; color: var(--muted); }
-.act { min-width: 180px; }
+.act { min-width: 210px; }
 .badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
 tr.err td { background: color-mix(in srgb, var(--light-red) 5%, transparent); }
 tr.clear td.val:not(.muted) { color: var(--text-2); font-style: italic; }
@@ -205,6 +209,8 @@ tr.clear td.val:not(.muted) { color: var(--text-2); font-style: italic; }
 .more { margin-top: 8px; }
 .muted { color: var(--muted); }
 @media (max-width: 720px) {
+  .rows, .rows.with-values { min-width: 0; }
+  .what, .val, .act, .line { min-width: 0; }
   .rows thead { display: none; }
   .rows tr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .rows td { padding: 0; border: 0; background: transparent !important; }

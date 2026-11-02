@@ -237,6 +237,14 @@ def ensure_indicators(ctx: RunContext, notes: list[str]) -> tuple[dict[str, Indi
 @register
 class PulsConnector(Connector):
     kind = "puls"
+    order = 20
+    counter_labels = {
+        "projects": "проектов", "mapped": "сопоставлено с подразделениями", "unmapped": "без подразделения",
+        "units": "подразделений", "projects_green": "зелёных", "projects_yellow": "жёлтых",
+        "projects_red": "красных", "projects_gray": "без задач", "values_create": "значений: новых",
+        "values_update": "значений: изменено", "values_unchanged": "значений без изменений",
+        "values_cleared": "значений очищено", "values_errors": "ошибок в значениях",
+    }
     title = TITLE
     description = ("Проекты «Пульса проекта» → показатели сквозного отчёта по подразделениям (сопоставление "
                    "«направление → подразделение»): проекты в работе, просроченные, заблокированные задачи, средний "

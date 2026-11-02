@@ -8,7 +8,7 @@ import { inboxApi } from '@/api/inbox'
 import { useAsync } from '@/composables/useAsync'
 import { useAuthStore } from '@/stores/auth'
 import { toastOk } from '@/composables/useToast'
-import { folderState, folderTree, scanText, workerState } from '@/domain/inbox'
+import { detectRules, folderState, folderTree, scanText, workerState } from '@/domain/inbox'
 import { curlExample } from '@/domain/integrations'
 import { formatDateTime, formatRelative } from '@/utils/format'
 
@@ -30,6 +30,8 @@ const lastScan = computed(() => folder.value?.last_scan || null)
 const datasets = computed(() => props.meta?.datasets || [])
 const subfolders = computed(() => (folder.value?.folders || []).map((f) => ({ ...f, patterns: f.patterns || [] })))
 const tree = computed(() => folderTree(folder.value, datasets.value))
+// Распознавание в корне: по содержимому, имя по шаблону только добавляет очки (inbox_datasets.detect на сервере)
+const detect = computed(() => detectRules(folder.value?.detect))
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
 const curl = computed(() => curlExample({ origin, dataset: 'tp-weekly', filename: 'Итоговый отчёт ТП.xlsx' }))
 
@@ -105,15 +107,15 @@ async function scanNow() {
       </section>
 
       <section class="card">
-        <header class="card-head"><h3>Подпапки наборов</h3><span class="hint">Файл в подпапке — набор известен; в корне — распознаётся по имени и содержимому</span></header>
+        <header class="card-head"><h3>Подпапки наборов</h3><span class="hint" data-testid="folder-detect-hint">{{ detect.hint }}</span></header>
         <div class="card-body flush table-wrap">
           <table class="table table-compact subs">
-            <thead><tr><th>Подпапка</th><th>Набор</th><th>Распознаётся в корне по имени</th></tr></thead>
+            <thead><tr><th>Подпапка</th><th>Набор</th><th :title="detect.hint">{{ detect.column }}</th></tr></thead>
             <tbody>
               <tr v-for="f in subfolders" :key="f.folder">
                 <td class="mono nowrap"><b>{{ f.folder }}/</b></td>
                 <td>{{ f.label }}</td>
-                <td><span v-for="p in f.patterns" :key="p" class="pat">{{ p }}</span><span v-if="!f.patterns.length" class="muted">по содержимому</span></td>
+                <td><span class="lbl">{{ detect.column }}: </span><span v-for="p in f.patterns" :key="p" class="pat">{{ p }}</span><span v-if="!f.patterns.length" class="muted">нет — только по содержимому</span></td>
               </tr>
             </tbody>
           </table>
@@ -176,6 +178,7 @@ async function scanNow() {
 .w-red .w-pill { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--on-red); }
 .flush { padding: 8px 0 0; }
 .subs td { vertical-align: top; font-size: var(--fs-sm); }
+.lbl { display: none; font-size: var(--fs-xs); color: var(--muted); }
 .pat { display: inline-block; margin: 0 4px 3px 0; padding: 0 6px; border-radius: 5px; background: var(--surface-3); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }
 .help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; }
 .help h4 { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 650; }
@@ -189,6 +192,7 @@ async function scanNow() {
   .subs tr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
   .subs td { display: block; padding: 0; border: 0; }
   .subs td:last-child { grid-column: 1 / -1; }
+  .subs .lbl { display: inline; }
   .st-head .btn { width: 100%; }
   .st-head { padding: 16px; }
   .st-body { padding: 14px 16px 16px; }

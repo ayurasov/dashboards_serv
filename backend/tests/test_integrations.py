@@ -252,6 +252,99 @@ def test_permissions_and_capability(admin, demo, fake, login, db):
     assert lead.get("/api/integrations/keys").status_code == 200
 
 
+class SecretReportConnector(DemoConnector):
+    """Как Confluence: отдаёт наружу данные, которых не видит пользователь с integrations.manage."""
+
+    kind = "demo_admin"
+    title = "Демо: только администратор"
+    admin_only = True
+    admin_only_reason = "публикует полный сквозной отчёт"
+
+
+@pytest.fixture()
+def admin_only_kind():
+    base.register(SecretReportConnector)
+    yield SecretReportConnector
+    base.unregister("demo_admin")
+
+
+def test_admin_only_kind_is_read_only_for_integrations_manage(admin, demo, admin_only_kind, fake, login, db):
+    tp = db.scalar(select(User).where(User.username == "tp_lead"))
+    admin.patch(f"/api/users/{tp.id}", json={"capabilities": ["integrations.manage"]})
+    lead = login("tp_lead")
+    meta = {k["kind"]: k for k in lead.get("/api/integrations/kinds").json()}
+    assert meta["demo_admin"]["admin_only"] and \
+        meta["demo_admin"]["admin_only_note"] == "Только администратор: публикует полный сквозной отчёт"
+    assert not meta["demo"]["admin_only"] and meta["demo"]["admin_only_note"] == ""
+    body = {"kind": "demo_admin", "name": "Отчёт", "config": {"base_url": fake.url, "login": "svc"},
+            "secrets": {"token": TOKEN}}
+    denied = lead.post("/api/integrations", json=body)
+    assert denied.status_code == 403 and denied.json()["code"] == "admin_only"
+    assert "Только администратор: публикует полный сквозной отчёт" in denied.json()["detail"]
+    assert lead.post("/api/integrations/check", json={k: body[k] for k in ("kind", "config", "secrets")}) \
+        .status_code == 403
+    item = admin.post("/api/integrations", json=body).json()
+    assert item["can_manage"] is True, "администратору — всё"
+    seen = lead.get(f"/api/integrations/{item['id']}").json()
+    assert seen["can_manage"] is False and seen["connector"]["admin_only"], "остальным — только для чтения"
+    assert {i["kind"]: i["can_manage"] for i in lead.get("/api/integrations").json()} == {"demo_admin": False}
+    path = f"/api/integrations/{item['id']}"
+    for method, url, payload in (("PATCH", path, {"name": "Другое"}), ("PATCH", path, {"enabled": True}),
+                                 ("PATCH", path, {"schedule": [{"mode": "interval", "minutes": 60}]}),
+                                 ("POST", f"{path}/check", None), ("POST", f"{path}/run", {"action": "pull"}),
+                                 ("DELETE", path, None)):
+        response = lead.request(method, url, json=payload)
+        assert response.status_code == 403 and response.json()["code"] == "admin_only", (method, url)
+    assert lead.get(f"{path}/runs").status_code == 200, "журнал запусков виден"
+    assert admin.post(f"{path}/run", json={"action": "pull"}).json()["status"] == "ok"
+    assert admin.delete(path).status_code == 200
+    # Обычный вид — без ограничения
+    own = lead.post("/api/integrations", json={**body, "kind": "demo", "name": "Своё"})
+    assert own.status_code == 201 and own.json()["can_manage"] is True
+
+
+def test_kinds_order_and_counter_labels(admin):
+    kinds = admin.get("/api/integrations/kinds").json()
+    assert [k["kind"] for k in kinds] == ["podelu", "puls", "jira", "confluence", "bitrix24", "exchange", "onec",
+                                          "folder"], "порядок для человека, а не по ключу"
+    by_kind = {k["kind"]: k for k in kinds}
+    assert by_kind["confluence"]["admin_only"] and not by_kind["jira"]["admin_only"]
+    for kind in kinds:
+        labels = kind["counter_labels"]
+        assert labels["values"] == "значений" and labels["status_applied"], "общие подписи каркаса"
+    assert by_kind["podelu"]["counter_labels"]["tasks"] == "задач в списке"
+    assert by_kind["jira"]["counter_labels"]["overspent"] == "задач: затрачено больше оценки"
+    assert by_kind["confluence"]["counter_labels"]["created"] == "страница создана", "свои подписи сильнее общих"
+    imap = next(f for f in by_kind["exchange"]["fields"] if f["key"] == "imap_host")
+    assert "прокси" in imap["hint"] and "напрямую" in imap["hint"], "IMAP не ходит через прокси HTTP"
+
+
+def test_cards_follow_kind_order(admin, db):
+    for kind, name in (("folder", "А-папка"), ("jira", "Я-джира"), ("jira", "Б-джира"), ("podelu", "Ю-по-делу")):
+        db.add(Integration(kind=kind, name=name, enabled=False, config={}, schedule=[], state={}, last_error=""))
+    db.commit()
+    assert [i["name"] for i in admin.get("/api/integrations").json()] == ["Ю-по-делу", "Б-джира", "Я-джира", "А-папка"]
+
+
+def test_pending_values_of_missing_indicators(db, demo):
+    from app.integrations.connectors import _metrics as metrics
+
+    units = metrics.Units.load(db)
+    unit = next(iter(units.snap.units))
+    month = metrics.window(1)[0]
+    targets = metrics.Targets(pending=["a.one", "a.none"])
+    cells = [metrics.Cell("a.one", unit, month, 3.0), metrics.Cell("a.one", unit, metrics.window(2)[0], 1.5)]
+    preview = metrics.Pending.of(cells, targets, units, preview=True)
+    assert preview.parts == ["показатель «a.one» будет создан при запуске: значений 2",
+                             "показатель «a.none»: значений нет — при запуске он не будет создан"]
+    assert preview.counters == {"values_pending": 2} and len(preview.sample) == 2
+    assert {r["value"] for r in preview.sample} == {"3", "1.5"} and all(r["action"] == "create" for r in preview.sample)
+    assert len(metrics.Pending.of(cells, targets, units, preview=True, room=1).sample) == 1
+    after = metrics.Pending.of([], metrics.Targets(pending=["a.none"]), units, preview=False)
+    assert after.parts == ["не созданы показатели без значений: «a.none»"] and after.counters == {}
+    assert metrics.Pending.of(cells, metrics.Targets(), units, preview=True).parts == []
+
+
 # ---------------------------------------------------------------- запуск и журнал
 
 def test_run_puts_file_into_inbox_and_journal(admin, demo, fake, db):
@@ -304,6 +397,70 @@ def test_run_errors(admin, demo, fake, db):
     assert admin.post(f"/api/integrations/{item['id']}/run", json={"action": "pull"}).json()["status"] == "ok"
 
 
+def test_stale_running_is_shown_interrupted_and_reclaimed(admin, demo, fake, db):
+    """Запуск, оставшийся «выполняется» после сбоя: до RUNNING_TIMEOUT — идёт; старше — «Запуск прерван», запустить
+    снова можно, а новый запуск или планировщик отмечают запись журнала прерванной."""
+    item = _create(admin, fake)
+    started = utcnow() - timedelta(minutes=30)
+    db.add(IntegrationRun(integration_id=item["id"], action="pull", trigger="schedule", status="running",
+                          started_at=started, summary={}, message="", error="", username="system"))
+    db.execute(update(Integration).where(Integration.id == item["id"]).values(running_since=started))
+    db.commit()
+    fresh = admin.get(f"/api/integrations/{item['id']}").json()
+    assert fresh["running"] and fresh["last_run"]["status"] == "running"
+    assert admin.post(f"/api/integrations/{item['id']}/run", json={"action": "pull"}).status_code == 409
+
+    stale = utcnow() - runner.RUNNING_TIMEOUT - timedelta(minutes=1)
+    db.execute(update(IntegrationRun).values(started_at=stale))
+    db.execute(update(Integration).where(Integration.id == item["id"]).values(running_since=stale))
+    db.commit()
+    data = admin.get(f"/api/integrations/{item['id']}").json()
+    assert data["running"] is False and data["running_since"] is None
+    assert data["last_run"]["status"] == "interrupted" and data["last_run"]["status_label"] == "Запуск прерван"
+    journal = admin.get(f"/api/integrations/{item['id']}/runs").json()
+    assert journal[0]["status"] == "interrupted" and "Запуск прерван" in journal[0]["message"]
+    rerun = admin.post(f"/api/integrations/{item['id']}/run", json={"action": "pull"})
+    assert rerun.status_code == 200 and rerun.json()["status"] == "ok", "прерванный не мешает новому запуску"
+    db.expire_all()
+    statuses = [r.status for r in db.scalars(select(IntegrationRun).order_by(IntegrationRun.id))]
+    assert statuses == ["interrupted", "ok"], "новый запуск отметил прерванный в журнале"
+
+
+def test_worker_reclaims_stale_runs(db, demo, engine):
+    from app.worker import Worker
+
+    stale = utcnow() - runner.RUNNING_TIMEOUT - timedelta(minutes=5)
+    row = Integration(kind="demo", name="Демо", enabled=True, config={"base_url": "http://127.0.0.1:9", "login": "x"},
+                      schedule=[], state={}, last_error="", running_since=stale)
+    db.add(row)
+    db.flush()
+    db.add_all([IntegrationRun(integration_id=row.id, action="pull", trigger="manual", status="running",
+                               started_at=stale, summary={}, message="", error="", username="admin"),
+                IntegrationRun(integration_id=row.id, action="pull", trigger="manual", status="running",
+                               started_at=utcnow(), summary={}, message="", error="", username="admin")])
+    db.commit()
+    out = Worker(tick_seconds=1).tick()
+    assert out["interrupted"] == 1
+    db.expire_all()
+    assert db.get(Integration, row.id).running_since is None
+    assert [r.status for r in db.scalars(select(IntegrationRun).order_by(IntegrationRun.id))] == \
+        ["interrupted", "running"], "идущий меньше RUNNING_TIMEOUT не трогается"
+
+
+def test_current_error_is_hidden_after_later_success(admin, demo, fake, db):
+    item = _create(admin, fake)
+    failed = admin.post(f"/api/integrations/{item['id']}/run", json={"action": "manual"}).json()
+    assert failed["status"] == "error"
+    data = admin.get(f"/api/integrations/{item['id']}").json()
+    assert data["current_error"] == "Нет связи с демо-системой" == data["last_error"]
+    assert admin.post(f"/api/integrations/{item['id']}/run", json={"action": "pull"}).json()["status"] == "ok"
+    data = admin.get(f"/api/integrations/{item['id']}").json()
+    assert data["current_error"] == "" and data["last_error"] == "Нет связи с демо-системой", \
+        "старая ошибка — только в журнале и last_error, карточка её не показывает"
+    _enable(admin, item["id"])
+    assert admin.get(f"/api/integrations/{item['id']}").json()["health"] == "ok"
+
+
 def test_unexpected_exception_is_contained(admin, demo, fake, monkeypatch):
     item = _create(admin, fake)
     monkeypatch.setattr(DemoConnector, "run", lambda self, action, ctx: 1 / 0)
@@ -344,19 +501,34 @@ def test_folder_connector(admin, tmp_path, monkeypatch):
 # ---------------------------------------------------------------- расписание
 
 def test_schedule_normalization(demo):
-    assert runner.normalize_schedule(DemoConnector, None) == {}
+    assert runner.normalize_schedule(DemoConnector, None) == []
+    assert runner.normalize_schedule(DemoConnector, {"mode": "off"}) == []
+    assert runner.normalize_schedule(DemoConnector, []) == []
+    # Прежний вид — один объект — становится одной записью
     assert runner.normalize_schedule(DemoConnector, {"mode": "interval", "minutes": 30}) == \
-        {"mode": "interval", "actions": ["pull"], "minutes": 30}
-    daily = runner.normalize_schedule(DemoConnector, {"mode": "daily", "time": "06:30", "weekdays": [5, 1],
-                                                      "actions": ["structure"]})
-    assert daily == {"mode": "daily", "actions": ["structure"], "time": "06:30", "weekdays": [1, 5]}
+        [{"mode": "interval", "actions": ["pull"], "minutes": 30}]
+    daily = {"mode": "daily", "actions": ["structure"], "time": "06:30", "weekdays": [1, 5]}
+    assert runner.normalize_schedule(DemoConnector, {"mode": "daily", "time": "06:30", "weekdays": [5, 1],
+                                                     "actions": ["structure"]}) == [daily]
+    # Несколько записей: у каждой свои действия; mode off пропускается
+    two = runner.normalize_schedule(DemoConnector, [{"mode": "interval", "minutes": 30, "actions": ["pull"]},
+                                                    {"mode": "off"}, {**daily, "weekdays": [5, 1]}])
+    assert two == [{"mode": "interval", "actions": ["pull"], "minutes": 30}, daily]
     for bad in ({"mode": "interval", "minutes": 1}, {"mode": "interval"}, {"mode": "daily", "time": "25:00"},
                 {"mode": "daily", "time": "06:00", "weekdays": [8]}, {"mode": "interval", "minutes": 60,
-                                                                       "actions": ["manual"]}, {"mode": "cron"}):
+                                                                       "actions": ["manual"]}, {"mode": "cron"},
+                [{"mode": "interval", "minutes": 60}] * (runner.MAX_ENTRIES + 1), ["daily"]):
         with pytest.raises(ValidationFailed):
             runner.normalize_schedule(DemoConnector, bad)
-    assert runner.schedule_label(daily) == "В 06:30 (пн, пт)"
+    with pytest.raises(ValidationFailed) as error:
+        runner.normalize_schedule(DemoConnector, [daily, {"mode": "interval", "minutes": 2}])
+    assert error.value.fields == {"schedule.1.minutes": "Вне допустимого"}, "ошибка — с номером записи"
+    assert runner.schedule_label([daily]) == "В 06:30 (пн, пт)"
     assert runner.schedule_label({"mode": "interval", "minutes": 15}) == "Каждые 15 мин"
+    assert runner.schedule_label(two, DemoConnector) == \
+        "Каждые 30 мин — Забрать данные; В 06:30 (пн, пт) — Синхронизировать структуру"
+    assert runner.schedule_label([]) == runner.schedule_label({}) == "Вручную"
+    assert runner.schedule_actions(two) == ["pull", "structure"]
 
 
 def test_next_run_uses_company_timezone():
@@ -370,13 +542,30 @@ def test_next_run_uses_company_timezone():
 
 def test_schedule_via_api(admin, demo, fake):
     item = _create(admin, fake, schedule={"mode": "interval", "minutes": 60})
-    assert item["schedule"]["minutes"] == 60 and item["next_run_at"] is None, "выключенное не планируется"
+    assert [e["minutes"] for e in item["schedule"]] == [60], "прежний вид — одна запись"
+    assert item["next_run_at"] is None and item["schedule"][0]["next_run_at"] is None, "выключенное не планируется"
     data = _enable(admin, item["id"])
     assert data["next_run_at"] and data["schedule_label"] == "Каждые 60 мин"
+    assert data["schedule"][0]["next_run_at"] == data["next_run_at"] and data["schedule"][0]["label"] == "Каждые 60 мин"
+    # Две записи — у каждой свой следующий запуск; next_run_at — ближайший
+    entries = [{"mode": "daily", "time": "06:00", "actions": ["structure"]},
+               {"mode": "interval", "minutes": 30, "actions": ["pull"]}]
+    two = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": entries}).json()
+    assert [e["actions"] for e in two["schedule"]] == [["structure"], ["pull"]]
+    times = [datetime.fromisoformat(e["next_run_at"]) for e in two["schedule"]]
+    assert datetime.fromisoformat(two["next_run_at"]) == min(times) and times[0] != times[1]
+    assert two["schedule_label"] == "В 06:00 ежедневно — Синхронизировать структуру; Каждые 30 мин — Забрать данные"
+    # Записи из ответа можно отправить обратно как получены (подпись и время не используются)
+    again = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": two["schedule"]})
+    assert again.status_code == 200 and again.json()["schedule_label"] == two["schedule_label"]
     off = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": {"mode": "off"}}).json()
-    assert off["schedule"] == {} and off["next_run_at"] is None
+    assert off["schedule"] == [] and off["next_run_at"] is None and off["schedule_label"] == "Вручную"
     bad = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": {"mode": "interval", "minutes": 2}})
     assert bad.status_code == 422
+    six = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": [entries[1]] * 6})
+    assert six.status_code == 422 and "Не больше 5" in six.json()["detail"]
+    off = admin.patch(f"/api/integrations/{item['id']}", json={"schedule": []}).json()
+    assert off["schedule"] == [] and off["next_run_at"] is None
 
 
 def _due(db, name="Демо", minutes=60) -> int:
@@ -389,13 +578,97 @@ def _due(db, name="Демо", minutes=60) -> int:
 
 
 def test_claim_is_taken_once(db, demo):
+    """Сохранённое прежним видом расписание (один объект, без next_runs) читается и занимается как одна запись."""
     integration_id = _due(db)
     now = utcnow()
     first = runner.claim_due(now)
     second = runner.claim_due(now)
     assert first == [(integration_id, ["manual"])] and second == []
     db.expire_all()
-    assert db.get(Integration, integration_id).next_run_at == now + timedelta(minutes=60)
+    row = db.get(Integration, integration_id)
+    assert row.next_run_at == now + timedelta(minutes=60)
+    assert row.next_runs == [(now + timedelta(minutes=60)).isoformat()]
+
+
+def _due_entries(db, name="Демо", **times) -> int:
+    """Подключение с двумя записями: интервал 30 мин (pull) и ежедневно в 06:00 (structure)."""
+    now = utcnow()
+    entries = [{"mode": "interval", "minutes": 30, "actions": ["pull"]},
+               {"mode": "daily", "time": "06:00", "weekdays": [], "actions": ["structure"]}]
+    pull, structure = times.get("pull", now - timedelta(minutes=1)), times.get("structure", now + timedelta(hours=5))
+    row = Integration(kind="demo", name=name, enabled=True, config={"base_url": "http://127.0.0.1:9", "login": "x"},
+                      schedule=entries, next_runs=[pull.isoformat(), structure.isoformat()],
+                      next_run_at=min(pull, structure), state={}, last_error="")
+    db.add(row)
+    db.commit()
+    return row.id
+
+
+def test_claim_runs_only_due_entries(db, demo):
+    integration_id = _due_entries(db)
+    now = utcnow()
+    db.expire_all()
+    structure_next = db.get(Integration, integration_id).next_runs[1]
+    assert runner.claim_due(now) == [(integration_id, ["pull"])], "только записи, чей срок настал"
+    db.expire_all()
+    row = db.get(Integration, integration_id)
+    assert row.next_runs == [(now + timedelta(minutes=30)).isoformat(), structure_next], "у записей свой срок"
+    assert row.next_run_at == now + timedelta(minutes=30), "ближайший — минимум по записям"
+    assert runner.claim_due(now) == []
+    # Срок настал у обеих: одно занятие, действия обеих записей
+    later = datetime.fromisoformat(structure_next) + timedelta(minutes=1)
+    assert runner.claim_due(later) == [(integration_id, ["pull", "structure"])]
+    db.expire_all()
+    row = db.get(Integration, integration_id)
+    assert all(datetime.fromisoformat(t) > later for t in row.next_runs)
+    assert row.next_run_at == min(datetime.fromisoformat(t) for t in row.next_runs)
+
+
+def test_claim_is_refused_when_schedule_changed_meanwhile(db, demo):
+    """Занятие сравнивает ближайший запуск с прочитанным: расписание изменили между чтением и занятием — не занято
+    (следующий такт прочитает новое)."""
+    integration_id = _due_entries(db)
+    now = utcnow()
+    seen = db.get(Integration, integration_id).next_run_at
+    db.execute(update(Integration).where(Integration.id == integration_id)
+               .values(next_run_at=now - timedelta(seconds=5)))
+    db.commit()
+    assert runner._claim(db, integration_id, now, now + timedelta(hours=1), [], seen) is False
+    assert runner._claim(db, integration_id, now, now + timedelta(hours=1), [], now - timedelta(seconds=5)) is True
+
+
+def test_two_workers_do_not_double_run_entry(db, demo, engine):
+    """Два планировщика на одном такте: запись выполняет только один (SQLite — записи по очереди)."""
+    from app.worker import Worker
+
+    integration_id = _due_entries(db)
+    first, second = Worker(tick_seconds=1), Worker(tick_seconds=1)
+    runs = first.tick()["runs"] + second.tick()["runs"]
+    db.expire_all()
+    journal = list(db.scalars(select(IntegrationRun).where(IntegrationRun.integration_id == integration_id)))
+    assert len(runs) == 1 and [(r.action, r.trigger) for r in journal] == [("pull", "schedule")]
+
+
+def test_disabled_connection_has_no_next_runs(admin, demo, fake, db):
+    item = _create(admin, fake, schedule=[{"mode": "interval", "minutes": 30}, {"mode": "daily", "time": "06:00"}])
+    _enable(admin, item["id"])
+    db.expire_all()
+    assert all(db.get(Integration, item["id"]).next_runs)
+    off = admin.patch(f"/api/integrations/{item['id']}", json={"enabled": False}).json()
+    assert off["next_run_at"] is None and [e["next_run_at"] for e in off["schedule"]] == [None, None]
+    db.expire_all()
+    assert db.get(Integration, item["id"]).next_runs == [None, None]
+    assert runner.claim_due(utcnow() + timedelta(days=2)) == [], "выключенное по расписанию не запускается"
+
+
+def test_worker_tick_runs_due_entry_actions(db, demo, engine):
+    from app.worker import Worker
+
+    integration_id = _due_entries(db)
+    out = Worker(tick_seconds=1).tick()
+    db.expire_all()
+    runs = list(db.scalars(select(IntegrationRun).where(IntegrationRun.integration_id == integration_id)))
+    assert len(out["runs"]) == 1 and [r.action for r in runs] == ["pull"], "только действия записи, чей срок настал"
 
 
 def test_worker_tick_runs_due_and_writes_heartbeat(db, demo, engine):
@@ -467,11 +740,34 @@ def test_cli_integrations(db, demo, fake, capsys):
     assert main(["integrations", "run", "jira"]) == 2
     db.execute(update(Integration).values(enabled=False))
     db.commit()
-    assert main(["integrations", "run", str(row.id)]) == 2
+    capsys.readouterr()
+    assert main(["integrations", "run", str(row.id)]) == 2, "выключенное по умолчанию не запускается (cron)"
+    assert f"integrations run {row.id} --force" in capsys.readouterr().err, "отказ подсказывает --force"
+    assert main(["integrations", "run", "demo", "--force"]) == 2, "по виду — только включённые, даже с --force"
+    assert main(["integrations", "run", str(row.id), "--force"]) == 0, "--force — как «Запустить» в интерфейсе"
     runs = list(db.scalars(select(IntegrationRun).order_by(IntegrationRun.id)))
-    assert [r.trigger for r in runs] == ["cli", "cli"]
+    assert [r.trigger for r in runs] == ["cli", "cli", "cli"]
     assert db.scalar(select(AuditEntry.username).where(AuditEntry.entity_type == "integration",
                                                        AuditEntry.action == "run").limit(1)) == "Командная строка"
+
+
+def test_cli_runs_actions_of_all_schedule_entries(db, demo, fake, capsys):
+    from app.cli import main
+    from app.core.secrets import seal
+
+    row = Integration(kind="demo", name="Демо", enabled=True, config={"base_url": fake.url, "login": "svc"},
+                      schedule=[{"mode": "interval", "minutes": 30, "actions": ["pull"]},
+                                {"mode": "daily", "time": "06:00", "weekdays": [], "actions": ["structure"]}],
+                      state={}, last_error="")
+    db.add(row)
+    db.flush()
+    row.secret_encrypted, row.secret_bound_url = seal(runner.PURPOSE, {"token": TOKEN}, fake.url,
+                                                      owner=runner.owner(row.id))
+    db.commit()
+    assert main(["integrations", "run", str(row.id)]) == 0
+    assert [r.action for r in db.scalars(select(IntegrationRun).order_by(IntegrationRun.id))] == ["pull", "structure"]
+    assert main(["integrations", "list"]) == 0
+    assert "Каждые 30 мин — Забрать данные; В 06:00 ежедневно — Синхронизировать структуру" in capsys.readouterr().out
 
 
 def test_cli_inbox(monkeypatch, tmp_path, engine, capsys):
@@ -555,6 +851,33 @@ def test_parallel_claims_on_postgres(pg_factory):
         t.join(10)
     claimed = sorted(i for batch in results for i, _ in batch)
     assert claimed == sorted(ids), "каждое подключение занято ровно одним процессом"
+
+
+@pytest.mark.postgres
+def test_parallel_claims_of_schedule_entries_on_postgres(pg_factory):
+    """Несколько записей расписания и шесть планировщиков: каждая запись, чей срок настал, занята один раз."""
+    with pg_factory() as db:
+        ids = [_due_entries(db, name=f"Демо {n}") for n in range(3)]
+    now = utcnow()
+    barrier = threading.Barrier(6)
+    results: list[list] = []
+
+    def worker():
+        with pg_factory() as db:
+            barrier.wait()
+            results.append(runner.claim_due(now, db))
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    claimed = sorted((i, tuple(actions)) for batch in results for i, actions in batch)
+    assert claimed == sorted((i, ("pull",)) for i in ids)
+    with pg_factory() as db:
+        for integration_id in ids:
+            row = db.get(Integration, integration_id)
+            assert datetime.fromisoformat(row.next_runs[0]) == now + timedelta(minutes=30)
 
 
 def test_json_field_accepts_parsed_and_text_values():

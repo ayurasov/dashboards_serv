@@ -388,6 +388,40 @@ class WriteResult:
         return f"{head}: {self.rows} (новых {self.create}, изменено {self.update}, без изменений {self.unchanged})"
 
 
+@dataclass
+class Pending:
+    """Показатели, которых ещё нет в каталоге (создаются при записи, если для них получены значения).
+
+    План без записи (preview) не может построить для них план загрузки — показателя нет, — поэтому их значения
+    считаются отдельно: «показатель «jira.resolved» будет создан при запуске: значений 6» и образцы строк с
+    действием create. После записи в pending остаются только показатели без значений — они не создаются."""
+
+    parts: list[str] = field(default_factory=list)
+    counters: dict[str, int] = field(default_factory=dict)
+    sample: list[dict] = field(default_factory=list)
+
+    @classmethod
+    def of(cls, cells: list[Cell], targets: Targets, units: Units, *, preview: bool,
+           room: int = SAMPLE_ROWS) -> Pending:
+        out = cls()
+        if not targets.pending:
+            return out
+        if not preview:
+            out.parts.append("не созданы показатели без значений: " + ", ".join(f"«{k}»" for k in targets.pending))
+            return out
+        waiting = sorted((c for c in cells if c.indicator in targets.pending),
+                         key=lambda c: (c.indicator, c.month.key, units.path(c.unit)))
+        for key in targets.pending:
+            count = sum(1 for c in waiting if c.indicator == key)
+            out.parts.append(f"показатель «{key}» будет создан при запуске: значений {count}" if count else
+                             f"показатель «{key}»: значений нет — при запуске он не будет создан")
+        out.counters["values_pending"] = len(waiting)
+        out.sample = [{"unit": units.path(c.unit), "indicator": c.indicator, "period": c.month.key,
+                       "value": number_text(c.value), "action": "create", "pending": True}
+                      for c in waiting[:max(0, room)]]
+        return out
+
+
 def number_text(value: float) -> str:
     text_value = f"{round(float(value), 6):.6f}".rstrip("0").rstrip(".")
     return "0" if text_value in ("-0", "") else text_value

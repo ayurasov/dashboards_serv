@@ -127,3 +127,20 @@ describe('права текущего пользователя', () => {
     expect(auth.inbox).toBe(false)
   })
 })
+
+describe('руководство администратора', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('администратору и любому полномочию администрирования; остальным — нет', () => {
+    const auth = useAuthStore()
+    expect(auth.canReadAdminGuide).toBe(false)
+    auth.setUser(EMPLOYEE)
+    expect(auth.canReadAdminGuide).toBe(false)
+    for (const capability of ['org.manage', 'users.manage', 'reports.manage', 'data.manage', 'integrations.manage']) {
+      auth.setUser({ ...EMPLOYEE, capabilities: [capability] })
+      expect(auth.canReadAdminGuide).toBe(true)
+    }
+    auth.setUser({ ...EMPLOYEE, role: 'admin' })
+    expect(auth.canReadAdminGuide).toBe(true)
+  })
+})

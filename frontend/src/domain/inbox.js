@@ -411,7 +411,7 @@ export function folderTree(folder, datasets = []) {
   const root = folder?.path || 'INBOX_DIR'
   const names = (folder?.folders?.length ? folder.folders.map((f) => f.folder) : datasets.map((d) => d.folder || d.key))
   const width = Math.max(14, ...names.map((n) => n.length + 2))
-  const lines = [`${root}/`, `├── ${'файл.xlsx'.padEnd(width)}набор распознаётся по имени и содержимому`]
+  const lines = [`${root}/`, `├── ${'файл.xlsx'.padEnd(width)}набор распознаётся по содержимому (имя — подсказка)`]
   for (const name of names) {
     const label = folder?.folders?.find((f) => f.folder === name)?.label || datasets.find((d) => d.key === name)?.label || ''
     lines.push(`├── ${`${name}/`.padEnd(width)}${label}`)
@@ -419,4 +419,20 @@ export function folderTree(folder, datasets = []) {
   lines.push(`├── ${'processed/'.padEnd(width)}принятые, по месяцам ГГГГ-ММ/ с отчётом *.result.json`)
   lines.push(`└── ${'rejected/'.padEnd(width)}не принятые: ошибка, повтор, слишком большой`)
   return lines.join('\n')
+}
+
+/**
+ * Как распознаётся файл в корне папки «Входящие» (сервер — inbox_datasets.detect, числа — из GET /api/inbox/folder →
+ * detect): каждый набор оценивает содержимое (первые строки таблицы или JSON) от 0 до 100, совпадение имени с
+ * шаблоном набора добавляет name_bonus; берётся лучший набор с оценкой не меньше threshold, при равенстве лучших —
+ * не распознан. Одного имени для распознавания мало.
+ */
+export function detectRules(detect) {
+  const threshold = Number(detect?.threshold) || 50
+  const bonus = Number(detect?.name_bonus) || 20
+  return {
+    threshold, bonus,
+    column: `Шаблоны имени: +${bonus} к оценке в корне`,
+    hint: `Файл в подпапке — набор известен. В корне набор распознаётся по содержимому (первые строки таблицы или JSON, оценка до 100); имя по шаблону добавляет ${bonus}, нужно не меньше ${threshold} — по одному имени файл не распознаётся`,
+  }
 }

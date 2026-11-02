@@ -17,6 +17,7 @@ from app.integrations.connectors import onec
 from app.integrations.connectors.onec import OneCConnector
 from app.models import Department, Indicator, IndicatorValue
 from app.services import reports
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer
 
 LOGIN, PASSWORD = "Обмен", "пароль-1С"
@@ -201,7 +202,7 @@ def create(admin, fake, queries=None, name="1С ЗУП", password=PASSWORD, **co
 def run(admin, item, action="load") -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": action})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "onec")
 
 
 def values(db, key: str, comments: bool = False) -> dict:
@@ -382,6 +383,14 @@ def test_preview_writes_nothing(admin, fake, db):
     data = run(admin, item, "preview")
     assert data["status"] == "ok" and data["message"].startswith("План без записи")
     assert db.scalar(select(Indicator).where(Indicator.key.like("onec.%"))) is None
+    # Показателей onec.* ещё нет: значения для них посчитаны и названы (раньше план показывал 0 значений)
+    pending = [v for v in data["summary"]["details"]["values"] if v.get("pending")]
+    assert pending and data["summary"]["values_pending"] == len(pending)
+    for key in sorted({v["indicator"] for v in pending}):
+        count = sum(1 for v in pending if v["indicator"] == key)
+        assert f"показатель «{key}» будет создан при запуске: значений {count}" in data["message"]
+    written = run(admin, item)
+    assert written["summary"]["created"] == len(pending)
 
 
 def test_auth_failure_during_load(admin, fake, db):

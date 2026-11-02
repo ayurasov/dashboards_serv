@@ -1,7 +1,9 @@
 """Интеграции (ADR-0011): подключения, проверка, запуск, журнал запусков, ключи для входящих вызовов.
 
 Доступно администратору и пользователю с полномочием integrations.manage. Секреты подключений
-в ответах не возвращаются — только has_secret и secret_fields.
+в ответах не возвращаются — только has_secret и secret_fields. Подключение вида admin_only (Confluence: публикует
+полный сквозной отчёт) создаёт, изменяет, проверяет, запускает и удаляет только администратор (403 admin_only),
+остальным оно видно только для чтения (can_manage: false).
 """
 from __future__ import annotations
 
@@ -10,7 +12,6 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ...core.db import get_db
-from ...integrations import runner
 from ...models import User
 from ...schemas.common import Ok
 from ...schemas.integrations import (
@@ -20,6 +21,7 @@ from ...schemas.integrations import (
     IntegrationDraftCheckIn,
     IntegrationRunIn,
     IntegrationUpdateIn,
+    schedule_body,
 )
 from ...services import integration_admin as admin
 from ..deps import require_capability
@@ -33,24 +35,26 @@ def kinds(_: User = Depends(manage)):
     return admin.kinds()
 
 
-@router.get("", summary="Подключения (с описанием вида и полями настроек)")
-def list_integrations(db: Session = Depends(get_db), _: User = Depends(manage)):
-    return admin.list_out(db)
+@router.get("", summary="Подключения (с описанием вида и полями настроек)",
+            description="В порядке видов (Connector.order), внутри вида — по названию. schedule — записи расписания "
+                        "с подписью (label) и следующим запуском (next_run_at) каждой; next_run_at — ближайший.")
+def list_integrations(db: Session = Depends(get_db), user: User = Depends(manage)):
+    return admin.list_out(db, user)
 
 
 @router.post("", status_code=201, summary="Создать подключение",
              description="Создаётся выключенным: включить можно после успешной проверки (PATCH enabled=true).")
 def create(body: IntegrationCreateIn, request: Request, db: Session = Depends(get_db), user: User = Depends(manage)):
     data = body.model_dump()
-    data["schedule"] = body.schedule.model_dump() if body.schedule else None
+    data["schedule"] = schedule_body(body.schedule)
     row = admin.create(db, user, data, request)
     db.commit()
-    return admin.integration_out(db, row)
+    return admin.integration_out(db, row, user)
 
 
 @router.post("/check", summary="Проверить ещё не сохранённое подключение")
-async def check_draft(body: IntegrationDraftCheckIn, _: User = Depends(manage)):
-    return await run_in_threadpool(admin.check_draft, body.kind, body.config, body.secrets)
+async def check_draft(body: IntegrationDraftCheckIn, user: User = Depends(manage)):
+    return await run_in_threadpool(admin.check_draft, body.kind, body.config, body.secrets, user)
 
 
 # ---------------------------------------------------------------- ключи для входящих вызовов
@@ -58,6 +62,11 @@ async def check_draft(body: IntegrationDraftCheckIn, _: User = Depends(manage)):
 @router.get("/keys", summary="Ключи для входящих вызовов (без значений)")
 def list_keys(db: Session = Depends(get_db), _: User = Depends(manage)):
     return admin.keys_out(db)
+
+
+@router.get("/keys/scopes", summary="Области ключа: значение, подпись, подсказка")
+def key_scopes(_: User = Depends(manage)):
+    return admin.key_scopes()
 
 
 @router.post("/keys", status_code=201, summary="Выпустить ключ (значение показывается один раз)")
@@ -86,8 +95,8 @@ def revoke_key(key_id: int, request: Request, db: Session = Depends(get_db), use
 # ---------------------------------------------------------------- подключение
 
 @router.get("/{integration_id}", summary="Подключение")
-def get_integration(integration_id: int, db: Session = Depends(get_db), _: User = Depends(manage)):
-    return admin.integration_out(db, admin.get(db, integration_id))
+def get_integration(integration_id: int, db: Session = Depends(get_db), user: User = Depends(manage)):
+    return admin.integration_out(db, admin.get(db, integration_id), user)
 
 
 @router.patch("/{integration_id}", summary="Изменить подключение",
@@ -99,10 +108,10 @@ def update(integration_id: int, body: IntegrationUpdateIn, request: Request, db:
     row = admin.get(db, integration_id)
     data = body.model_dump(exclude_unset=True)
     if body.schedule is not None:
-        data["schedule"] = body.schedule.model_dump()
+        data["schedule"] = schedule_body(body.schedule)
     admin.update(db, user, row, data, request)
     db.commit()
-    return admin.integration_out(db, row)
+    return admin.integration_out(db, row, user)
 
 
 @router.delete("/{integration_id}", response_model=Ok, summary="Удалить подключение (вместе с журналом запусков)")
@@ -134,9 +143,9 @@ async def check(integration_id: int, request: Request, body: IntegrationCheckIn 
                          "409 run_in_progress — запуск уже идёт.")
 async def run(integration_id: int, body: IntegrationRunIn, db: Session = Depends(get_db),
               user: User = Depends(manage)):
-    admin.get(db, integration_id)
+    row = admin.get(db, integration_id)
     db.commit()
-    return await run_in_threadpool(runner.run_action, integration_id, body.action, trigger="manual", user=user)
+    return await run_in_threadpool(admin.run, user, row, body.action)
 
 
 @router.get("/{integration_id}/runs", summary="Журнал запусков подключения")

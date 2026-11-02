@@ -18,6 +18,7 @@ from app.core.timeutil import local_now
 from app.integrations.connectors.confluence import ConfluenceConnector
 from app.models import Department, Indicator, IndicatorValue
 from app.services import reports
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer
 
 TOKEN = "conf-pat-0123456789"
@@ -189,7 +190,7 @@ def create(admin, fake, name="Confluence", **config) -> dict:
 def publish(admin, item) -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": "publish"})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "confluence")
 
 
 def state(db, item) -> dict:

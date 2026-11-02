@@ -21,18 +21,22 @@ test('папка «Входящие» как подключение: созда�
   await expect(page).toHaveURL(/\/admin\/integrations$/)
   await expect(page.getByRole('heading', { name: 'Интеграции', level: 1 })).toBeVisible()
 
-  // «Подключить систему»: все виды сервера с названием и описанием
+  // «Подключить систему»: все виды сервера с названием и описанием — в порядке сервера, а не по ключу
   await page.getByTestId('integration-add').click()
   const picker = page.getByRole('dialog', { name: 'Подключить систему' })
   const kinds = await apiGet(page, '/integrations/kinds')
   for (const k of kinds) await expect(picker.getByTestId(`kind-${k.kind}`)).toContainText(k.title)
+  expect(await picker.locator('button.kind').evaluateAll((items) => items.map((b) => b.dataset.kind))).toEqual(kinds.map((k) => k.kind))
+  expect(kinds.map((k) => k.kind).slice(0, 4)).toEqual(['podelu', 'puls', 'jira', 'confluence'])
   await picker.getByTestId('kind-folder').click()
 
   const editor = page.getByRole('dialog').filter({ hasText: 'Новое подключение' })
   await expect(editor).toContainText('Папка «Входящие»')
   await expect(editor).toContainText('У этого вида подключения нет настроек')
-  // Расписание: через интервал, 60 минут, действие «Разобрать папку»
-  await editor.locator('.schedule').getByRole('radio', { name: 'Через интервал' }).click()
+  // Расписания нет — только вручную; «Добавить расписание»: через интервал, действие «Разобрать папку»
+  await expect(editor.getByTestId('schedule-empty')).toBeVisible()
+  await editor.getByTestId('schedule-add').click()
+  await expect(editor.getByTestId('schedule-entry')).toHaveCount(1)
   await editor.getByTestId('schedule-minutes').fill('3')
   await editor.getByTestId('editor-save').click()
   await expect(editor.getByTestId('editor-error')).toBeVisible()
@@ -81,11 +85,27 @@ test('папка «Входящие» как подключение: созда�
   // Расписание меняется в настройках: в 06:30 по понедельникам и пятницам
   await c.getByTestId('integration-edit').click()
   const settings = page.getByRole('dialog').filter({ hasText: 'Расписание' })
-  await settings.locator('.schedule').getByRole('radio', { name: 'В заданное время' }).click()
+  await settings.getByTestId('schedule-entry').first().getByRole('radio', { name: 'В заданное время' }).click()
   await settings.getByTestId('schedule-time').fill('06:30')
   await settings.getByRole('button', { name: 'пн', exact: true }).click()
   await settings.getByRole('button', { name: 'пт', exact: true }).click()
   await expect(settings.getByTestId('schedule-preview')).toContainText('В 06:30 (пн, пт)')
+  // Второе расписание того же подключения: каждые 30 минут — у каждого свой следующий запуск
+  await settings.getByTestId('schedule-add').click()
+  const second = settings.getByTestId('schedule-entry').nth(1)
+  await second.getByTestId('schedule-minutes').fill('30')
+  await expect(settings.getByTestId('schedule-preview')).toContainText('В 06:30 (пн, пт) — Разобрать папку; Каждые 30 мин — Разобрать папку')
+  await settings.getByTestId('editor-save').click()
+  await expect(settings).toHaveCount(0)
+  const entries = c.getByTestId('integration-schedule-entry')
+  await expect(entries).toHaveCount(2)
+  await expect(entries.nth(0)).toContainText('В 06:30 (пн, пт)')
+  await expect(entries.nth(1)).toContainText('Каждые 30 мин')
+  const saved = (await apiGet(page, '/integrations')).find((i) => i.kind === 'folder')
+  expect(saved.schedule.map((e) => e.label)).toEqual(['В 06:30 (пн, пт)', 'Каждые 30 мин'])
+  // Одно из расписаний удаляется — остаётся одно
+  await c.getByTestId('integration-edit').click()
+  await settings.getByTestId('schedule-entry').nth(1).getByTestId('schedule-remove').click()
   await settings.getByTestId('editor-save').click()
   await expect(c.getByTestId('integration-schedule')).toHaveText('В 06:30 (пн, пт)')
 
@@ -121,7 +141,7 @@ test('проверка до сохранения: подробная ошибк�
     const box = editor.locator(`[data-field="${f.key}"]`)
     if (f.key === kind.url_field) await box.locator('input').fill('http://127.0.0.1:9')
     else if (f.secret) await box.locator('input').fill('e2e-secret')
-    else if (f.type === 'select') { if (!f.default) await box.locator('select').selectOption(f.options[0].value) }
+    else if (f.type === 'select') { if (!f.default) await ((await box.locator('select').count()) ? box.locator('select').selectOption(f.options[0].value) : box.locator('input[type=radio]').first().check()) }
     else if (f.type === 'multiselect') await box.locator('input[type=checkbox]').first().check()
     else if (f.type === 'int') await box.locator('input').fill(String(f.min ?? 1))
     else if (f.type === 'time') await box.locator('input').fill('06:00')
@@ -149,6 +169,8 @@ test('ключи для входящих вызовов: выпуск, пока�
   const name = uniq('1С ЗУП')
   await page.getByTestId('key-create').click()
   const dialog = page.getByRole('dialog', { name: 'Выпустить ключ' })
+  // Подписи областей — с сервера, одна и та же везде
+  await expect(dialog).toContainText('Чтение статусов принятых файлов')
   await dialog.getByTestId('key-issue').click()
   await expect(dialog).toContainText('Укажите название ключа')
   await dialog.getByTestId('key-name').fill(name)
@@ -168,7 +190,7 @@ test('ключи для входящих вызовов: выпуск, пока�
   const row = page.getByTestId('keys-table').locator(`tr[data-key="${name}"]`)
   await expect(row).toContainText(`${key.slice(0, 12)}…`)
   await expect(row).toContainText('Приём файлов')
-  await expect(row).toContainText('Чтение статусов')
+  await expect(row).toContainText('Чтение статусов принятых файлов')
   await expect(row).toContainText('Действует')
   await expect(page.locator('body')).not.toContainText(key)
 
@@ -228,3 +250,111 @@ test('«По Делу»: смена любого из адресов — пре�
   }
   expect(errors).toEqual([])
 })
+
+test('несколько расписаний «По Делу»: структура раз в день, файлы задач каждые 30 минут — на карточке оба', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  const name = uniq('По Делу')
+  const created = await api(page, 'POST', '/integrations', {
+    kind: 'podelu', name, config: { base_url: 'https://podelu.company.ru', login: 'svc' }, secrets: { password: 'Пароль-42' },
+    schedule: [{ mode: 'daily', time: '06:00', actions: ['sync'] }, { mode: 'interval', minutes: 30, actions: ['pull'] }],
+  })
+  try {
+    expect(created.schedule.map((e) => e.actions)).toEqual([['sync'], ['pull']])
+    await page.goto('/admin/integrations')
+    const c = page.locator(`article[data-integration="${created.id}"]`)
+    const entries = c.getByTestId('integration-schedule-entry')
+    await expect(entries).toHaveCount(2)
+    await expect(entries.nth(0)).toContainText('В 06:00 ежедневно')
+    await expect(entries.nth(0)).toContainText('Синхронизировать структуру')
+    await expect(entries.nth(1)).toContainText('Каждые 30 мин')
+    await expect(entries.nth(1)).toContainText('Забрать данные из задач')
+    await expect(c.locator('[data-action=sync]')).toContainText('по расписанию')
+    await expect(c.locator('[data-action=pull]')).toContainText('по расписанию')
+    // Действие «По Делу» называет наборы так же, как «Входящие»
+    await expect(c.locator('[data-action=sync] small').first()).toHaveAttribute('title', /наборы «Структура компании» и «Сотрудники»/)
+
+    await c.getByTestId('integration-edit').click()
+    const editor = page.getByRole('dialog').filter({ has: page.getByTestId('editor-save') })
+    await expect(editor.getByTestId('schedule-entry')).toHaveCount(2)
+    await expect(editor.getByTestId('schedule-entry').nth(1).locator('[data-action=pull] input')).toBeChecked()
+    await expect(editor.getByTestId('schedule-entry').nth(1).locator('[data-action=sync] input')).not.toBeChecked()
+    // «Тип подключения» и прочие длинные списки — на всю ширину, текст не обрезается (проверяется на Jira ниже)
+    await editor.getByRole('button', { name: 'Отмена' }).click()
+  } finally {
+    await api(page, 'DELETE', `/integrations/${created.id}`)
+  }
+  expect(errors).toEqual([])
+})
+
+test('«Тип подключения» Jira не обрезается; «Копировать» не закрывает код ключей', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  await page.goto('/admin/integrations')
+  await page.getByTestId('integration-add').click()
+  await page.getByTestId('kind-jira').click()
+  const editor = page.getByRole('dialog').filter({ hasText: 'Новое подключение' })
+  // «Тип подключения» — переключателями: подпись варианта видна целиком, без обрезки
+  const server = editor.locator('[data-field=instance] label.choice').filter({ hasText: 'Server / Data Center — персональный токен (PAT)' })
+  await server.locator('input[type=radio]').check()
+  await expect(server).toHaveClass(/on/)
+  const clipped = await editor.locator('[data-field=instance] label.choice span').evaluateAll((spans) => spans.filter((el) => el.scrollWidth > el.clientWidth + 1).length)
+  expect(clipped).toBe(0)
+  await editor.getByRole('button', { name: 'Отмена' }).click()
+
+  await page.goto('/admin/integrations?tab=keys')
+  const block = page.getByTestId('keys-curl')
+  const [button, pre] = [await block.locator('button.copy').boundingBox(), await block.locator('pre').boundingBox()]
+  expect(button.y + button.height).toBeLessThanOrEqual(pre.y + 0.5)
+  expect(errors).toEqual([])
+})
+
+test('полномочие «Интеграции» без роли администратора: Confluence — только для чтения, справка «?» открывается', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  const viewer = (await apiGet(page, '/users?search=viewer')).items.find((u) => u.username === 'viewer')
+  const name = uniq('Confluence')
+  const created = await api(page, 'POST', '/integrations', {
+    kind: 'confluence', name, config: { base_url: 'https://wiki.company.ru', instance: 'server', space: 'DASH' }, secrets: { token: 'pat-42' },
+  })
+  await api(page, 'PATCH', `/users/${viewer.id}`, { capabilities: ['integrations.manage'] })
+  try {
+    await page.context().clearCookies()
+    await login(page, 'viewer')
+    await page.goto('/admin/integrations')
+    const c = page.locator(`article[data-integration="${created.id}"]`)
+    await expect(c.getByTestId('integration-read-only')).toContainText('Только администратор: публикует полный сквозной отчёт')
+    await expect(c.getByTestId('integration-edit')).toHaveCount(0)
+    await expect(c.getByTestId('integration-check')).toHaveCount(0)
+    await expect(c.getByTestId('integration-delete')).toHaveCount(0)
+    await expect(c.getByTestId('run-publish')).toHaveCount(0)
+    await expect(c.getByTestId('integration-journal')).toBeVisible()
+    const denied = await page.request.post(`/api/integrations/${created.id}/run`, {
+      data: { action: 'publish' }, headers: { 'X-CSRF-Token': (await page.context().cookies()).find((k) => k.name === 'ds_csrf')?.value || '' },
+    })
+    expect(denied.status()).toBe(403)
+    await page.getByTestId('integration-add').click()
+    const picker = page.getByRole('dialog', { name: 'Подключить систему' })
+    await expect(picker.getByTestId('kind-confluence')).toBeDisabled()
+    await expect(picker.getByTestId('kind-confluence')).toContainText('Только администратор')
+    await picker.getByRole('button', { name: 'Закрыть' }).click()
+
+    // «?» на странице администрирования ведёт в руководство администратора — оно открывается
+    await page.getByTestId('page-help').click()
+    await expect(page).toHaveURL(/\/guide\/admin#/)
+    await expect(page.getByRole('heading', { name: 'Нет доступа' })).toHaveCount(0)
+    await expect(page.locator('article h1, article h2').filter({ hasText: 'Интеграции' }).first()).toBeVisible()
+  } finally {
+    await page.context().clearCookies()
+    await login(page, 'admin')
+    await api(page, 'PATCH', `/users/${viewer.id}`, { capabilities: [] })
+    await api(page, 'DELETE', `/integrations/${created.id}`)
+  }
+  // Без полномочий руководства администратора нет
+  await page.context().clearCookies()
+  await login(page, 'viewer')
+  await page.goto('/guide/admin')
+  await expect(page.getByRole('heading', { name: 'Нет доступа' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+

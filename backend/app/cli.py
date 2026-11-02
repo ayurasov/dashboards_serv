@@ -17,10 +17,12 @@
                        Код выхода: 0 — готово, 1 — были ошибки, 2 — папка не настроена или не найдена
   inbox cleanup        удалить исходные файлы старше INBOX_RETENTION_DAYS (в базе и в папке)
   integrations list    подключения: номер, вид, название, состояние
-  integrations run ID|ВИД [--action ДЕЙСТВИЕ]
+  integrations run ID|ВИД [--action ДЕЙСТВИЕ] [--force]
                        запустить действие подключения (по номеру или все включённые подключения вида);
-                       по умолчанию — действия расписания или первое действие. Код выхода: 0 — успешно,
-                       1 — частично или ошибка, 2 — подключение не найдено или выключено
+                       по умолчанию — действия всех записей расписания или первое действие. Выключенное
+                       подключение не запускается (так cron не запустит выключенное); --force — запустить
+                       выключенное подключение по номеру, как кнопка «Запустить» в интерфейсе. Код выхода:
+                       0 — успешно, 1 — частично или ошибка, 2 — подключение не найдено или выключено
 """
 from __future__ import annotations
 
@@ -216,9 +218,10 @@ def cmd_integrations(args) -> int:
     if args.integrations_command == "list":
         for row in rows:
             state = "включено" if row.enabled else "выключено"
-            health = f"ошибка: {row.last_error[:80]}" if row.last_error_at and (
-                row.last_ok_at is None or row.last_error_at > row.last_ok_at) else "в порядке"
-            print(f"{row.id}\t{row.kind}\t{row.name}\t{state}\t{runner.schedule_label(row.schedule)}\t{health}")
+            error = runner.current_error(row)
+            health = f"ошибка: {error[:80]}" if error else "в порядке"
+            label = runner.schedule_label(row.schedule, base.find(row.kind))
+            print(f"{row.id}\t{row.kind}\t{row.name}\t{state}\t{label}\t{health}")
         return 0
     target = args.target
     chosen = [r for r in rows if str(r.id) == target] if target.isdigit() else \
@@ -229,11 +232,12 @@ def cmd_integrations(args) -> int:
         return 2
     code = 0
     for row in chosen:
-        if not row.enabled:
-            print(f"Подключение «{row.name}» выключено", file=sys.stderr)
+        if not row.enabled and not args.force:
+            print(f"Подключение «{row.name}» выключено — по расписанию и из cron оно не запускается. Запустить "
+                  f"выключенное: python -m app.cli integrations run {row.id} --force", file=sys.stderr)
             return 2
         cls = base.get(row.kind)
-        actions = [args.action] if args.action else ((row.schedule or {}).get("actions") or
+        actions = [args.action] if args.action else (runner.schedule_actions(row.schedule) or
                                                      [a.key for a in cls.actions][:1])
         for action in actions:
             try:
@@ -288,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     run = integrations_sub.add_parser("run", help="запустить действие подключения")
     run.add_argument("target", metavar="ID|ВИД", help="номер подключения или вид (все включённые этого вида)")
     run.add_argument("--action", default=None, help="действие (по умолчанию — действия расписания)")
+    run.add_argument("--force", action="store_true",
+                     help="запустить и выключенное подключение (по номеру) — как «Запустить» в интерфейсе")
     p.set_defaults(func=cmd_integrations)
     args = parser.parse_args(argv)
     return args.func(args)

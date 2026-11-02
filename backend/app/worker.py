@@ -3,7 +3,9 @@
 На каждом такте (WORKER_TICK_SECONDS, по умолчанию 30 с):
 1. разбор папки «Входящие» (если задан INBOX_DIR) — app/services/inbox_folder.py;
 2. запуски подключений по расписанию — занимаются атомарно в базе (app/integrations/runner.py),
-   поэтому несколько планировщиков не выполнят один запуск дважды;
+   поэтому несколько планировщиков не выполнят одну запись расписания дважды; перед ними прерванные запуски
+   (идут дольше RUNNING_TIMEOUT — процесс остановился посреди запуска) освобождаются и в журнале
+   отмечаются «Запуск прерван» (runner.reclaim_stale — то же условие, что у ручного запуска и API);
 3. раз в час — срок хранения: исходные файлы обработанных элементов старше INBOX_RETENTION_DAYS
    удаляются из базы, старые файлы — из processed/ и rejected/ папки;
 4. отметка «планировщик работает» (app_settings.worker_status) — её показывает экран «Входящие».
@@ -81,6 +83,13 @@ class Worker:
             except Exception:  # noqa: BLE001 — такт не должен падать
                 log.exception("Планировщик: ошибка разбора папки «Входящие»")
         if not self.stopping.is_set():
+            try:
+                interrupted = runner.reclaim_stale()
+                if interrupted:
+                    out["interrupted"] = interrupted
+                    log.warning("Планировщик: прерванных запусков подключений — %s (отмечены в журнале)", interrupted)
+            except Exception:  # noqa: BLE001
+                log.exception("Планировщик: ошибка при освобождении прерванных запусков")
             try:
                 out["runs"] = [r["id"] for r in runner.run_due()]
             except Exception:  # noqa: BLE001

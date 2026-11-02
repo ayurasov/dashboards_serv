@@ -308,3 +308,93 @@ def test_connection_error_text_is_scrubbed(server):
         c.request("POST", f"rest/1/{secret}/profile.json", retry=True)
     assert exc.value.code == "connect" and secret not in exc.value.detail
     server.start()
+
+
+# ---------------------------------------------------------------- прокси и NO_PROXY
+
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+@pytest.fixture()
+def proxy_env(monkeypatch):
+    """Окружение без прокси (у CI и среды разработки они свои): тест задаёт их сам."""
+    for name in PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.delenv("FAKE_ALLOWED_HOSTS", raising=False)
+    return monkeypatch
+
+
+@pytest.fixture()
+def target_and_proxy():
+    """Узел подключения и поддельный прокси HTTP: прокси получает запрос с полным адресом в строке запроса."""
+    with FakeServer() as target, FakeServer() as proxy:
+        target.route("GET", "/api/ping", lambda r: (200, {"via": "direct"}))
+        proxy.route("GET", "/api/ping", lambda r: (200, {"via": "proxy"}))
+        yield target, proxy
+
+
+def _via(target) -> str:
+    with HttpClient(target.url, kind="fake", title="Система") as c:
+        return c.get_json("api/ping")["via"]
+
+
+def test_requests_go_through_http_proxy(proxy_env, target_and_proxy):
+    target, proxy = target_and_proxy
+    proxy_env.setenv("HTTP_PROXY", proxy.url)
+    assert _via(target) == "proxy"
+    host = target.url.removeprefix("http://")
+    assert proxy.requests[0].headers["host"] == host and not target.requests
+
+
+@pytest.mark.parametrize("no_proxy", ["127.0.0.1", "localhost, 127.0.0.1", "{host}", "*", "127.0.0.0/8"])
+def test_no_proxy_hosts_go_direct(proxy_env, target_and_proxy, no_proxy):
+    target, proxy = target_and_proxy
+    proxy_env.setenv("HTTP_PROXY", proxy.url)
+    proxy_env.setenv("NO_PROXY", no_proxy.format(host=target.url.removeprefix("http://")))
+    assert _via(target) == "direct" and not proxy.requests
+    assert http.environ_proxy(target.url) == ""
+
+
+def test_lowercase_no_proxy_is_honoured(proxy_env, target_and_proxy):
+    target, proxy = target_and_proxy
+    proxy_env.setenv("http_proxy", proxy.url)
+    proxy_env.setenv("no_proxy", "127.0.0.1")
+    assert _via(target) == "direct"
+    proxy_env.setenv("no_proxy", ".company.ru")
+    assert _via(target) == "proxy", "узел не из NO_PROXY — через прокси"
+
+
+def test_unreachable_proxy_is_named_without_credentials(proxy_env):
+    proxy_env.setenv("HTTP_PROXY", "http://svc:proxy-secret@127.0.0.1:9")
+    proxy_env.setenv("HTTPS_PROXY", "http://svc:proxy-secret@proxy.company.ru:3128")
+    assert http.environ_proxy("https://jira.company.ru/rest") == "http://proxy.company.ru:3128"
+    with pytest.raises(IntegrationError) as exc, HttpClient("http://10.20.30.40:8080", kind="fake",
+                                                            title="Система") as c:
+        c.get_json("api/ping")
+    assert exc.value.code in ("connect", "connect_timeout")
+    assert "через прокси http://127.0.0.1:9" in exc.value.detail and "NO_PROXY" in exc.value.detail
+    assert "proxy-secret" not in exc.value.detail and "svc:" not in exc.value.detail
+    proxy_env.setenv("NO_PROXY", "10.0.0.0/8")
+    assert http.environ_proxy("http://10.20.30.40:8080") == "", "NO_PROXY с маской сети"
+
+
+@pytest.mark.parametrize(("no_proxy", "url", "direct"), [
+    ("jira.company.ru", "https://jira.company.ru/rest", True),
+    ("company.ru", "https://jira.company.ru", True),
+    (".company.ru", "https://company.ru", True),
+    ("*.company.ru", "https://a.b.company.ru:8443/x", True),
+    ("jira.company.ru:8443", "https://jira.company.ru:8443", True),
+    ("jira.company.ru:8443", "https://jira.company.ru", False),
+    ("10.1.2.3:8080", "http://10.1.2.3:8080/odata", True),
+    ("10.1.2.3:8080", "http://10.1.2.3/odata", False),
+    ("10.0.0.0/8", "http://10.200.0.1", True),
+    ("10.0.0.0/8", "http://11.0.0.1", False),
+    ("[::1]:8080", "http://[::1]:8080", True),
+    ("other.ru, , localhost", "http://localhost:5000", True),
+    ("other.ru", "https://jira.company.ru", False),
+    ("", "https://jira.company.ru", False),
+])
+def test_bypass_proxy_rules(proxy_env, no_proxy, url, direct):
+    proxy_env.setenv("NO_PROXY", no_proxy)
+    assert http.bypass_proxy(url) is direct

@@ -18,6 +18,9 @@ import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
  * «выпустить заново» заменяет значение, «отозвать» — ключ перестаёт работать сразу.
  */
 const { data, loading, error, reload } = useAsync(() => integrationsApi.keys())
+// Подписи областей — с сервера (те же, что в scope_labels ключа); пока ответа нет — запасные с теми же подписями
+const scopesApi = useAsync(() => integrationsApi.keyScopes(), { initial: null })
+const scopes = computed(() => (Array.isArray(scopesApi.data.value) && scopesApi.data.value.length ? scopesApi.data.value : SCOPES))
 const keys = computed(() => data.value || [])
 const active = computed(() => keys.value.filter((k) => k.active).length)
 // Частота вызовов — настройка сервера INBOUND_RATE_LIMIT (одна на все ключи; приходит с каждым ключом)
@@ -143,11 +146,11 @@ async function revoke(key) {
       <div class="card-body usage">
         <div class="stack">
           <CodeBlock :code="example" label="curl" testid="keys-curl" />
-          <p class="explain"><code>dataset</code> — набор (<code>indicators</code>, <code>tp-weekly</code>, <code>hr-months</code>…); без него набор распознаётся по имени и содержимому. <code>apply=true</code> — применить, если план без ошибок и для источника «Приём по API» и набора включено «применять сразу» (Входящие → Правила); <code>apply=false</code> — только план, ждать подтверждения.</p>
+          <p class="explain"><code>dataset</code> — набор (<code>indicators</code>, <code>tp-weekly</code>, <code>hr-months</code>…); без него набор распознаётся по содержимому файла (имя по шаблону набора только помогает). <code>apply=true</code> — применить, если план без ошибок и для источника «Приём по API» и набора включено «применять сразу» (Входящие → Правила); <code>apply=false</code> — только план, ждать подтверждения.</p>
         </div>
         <ul class="facts">
           <li><b>Ответ</b> — номер элемента, статус (<code>pending</code>, <code>applied</code>, <code>error</code>, <code>duplicate</code>), сводка плана и ошибки. Тот же файл второй раз — <code>200</code> со статусом «повтор».</li>
-          <li><b>Статус позже</b> — <code>GET /api/inbound/v1/files/{id}</code> (область «Чтение статусов»), проверка ключа — <code>GET /api/inbound/v1/ping</code>.</li>
+          <li><b>Статус позже</b> — <code>GET /api/inbound/v1/files/{id}</code> (область «{{ scopes.find((s) => s.value === 'status')?.label }}»), проверка ключа — <code>GET /api/inbound/v1/ping</code>.</li>
           <li><b>1С</b> — регламентное задание отправляет выгрузку тем же запросом: <code>HTTPСоединение</code> + <code>HTTPЗапрос</code>, заголовок <code>Authorization: Bearer dash_…</code>, тело <code>multipart/form-data</code> с полем <code>file</code>.</li>
           <li><b>Частота</b> — {{ rateLimitText(rateLimit).toLowerCase() }}; чаще — ответ <code>429</code> с заголовком <code>Retry-After</code>.</li>
           <li><b>Ошибки</b> — <code>401</code> ключ неверен или отозван, <code>403</code> не хватает области, <code>413</code> файл слишком большой, <code>429</code> слишком часто (смотрите <code>Retry-After</code>).</li>
@@ -164,7 +167,7 @@ async function revoke(key) {
         </label>
         <fieldset class="scopes">
           <legend>Что разрешено</legend>
-          <label v-for="s in SCOPES" :key="s.value" class="check">
+          <label v-for="s in scopes" :key="s.value" class="check">
             <input type="checkbox" :checked="form.scopes.includes(s.value)" :data-testid="`key-scope-${s.value}`" @change="toggleScope(s.value)" />
             <span>{{ s.label }}<small>{{ s.hint }}</small></span>
           </label>

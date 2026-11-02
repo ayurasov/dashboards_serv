@@ -237,18 +237,24 @@ async function downloadFile() {
     </div>
 
     <template v-if="item" #footer>
-      <button v-if="item.actions.download" type="button" class="btn btn-ghost" :disabled="!!busy" data-testid="inbox-download" @click="downloadFile">
-        <AppIcon name="download" :size="15" /><span class="hide-sm">Скачать исходный файл</span><span class="show-sm">Файл</span>
-      </button>
-      <span class="spacer" />
-      <span v-if="applyHint" class="foot-hint">{{ applyHint }}</span>
-      <button v-if="item.actions.reject" type="button" class="btn btn-danger" :disabled="!!busy" data-testid="inbox-reject" @click="rejectOpen = true">Отклонить</button>
-      <button v-if="item.actions.retry && item.status !== 'received'" type="button" class="btn" :disabled="!!busy" data-testid="inbox-retry" @click="openRetry">
-        <AppIcon name="refresh" :size="15" />Повторить
-      </button>
-      <button v-if="item.status === 'pending'" type="button" class="btn btn-primary" :disabled="!item.actions.apply || !!busy" data-testid="inbox-apply" @click="apply">
-        <AppIcon name="check" :size="15" />{{ busy === 'apply' ? 'Применяю…' : 'Применить' }}
-      </button>
+      <!-- Подвал: «Скачать», подсказка (сжимается и переносится), кнопки действий — одной группой, без переноса
+           текста; не помещается — группа целиком уходит на следующую строку, на телефоне — во всю ширину -->
+      <div class="foot-bar" data-testid="inbox-footer">
+        <button v-if="item.actions.download" type="button" class="btn btn-ghost foot-download" :disabled="!!busy" data-testid="inbox-download" @click="downloadFile">
+          <AppIcon name="download" :size="15" /><span class="hide-md">Скачать исходный файл</span><span class="show-md">Файл</span>
+        </button>
+        <span v-if="applyHint" class="foot-hint">{{ applyHint }}</span>
+        <span v-else class="spacer" />
+        <div class="foot-actions">
+          <button v-if="item.actions.reject" type="button" class="btn btn-danger" :disabled="!!busy" data-testid="inbox-reject" @click="rejectOpen = true">Отклонить</button>
+          <button v-if="item.actions.retry && item.status !== 'received'" type="button" class="btn" :disabled="!!busy" data-testid="inbox-retry" @click="openRetry">
+            <AppIcon name="refresh" :size="15" />Повторить
+          </button>
+          <button v-if="item.status === 'pending'" type="button" class="btn btn-primary" :disabled="!item.actions.apply || !!busy" data-testid="inbox-apply" @click="apply">
+            <AppIcon name="check" :size="15" />{{ busy === 'apply' ? 'Применяю…' : 'Применить' }}
+          </button>
+        </div>
+      </div>
     </template>
   </SideDrawer>
 
@@ -293,7 +299,7 @@ async function downloadFile() {
 .dh-text p { font-size: var(--fs-xs); }
 .dh-text .note-line { margin-top: 1px; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
-.body-stack { display: flex; flex-direction: column; gap: 16px; }
+.body-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 24px; }
 .facts div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .facts dt { font-size: var(--fs-xs); color: var(--muted); }
@@ -312,12 +318,22 @@ async function downloadFile() {
 .check small, .help { font-size: var(--fs-xs); color: var(--muted); }
 .dirty-row { font-size: var(--fs-sm); }
 .no-plan, .note { font-size: var(--fs-sm); }
-.foot-hint { font-size: var(--fs-xs); color: var(--muted); max-width: 300px; text-align: right; }
+.foot-bar { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.foot-download { flex: 0 0 auto; }
+.foot-hint { flex: 1 1 180px; min-width: 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); text-align: right; }
+.foot-actions { flex: 0 0 auto; margin-left: auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+.foot-actions .btn { flex: 0 0 auto; white-space: nowrap; }
 .danger { background: var(--light-red); border-color: var(--light-red); }
-.show-sm { display: none; }
+.show-md { display: none; }
+@media (max-width: 960px) {
+  .hide-md { display: none; }
+  .show-md { display: inline; }
+}
 @media (max-width: 720px) {
   .foot-hint { display: none; }
-  .hide-sm { display: none; }
-  .show-sm { display: inline; }
+}
+@media (max-width: 560px) {
+  .foot-actions { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
+  .foot-actions .btn { flex: 1 1 auto; min-width: 0; }
 }
 </style>

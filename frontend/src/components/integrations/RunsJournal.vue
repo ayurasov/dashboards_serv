@@ -8,7 +8,10 @@ import { useAsync } from '@/composables/useAsync'
 import { runCounters, runDuration, runStatus } from '@/domain/integrations'
 import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
 
-/** Журнал запусков подключения: повод, кто запустил, время, итог, счётчики сводки, текст ошибки. */
+/**
+ * Журнал запусков подключения: повод, кто запустил, время, итог (в том числе «Запуск прерван»), счётчики сводки
+ * подписями вида подключения (counter_labels; счётчик без подписи не показывается), текст ошибки.
+ */
 const props = defineProps({
   integration: { type: Object, required: true },
   kind: { type: Object, default: null },
@@ -18,6 +21,8 @@ const LIMIT = 100
 const { data, loading, error, reload } = useAsync(() => integrationsApi.runs(props.integration.id, LIMIT))
 const runs = computed(() => data.value || [])
 const actionLabel = (key) => (props.kind?.actions || []).find((a) => a.key === key)?.label || key
+const labels = computed(() => props.kind?.counter_labels || props.integration.connector?.counter_labels || null)
+const counters = (run) => runCounters(run.summary, { labels: labels.value })
 </script>
 
 <template>
@@ -49,8 +54,8 @@ const actionLabel = (key) => (props.kind?.actions || []).find((a) => a.key === k
             <td class="num"><span class="lbl">Длительность: </span>{{ runDuration(r) }}</td>
             <td class="sum">
               <p v-if="r.message && r.message !== r.error">{{ r.message }}</p>
-              <p v-if="runCounters(r.summary).length" class="counters">
-                <span v-for="c in runCounters(r.summary)" :key="c.key">{{ c.label }}: <b class="num">{{ formatNumber(c.value) }}</b></span>
+              <p v-if="counters(r).length" class="counters" data-testid="run-counters">
+                <span v-for="c in counters(r)" :key="c.key">{{ c.label }}: <b class="num">{{ formatNumber(c.value) }}</b></span>
               </p>
               <p v-if="r.error" class="err">{{ r.error }}</p>
             </td>

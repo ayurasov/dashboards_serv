@@ -16,6 +16,7 @@ from app.integrations.connectors import jira
 from app.integrations.connectors.jira import JiraConnector
 from app.models import AuditEntry, Department, Indicator, IndicatorValue
 from app.services import reports
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer
 
 TOKEN = "jira-pat-0123456789XYZ"
@@ -210,7 +211,7 @@ def create(admin, fake, rules=None, **config) -> dict:
 def run(admin, item, action="refresh") -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": action})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "jira")
 
 
 def values(db, key: str) -> dict[tuple[str, str], tuple[float, str]]:
@@ -453,11 +454,19 @@ def test_preview_writes_nothing(admin, server_jira, db):
     item = create(admin, server_jira)
     data = run(admin, item, "preview")
     assert data["status"] == "ok" and data["message"].startswith("План без записи")
-    assert "при записи будут созданы показатели: «jira.resolved», «jira.spent», «jira.open»" in data["message"]
+    # Показателей ещё нет: план считает их значения отдельно — сколько запишется, когда запуск их создаст
+    pending = data["summary"]["details"]["values"]
+    counts = {k: sum(1 for v in pending if v["indicator"] == k) for k in ("jira.resolved", "jira.spent", "jira.open")}
+    assert all(counts.values()) and data["summary"]["values_pending"] == sum(counts.values()) == 7
+    assert all(v["pending"] and v["action"] == "create" for v in pending)
+    for key, count in counts.items():
+        assert f"показатель «{key}» будет создан при запуске: значений {count}" in data["message"]
     assert db.scalar(select(func.count()).select_from(Indicator).where(Indicator.key.like("jira.%"))) == 0
-    run(admin, item)
+    written = run(admin, item)
+    assert written["summary"]["created"] == 7 and "values_pending" not in written["summary"]
     preview = run(admin, item, "preview")
     assert preview["summary"]["unchanged"] == 7 and preview["summary"]["values"] == 7
+    assert "будет создан" not in preview["message"]
 
 
 def test_search_limit_is_not_written(admin, server_jira, db, monkeypatch):

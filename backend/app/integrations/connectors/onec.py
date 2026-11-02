@@ -331,6 +331,8 @@ class Departments:
 @register
 class OneCConnector(Connector):
     kind = "onec"
+    order = 70
+    counter_labels = {"rows": "строк 1С", "rows_unmapped": "строк без подразделения"}
     title = "1С (OData)"
     description = (
         "Значения показателей сквозного отчёта из 1С (ЗУП, Бухгалтерия) через стандартный интерфейс OData "
@@ -534,12 +536,13 @@ class OneCConnector(Connector):
                 f"{who} — {n}" for who, n in unmapped.most_common(10)))
         if targets.created:
             parts.append("созданы показатели: " + ", ".join(f"«{k}»" for k in targets.created))
-        if targets.pending:
-            head = "при записи будут созданы показатели" if preview else "не созданы показатели без значений"
-            parts.append(f"{head}: " + ", ".join(f"«{k}»" for k in targets.pending))
-        counters = {**written.counters(), "rows": rows_total, "rows_unmapped": sum(unmapped.values()),
-                    "indicators_created": len(targets.created), "errors": len(errors)}
-        details = {"months": [m.key for m in months], "values": written.sample, "requests": stats,
+        pending = metrics.Pending.of(cells, targets, units, preview=preview,
+                                     room=metrics.SAMPLE_ROWS - len(written.sample))
+        parts += pending.parts
+        counters = {**written.counters(), **pending.counters, "rows": rows_total,
+                    "rows_unmapped": sum(unmapped.values()), "indicators_created": len(targets.created),
+                    "errors": len(errors)}
+        details = {"months": [m.key for m in months], "values": written.sample + pending.sample, "requests": stats,
                    **({"unmapped": dict(unmapped.most_common(50))} if unmapped else {}),
                    **({"errors": errors[:50]} if errors else {}), **({"warnings": warnings} if warnings else {})}
         message = " · ".join(parts) + (". Внимание: " + "; ".join(warnings) if warnings else "")

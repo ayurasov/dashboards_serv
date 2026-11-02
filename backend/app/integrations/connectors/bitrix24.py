@@ -137,6 +137,9 @@ def amount(value) -> float:
 @register
 class Bitrix24Connector(Connector):
     kind = "bitrix24"
+    order = 50
+    counter_labels = {"deals_won": "выигранных сделок", "deals_open": "открытых сделок",
+                      "deals_unmapped": "сделок без подразделения"}
     title = "Bitrix24"
     description = ("Сделки CRM → показатели продаж сквозного отчёта: выручка (сумма выигранных сделок за месяц), "
                    "число выигранных сделок и сумма открытых сделок — по подразделениям ответственных, помесячно. "
@@ -440,12 +443,12 @@ class Bitrix24Connector(Connector):
             warnings.append("сделки в разных валютах (" + ", ".join(sorted(currencies)) + ") сложены без пересчёта")
         if targets.created:
             parts.append("созданы показатели: " + ", ".join(f"«{k}»" for k in targets.created))
-        if targets.pending:
-            head = "при записи будут созданы показатели" if preview else "не созданы показатели без значений"
-            parts.append(f"{head}: " + ", ".join(f"«{k}»" for k in targets.pending))
-        counters = {**written.counters(), "deals_won": len(won), "deals_open": len(opened),
+        pending = metrics.Pending.of(cells, targets, units, preview=preview,
+                                     room=metrics.SAMPLE_ROWS - len(written.sample))
+        parts += pending.parts
+        counters = {**written.counters(), **pending.counters, "deals_won": len(won), "deals_open": len(opened),
                     "deals_unmapped": sum(unmapped.values()), "indicators_created": len(targets.created)}
-        details = {"months": [m.key for m in months], "values": written.sample, "requests": stats,
+        details = {"months": [m.key for m in months], "values": written.sample + pending.sample, "requests": stats,
                    **({"unmapped": dict(unmapped.most_common(50))} if unmapped else {}),
                    **({"currencies": dict(currencies)} if currencies else {}),
                    **({"warnings": warnings} if warnings else {})}

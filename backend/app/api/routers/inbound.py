@@ -2,8 +2,9 @@
 
 Аутентификация — заголовок Authorization: Bearer dash_… (ключ из «Интеграции → Ключи для входящих
 вызовов»). Сессия и cookie не используются, поэтому CSRF-токен не нужен (проверка CSRF в app/api/deps.py
-относится только к сессионному входу). Частота — не больше INBOUND_RATE_LIMIT запросов в минуту на ключ
-(счётчик в памяти процесса); превышение — 429 с Retry-After.
+относится только к сессионному входу). Частота — не больше INBOUND_RATE_LIMIT запросов в минуту на ключ:
+счётчик окна — в строке ключа в базе (integration_admin.hit_rate_limit), общий для всех процессов приложения;
+превышение — 429 с Retry-After (секунд до конца окна).
 
 Ошибки — в формате приложения {"detail", "code"} и, для совместимости с соглашениями «По Делу» и «Пульса»,
 те же значения в полях {"error" (= code), "message" (= detail)}: 401 auth_required / invalid_key,
@@ -21,7 +22,6 @@ from ... import APP_NAME, __version__
 from ...core.config import settings
 from ...core.db import get_db
 from ...core.errors import Forbidden, NotFound, TooManyRequests, Unauthorized
-from ...core.ratelimit import SlidingWindowLimiter
 from ...models import InboundKey, InboxItem
 from ...services import inbox
 from ...services import inbox_datasets as datasets
@@ -31,7 +31,6 @@ from .inbox import parse_options, read_inbox_upload
 from .org import _flag
 
 router = APIRouter(prefix="/api/inbound/v1", tags=["Приём по API"])
-limiter = SlidingWindowLimiter(settings.inbound_rate_limit, 60)
 BEARER = "bearer "
 
 
@@ -42,13 +41,12 @@ def _authenticate(request: Request, db: Session) -> InboundKey:
     key = admin.authenticate(db, header[len(BEARER):])
     if key is None:
         raise Unauthorized("Ключ недействителен или отозван", code="invalid_key")
-    name = f"inbound:{key.id}"
-    wait = limiter.blocked_for(name)
-    if wait:
-        raise TooManyRequests(f"Не больше {limiter.limit} запросов в минуту — повторите через {wait} с",
-                              code="rate_limited", headers={"Retry-After": str(wait)})
-    limiter.hit(name)
+    limit = settings.inbound_rate_limit
+    wait = admin.hit_rate_limit(db, key, limit)
     db.commit()
+    if wait:
+        raise TooManyRequests(f"Не больше {limit} запросов в минуту — повторите через {wait} с",
+                              code="rate_limited", headers={"Retry-After": str(wait)})
     return key
 
 
@@ -93,11 +91,11 @@ def _receive(db: Session, key: InboundKey, raw: bytes, filename: str, content_ty
 
 
 @router.post("/files", status_code=201, summary="Принять файл во входящие",
-             description="Multipart: file; dataset — набор (иначе распознаётся по имени и содержимому); apply=false "
-                         "— только план (ждать подтверждения), иначе — применить, если план без ошибок и для "
-                         "источника «Приём по API» и набора включено «применять сразу»; options — JSON параметров "
-                         "набора. 201 — файл принят (смотрите status: pending · applied · error · received), 200 — "
-                         "повтор уже полученного файла (status: duplicate).")
+             description="Multipart: file; dataset — набор (иначе распознаётся по содержимому, имя по шаблону — "
+                         "подсказка); apply=false — только план (ждать подтверждения), иначе — применить, если план "
+                         "без ошибок и для источника «Приём по API» и набора включено «применять сразу»; options — "
+                         "JSON параметров набора. 201 — файл принят (смотрите status: pending · applied · error · "
+                         "received), 200 — повтор уже полученного файла (status: duplicate).")
 async def receive(request: Request, file: UploadFile = File(...), dataset: str = Form(""), apply: str = Form(""),
                   options: str = Form(""), db: Session = Depends(get_db),
                   key: InboundKey = Depends(inbound_key("files"))):

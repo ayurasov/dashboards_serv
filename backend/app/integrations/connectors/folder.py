@@ -18,6 +18,10 @@ class FolderConnector(Connector):
                    "обработанные переносятся в processed/ГГГГ-ММ/ или rejected/ с отчётом *.result.json")
     url_field = None
     singleton = True
+    order = 80
+    counter_labels = {"taken": "взято файлов", "applied": "применено", "pending": "ждут подтверждения",
+                      "duplicates": "повторов", "errors": "ошибок", "waiting": "дописываются",
+                      "skipped": "пропущено"}
     actions = (Action("scan", "Разобрать папку",
                       "Забрать файлы, которые не меняются дольше INBOX_SETTLE_SECONDS, во входящие"),)
 

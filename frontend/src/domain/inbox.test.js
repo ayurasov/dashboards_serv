@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CLEARED_TEXT, cloneMatrix, fileSize, filterPlanRows, folderState, folderTree, itemSummary, optionValues, optionsChanged, optionsPayload,
+  CLEARED_TEXT, cloneMatrix, detectRules, fileSize, filterPlanRows, folderState, folderTree, itemSummary, optionValues, optionsChanged, optionsPayload,
   planBlocked, planChips, planClears, planErrors, planHeads, planNewDepartments, planRows, rowAction, rulesChanges, rulesMatrix,
   scanText, sourceInfo, statusBadge, summaryText, workerState,
 } from './inbox'
@@ -227,5 +227,17 @@ describe('папка и планировщик', () => {
     expect(tree).toContain('tp-weekly/')
     expect(tree).toContain('Недельный отчёт')
     expect(tree.split('\n').at(-1)).toMatch(/^└── rejected\//)
+  })
+})
+
+describe('распознавание в корне папки «Входящие»', () => {
+  it('по содержимому; имя по шаблону только добавляет очки — числа с сервера', () => {
+    const rules = detectRules({ threshold: 50, name_bonus: 20 })
+    expect(rules.column).toBe('Шаблоны имени: +20 к оценке в корне')
+    expect(rules.hint).toContain('распознаётся по содержимому')
+    expect(rules.hint).toContain('имя по шаблону добавляет 20, нужно не меньше 50 — по одному имени файл не распознаётся')
+    expect(rules.hint).not.toMatch(/по имени и содержимому/)
+    expect(detectRules(null)).toMatchObject({ threshold: 50, bonus: 20 })
+    expect(detectRules({ threshold: 60, name_bonus: 15 }).column).toContain('+15')
   })
 })

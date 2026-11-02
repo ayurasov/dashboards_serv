@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select, update
 
 from app.models import Department, Indicator, IndicatorValue
+from tests.conftest import assert_counters_labelled
 from tests.fake_http import FakeServer, Request
 
 PASSWORD = "Пароль-пульса-7"
@@ -162,7 +163,7 @@ def _create(admin, fake, *, secrets=None, **config) -> dict:
 def _run(admin, item) -> dict:
     response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": "indicators"})
     assert response.status_code == 200, response.text
-    return response.json()
+    return assert_counters_labelled(response.json(), "puls")
 
 
 def _values(db) -> dict[tuple[str, str], IndicatorValue]:

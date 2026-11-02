@@ -46,6 +46,9 @@ def test_disabled_without_inbox_dir(monkeypatch):
 def test_layout_and_status(folder):
     status = inbox_folder.status()
     assert status["enabled"] and status["exists"] and status["writable"] and status["settle_seconds"] == 10
+    # Распознавание в корне — по содержимому; имя по шаблону только добавляет очки (одного имени мало)
+    assert status["detect"] == {"threshold": 50, "name_bonus": 20}
+    assert status["detect"]["name_bonus"] < status["detect"]["threshold"]
     inbox_folder.scan()
     names = {p.name for p in folder.iterdir()}
     assert {"hr-months", "tp-weekly", "naumen", "processed", "rejected", ".work"} <= names

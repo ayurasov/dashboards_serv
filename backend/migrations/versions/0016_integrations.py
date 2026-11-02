@@ -2,9 +2,11 @@
 
 - integrations — подключения к внешним системам: вид коннектора, настройки (JSON без секретов),
   секреты (зашифрованы ключом, производным от SECRET_KEY) и адрес, к которому они привязаны,
-  расписание, состояние коннектора, отметки проверки и здоровья;
-- integration_runs — журнал запусков (повод, итог, счётчики, ошибка);
-- inbound_keys — ключи для входящих вызовов (SHA-256 и префикс, область, отзыв);
+  расписание (до 5 записей) и следующий запуск каждой записи (next_runs) и ближайший (next_run_at),
+  состояние коннектора, отметки проверки и здоровья;
+- integration_runs — журнал запусков (повод, итог — в том числе «прерван», счётчики, ошибка);
+- inbound_keys — ключи для входящих вызовов (SHA-256 и префикс, область, отзыв) и окно ограничения частоты,
+  общее для всех процессов (rate_window_start, rate_count);
 - inbox_items — элементы входящих: источник, файл (содержимое до срока хранения), SHA-256, набор,
   статус, план и итог (и краткая сводка для списка), пояснение источника (note: «Задача «…» · автор»);
   частичный уникальный индекс (набор, SHA-256) по «живым» элементам распознаёт повтор файла; индекс
@@ -41,6 +43,7 @@ def upgrade() -> None:
         sa.Column("secret_encrypted", sa.Text(), nullable=True),
         sa.Column("secret_bound_url", sa.String(500), nullable=True),
         sa.Column("schedule", sa.JSON(), nullable=False),
+        sa.Column("next_runs", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("next_run_at", sa.DateTime(), nullable=True),
         sa.Column("state", sa.JSON(), nullable=False),
         sa.Column("running_since", sa.DateTime(), nullable=True),
@@ -84,7 +87,8 @@ def upgrade() -> None:
                                 ondelete="SET NULL"),
         sa.CheckConstraint("trigger IN ('manual', 'schedule', 'webhook', 'folder', 'cli')",
                            name="ck_integration_runs_trigger"),
-        sa.CheckConstraint("status IN ('running', 'ok', 'partial', 'error')", name="ck_integration_runs_status"),
+        sa.CheckConstraint("status IN ('running', 'ok', 'partial', 'error', 'interrupted')",
+                           name="ck_integration_runs_status"),
     )
     op.create_index("ix_integration_runs_integration_id_started_at", "integration_runs",
                     ["integration_id", "started_at"])
@@ -101,6 +105,8 @@ def upgrade() -> None:
         sa.Column("issued_by", sa.String(100), nullable=False),
         sa.Column("last_used_at", sa.DateTime(), nullable=True),
         sa.Column("revoked_at", sa.DateTime(), nullable=True),
+        sa.Column("rate_window_start", sa.DateTime(), nullable=True),
+        sa.Column("rate_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_inbound_keys"),
         sa.UniqueConstraint("sha256", name="uq_inbound_keys_sha256"),

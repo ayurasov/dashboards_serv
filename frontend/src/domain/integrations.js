@@ -21,6 +21,8 @@ export const RUN_STATUS = {
   ok: { label: 'Успешно', tone: 'green' },
   partial: { label: 'Частично', tone: 'yellow' },
   error: { label: 'Ошибка', tone: 'red' },
+  // Процесс остановился посреди запуска (перезапуск, сбой): сервер показывает так запуск старше двух часов
+  interrupted: { label: 'Запуск прерван', tone: 'gray' },
 }
 export const runStatus = (run) => ({ ...(RUN_STATUS[run?.status] || RUN_STATUS.error), label: run?.status_label || RUN_STATUS[run?.status]?.label || run?.status || '—' })
 
@@ -41,26 +43,37 @@ export function rateLimitText(limit) {
   return `Частота вызовов ограничена: не больше ${formatNumber(n)} ${plural(n, ['запроса', 'запросов', 'запросов'])} в минуту на ключ`
 }
 
+/**
+ * Области ключа. Подписи — с сервера (GET /api/integrations/keys/scopes и scope_labels ключа); этот список —
+ * только запасной, пока ответ не пришёл, с теми же подписями.
+ */
 export const SCOPES = [
-  { value: 'files', label: 'Приём файлов', hint: 'POST /api/inbound/v1/files — файлы во входящие' },
-  { value: 'status', label: 'Чтение статусов', hint: 'GET /api/inbound/v1/files/{id} — статус файлов, принятых этим ключом' },
+  { value: 'files', label: 'Приём файлов', hint: 'POST /api/inbound/v1/files — файлы во «Входящие»' },
+  { value: 'status', label: 'Чтение статусов принятых файлов', hint: 'GET /api/inbound/v1/files/{id} — статус файлов, принятых этим ключом' },
 ]
 
-// Счётчики журнала запусков: подписи известных; остальные — как прислал коннектор
-const COUNTER_LABELS = {
-  taken: 'взято', applied: 'применено', pending: 'ожидают', duplicates: 'повторов', errors: 'ошибок',
-  waiting: 'дописываются', skipped: 'пропущено', files: 'файлов', created: 'создано', updated: 'обновлено',
-  unchanged: 'без изменений', departments: 'подразделений', users: 'сотрудников', projects: 'проектов',
-  issues: 'задач', deals: 'сделок', messages: 'писем', attachments: 'вложений', values: 'значений', pages: 'страниц',
+/**
+ * Подписи счётчиков журнала запусков — с сервера: counter_labels вида подключения (GET /kinds: общие подписи
+ * каркаса и свои коннектора). Запасные — на случай, если описания вида нет (вид удалён из сервера).
+ */
+const FALLBACK_COUNTER_LABELS = {
+  values: 'значений', created: 'новых', updated: 'изменено', unchanged: 'без изменений', cleared: 'очищено',
+  files: 'файлов', added: 'во «Входящие»', seen: 'уже забраны', errors: 'ошибок', skipped: 'пропущено',
+  taken: 'взято файлов', applied: 'применено', pending: 'ждут подтверждения', duplicates: 'повторов',
 }
 
-/** Сводка запуска: [{ key, label, value }] — ненулевые числовые счётчики (items — число элементов входящих). */
-export function runCounters(summary, { zeros = false } = {}) {
+/**
+ * Сводка запуска: [{ key, label, value }] — ненулевые числовые счётчики с подписью (items — число элементов
+ * входящих). labels — counter_labels вида подключения; счётчик без подписи не показывается (служебные числа,
+ * например номер элемента, и английские ключи в журнал не попадают).
+ */
+export function runCounters(summary, { zeros = false, labels = null } = {}) {
   if (!summary || typeof summary !== 'object') return []
+  const known = { ...FALLBACK_COUNTER_LABELS, ...(labels || {}) }
   const out = []
   for (const [key, value] of Object.entries(summary)) {
-    if (key === 'items' && Array.isArray(value)) out.push({ key, label: 'элементов входящих', value: value.length })
-    else if (typeof value === 'number') out.push({ key, label: COUNTER_LABELS[key] || key.replaceAll('_', ' '), value })
+    if (key === 'items' && Array.isArray(value)) out.push({ key, label: known.items || 'элементов входящих', value: value.length })
+    else if (typeof value === 'number' && known[key]) out.push({ key, label: known[key], value })
   }
   return zeros ? out : out.filter((c) => c.value)
 }
@@ -68,9 +81,37 @@ export function runCounters(summary, { zeros = false } = {}) {
 /** Название в кавычках «…», если в нём своих кавычек нет: «Jira», но Папка «Входящие». */
 export const quoted = (name) => (/[«»"]/.test(String(name || '')) ? String(name) : `«${name}»`)
 
-export function runCountersText(summary) {
-  return runCounters(summary).map((c) => `${c.label}: ${formatNumber(c.value)}`).join(' · ')
+export function runCountersText(summary, labels = null) {
+  return runCounters(summary, { labels }).map((c) => `${c.label}: ${formatNumber(c.value)}`).join(' · ')
 }
+
+/**
+ * Ошибка для карточки: только если она новее последнего успеха (сервер — current_error). Старая ошибка при
+ * «Работает» не показывается — она остаётся в журнале запусков.
+ */
+export function currentError(integration) {
+  const it = integration || {}
+  if (typeof it.current_error === 'string') return it.current_error
+  if (!it.last_error || !it.last_error_at) return ''
+  return !it.last_ok_at || toTime(it.last_error_at) > toTime(it.last_ok_at) ? it.last_error : ''
+}
+
+/** Порядок видов — как на сервере (order: «По Делу», «Пульс проекта», Jira, Confluence, Bitrix24, Exchange, 1С, папка). */
+export function kindOrder(kinds = []) {
+  return (key) => {
+    const index = kinds.findIndex((k) => k.kind === key)
+    return index === -1 ? kinds.length : index
+  }
+}
+
+/** Подключения в порядке видов, внутри вида — по названию (как отдаёт сервер). */
+export function sortIntegrations(list = [], kinds = []) {
+  const order = kindOrder(kinds)
+  return [...list].sort((a, b) => order(a.kind) - order(b.kind) || String(a.name).localeCompare(String(b.name), 'ru'))
+}
+
+/** Вид только для администратора (admin_only: Confluence публикует полный отчёт) и пользователь — не администратор. */
+export const adminOnlyFor = (kind, isAdmin) => !!kind?.admin_only && !isAdmin
 
 /** Длительность запуска: «12 с», «3 мин 5 с», «—» — не закончен. */
 export function runDuration(run) {
@@ -99,6 +140,25 @@ export const FIELD_TYPES = ['string', 'text', 'url', 'password', 'int', 'bool', 
 /** Поле JSON (правила Jira, запросы 1С) — или текст с признаком monospace: моноширинное многострочное поле. */
 export const isJsonField = (field) => field?.type === 'json'
 export const isMonospace = (field) => isJsonField(field) || (field?.type === 'text' && !!field.monospace)
+
+/** Длина подписи варианта, с которой выбор из списка не помещается в половину формы («Server / Data Center — …»). */
+export const LONG_OPTION = 26
+
+/**
+ * Поле на всю ширину формы: текст, список, адрес, JSON и выбор из списка с длинными подписями вариантов — иначе
+ * выбранный вариант обрезается («Тип подключения» Jira и Confluence).
+ */
+export function isWideField(field) {
+  if (['text', 'list', 'url', 'json'].includes(field?.type)) return true
+  if (field?.type !== 'select') return false
+  return [field.placeholder, ...(field.options || []).map((o) => o.label)].some((t) => String(t || '').length > LONG_OPTION)
+}
+
+/**
+ * Выбор из 2–4 вариантов с длинными подписями («Тип подключения»: «Server / Data Center — персональный токен
+ * (PAT)») — списком переключателей: выпадающий список на телефоне обрезал бы выбранный вариант.
+ */
+export const isChoiceField = (field) => field?.type === 'select' && (field.options || []).length <= 4 && isWideField(field)
 
 /**
  * Разбор поля JSON: { ok, value, error }. Пусто — ok со значением null. Ошибка — «Ошибка JSON: строка 3,
@@ -440,8 +500,9 @@ export function richPreview(text, limit = 180) {
 
 // ---------------------------------------------------------------- расписание
 
+/** Записи расписания одного подключения: у каждой свой вид, время и действия; не больше MAX_SCHEDULES. */
+export const MAX_SCHEDULES = 5
 export const SCHEDULE_MODES = [
-  { value: 'off', label: 'Вручную' },
   { value: 'interval', label: 'Через интервал' },
   { value: 'daily', label: 'В заданное время' },
 ]
@@ -469,9 +530,15 @@ export function intervalText(minutes) {
   return `${plural(n, ['каждую', 'каждые', 'каждые'])} ${n} ${plural(n, ['минуту', 'минуты', 'минут'])}`
 }
 
-/** Подпись расписания — как на сервере (schedule_label): «Вручную», «Каждые 60 мин», «В 06:30 (пн, пт)». */
-export function scheduleLabel(schedule) {
-  const s = schedule || {}
+/** Записи расписания из API: список (0.4.0) или прежний вид — один объект; {} и mode off — вручную. */
+export function scheduleEntries(schedule) {
+  const list = Array.isArray(schedule) ? schedule : schedule && typeof schedule === 'object' ? [schedule] : []
+  return list.filter((e) => e && ['interval', 'daily'].includes(e.mode))
+}
+
+/** Подпись записи — как на сервере: «Каждые 60 мин», «В 06:30 (пн, пт)», «В 06:30 ежедневно». */
+export function entryLabel(entry) {
+  const s = entry || {}
   if (s.mode === 'interval' && s.minutes) return `Каждые ${s.minutes} мин`
   if (s.mode === 'daily' && s.time) {
     const days = [...(s.weekdays || [])].sort((a, b) => a - b)
@@ -481,45 +548,91 @@ export function scheduleLabel(schedule) {
   return 'Вручную'
 }
 
-/** Черновик расписания для формы; действия — сохранённые или первое действие по расписанию. */
-export function scheduleDraft(schedule, kind) {
-  const s = schedule || {}
+const actionNames = (entry, kind) => (entry.actions || []).map((key) => (kind?.actions || []).find((a) => a.key === key)?.label || key)
+
+/**
+ * Подпись расписания — как на сервере (schedule_label): «Вручную»; одна запись — её подпись; несколько —
+ * через «;» с действиями: «Каждые 30 мин — Забрать данные из задач; В 06:00 ежедневно — Синхронизировать структуру».
+ */
+export function scheduleLabel(schedule, kind = null) {
+  const entries = scheduleEntries(schedule).filter((e) => entryLabel(e) !== 'Вручную')
+  if (!entries.length) return 'Вручную'
+  if (entries.length === 1) return entryLabel(entries[0])
+  return entries.map((e) => {
+    const names = actionNames(e, kind)
+    return `${entryLabel(e)}${names.length ? ` — ${names.join(', ')}` : ''}`
+  }).join('; ')
+}
+
+/** Черновик записи для формы; действия — сохранённые (допустимые) или переданные по умолчанию. */
+export function entryDraft(entry, kind, fallback = null) {
+  const s = entry || {}
   const allowed = schedulableActions(kind).map((a) => a.key)
   const actions = (s.actions || []).filter((a) => allowed.includes(a))
   return {
-    mode: ['interval', 'daily'].includes(s.mode) ? s.mode : 'off',
+    mode: s.mode === 'daily' ? 'daily' : 'interval',
     minutes: s.minutes ? String(s.minutes) : '60',
     time: s.time || '06:00',
     weekdays: [...(s.weekdays || [])].sort((a, b) => a - b),
-    actions: actions.length ? actions : allowed.slice(0, 1),
+    actions: actions.length ? actions : (fallback || allowed.slice(0, 1)),
   }
 }
 
-/** Ошибки черновика: { 'schedule.minutes' | 'schedule.time' | 'schedule.actions': текст }. */
-export function scheduleErrors(draft, kind) {
+/** Черновик расписания: список записей (пустой — вручную). */
+export function scheduleDraft(schedule, kind) {
+  return scheduleEntries(schedule).map((e) => entryDraft(e, kind))
+}
+
+/**
+ * Новая запись «Добавить расписание»: через интервал 60 минут; действие — первое по расписанию, которого ещё нет
+ * в других записях (у «По Делу» вторая запись получает «Забрать данные из задач»), иначе первое.
+ */
+export function newScheduleEntry(kind, drafts = []) {
+  const allowed = schedulableActions(kind).map((a) => a.key)
+  const used = new Set(drafts.flatMap((d) => d.actions || []))
+  const free = allowed.find((a) => !used.has(a)) || allowed[0]
+  return entryDraft({ mode: 'interval', minutes: 60, actions: free ? [free] : [] }, kind)
+}
+
+export const canAddSchedule = (drafts = [], kind = null) => drafts.length < MAX_SCHEDULES && schedulableActions(kind).length > 0
+
+/**
+ * Ошибки черновика: { 'schedule.<номер записи с 0>.minutes' | '….time' | '….actions' | 'schedule': текст } —
+ * те же поля, что в ошибках сервера.
+ */
+export function scheduleErrors(drafts, kind) {
   const errors = {}
-  if (!draft || draft.mode === 'off') return errors
+  const list = Array.isArray(drafts) ? drafts : []
+  if (!list.length) return errors
   if (!schedulableActions(kind).length) {
     errors.schedule = 'У этого подключения нет действий по расписанию'
     return errors
   }
-  if (draft.mode === 'interval') {
-    const text = String(draft.minutes ?? '').trim()
-    const n = Number(text)
-    if (!/^\d+$/.test(text) || n < MIN_INTERVAL || n > MAX_INTERVAL) errors['schedule.minutes'] = `Целое число минут от ${MIN_INTERVAL} до ${formatNumber(MAX_INTERVAL)} (неделя)`
-  }
-  if (draft.mode === 'daily' && !TIME_RE.test(String(draft.time || ''))) errors['schedule.time'] = 'Время в формате ЧЧ:ММ'
-  if (!draft.actions?.length) errors['schedule.actions'] = 'Выберите хотя бы одно действие'
+  if (list.length > MAX_SCHEDULES) errors.schedule = `Не больше ${MAX_SCHEDULES} расписаний у подключения`
+  list.forEach((draft, n) => {
+    const place = `schedule.${n}`
+    if (draft.mode === 'interval') {
+      const text = String(draft.minutes ?? '').trim()
+      const value = Number(text)
+      if (!/^\d+$/.test(text) || value < MIN_INTERVAL || value > MAX_INTERVAL) errors[`${place}.minutes`] = `Целое число минут от ${MIN_INTERVAL} до ${formatNumber(MAX_INTERVAL)} (неделя)`
+    }
+    if (draft.mode === 'daily' && !TIME_RE.test(String(draft.time || ''))) errors[`${place}.time`] = 'Время в формате ЧЧ:ММ'
+    if (!draft.actions?.length) errors[`${place}.actions`] = 'Выберите хотя бы одно действие'
+  })
   return errors
 }
 
-/** Тело расписания для API: { mode: off } или с интервалом / временем, днями и действиями. */
-export function schedulePayload(draft) {
-  if (!draft || draft.mode === 'off') return { mode: 'off' }
-  const base = { mode: draft.mode, actions: [...(draft.actions || [])] }
-  if (draft.mode === 'interval') return { ...base, minutes: Number(String(draft.minutes).trim()) }
-  return { ...base, time: draft.time, weekdays: [...new Set(draft.weekdays || [])].sort((a, b) => a - b) }
+/** Тело расписания для API: список записей с интервалом или временем, днями и действиями ([] — вручную). */
+export function schedulePayload(drafts) {
+  return (Array.isArray(drafts) ? drafts : []).map((draft) => {
+    const base = { mode: draft.mode, actions: [...(draft.actions || [])] }
+    if (draft.mode === 'interval') return { ...base, minutes: Number(String(draft.minutes).trim()) }
+    return { ...base, time: draft.time, weekdays: [...new Set(draft.weekdays || [])].sort((a, b) => a - b) }
+  })
 }
+
+/** Действия, которые выполняются хотя бы одной записью расписания (для отметки «по расписанию» на карточке). */
+export const scheduledActions = (schedule) => [...new Set(scheduleEntries(schedule).flatMap((e) => e.actions || []))]
 
 export function toggleWeekday(weekdays = [], day) {
   return weekdays.includes(day) ? weekdays.filter((d) => d !== day) : [...weekdays, day].sort((a, b) => a - b)

@@ -1,17 +1,25 @@
 """Запуск подключений: экземпляр коннектора с секретами, проверка, действие, журнал запусков, расписание.
 
-Расписание (integrations.schedule):
-    {}                                                    — только вручную
-    {"mode": "interval", "minutes": 60, "actions": ["sync"]}            — каждые N минут (5…10080)
-    {"mode": "daily", "time": "06:30", "weekdays": [1, 5], "actions": […]} — в ЧЧ:ММ по TIMEZONE;
+Расписание (integrations.schedule) — список записей, не больше MAX_ENTRIES (пустой — только вручную):
+    [{"mode": "interval", "minutes": 30, "actions": ["pull"]},                  — каждые N минут (5…10080)
+     {"mode": "daily", "time": "06:30", "weekdays": [1, 5], "actions": […]}]    — в ЧЧ:ММ по TIMEZONE;
         weekdays — дни недели ISO (1 — понедельник), пусто — каждый день
-actions — действия коннектора с schedulable=True; по умолчанию — первое такое.
+actions — действия коннектора с schedulable=True; по умолчанию — первое такое. Прежний вид — один объект
+{"mode": …} или {} — принимается и читается как одна запись (entries_of).
 
-Занятие запуска атомарно (claim_due): UPDATE integrations SET next_run_at = <следующий> WHERE id = …
-AND enabled AND next_run_at <= now — на PostgreSQL второй процесс ждёт блокировку строки и после неё
-условие уже не выполняется, на SQLite записи и так идут по очереди. Поэтому несколько планировщиков не
-выполнят один запуск дважды. Ручной запуск во время идущего не начнётся: running_since занимается тем же
-приёмом (begin_running).
+У каждой записи свой следующий запуск (integrations.next_runs — список по порядку записей, ISO-время UTC);
+integrations.next_run_at — ближайший из них (по нему планировщик выбирает подключения и его показывает карточка).
+
+Занятие запуска атомарно (claim_due): UPDATE integrations SET next_run_at = <ближайший после занятия>,
+next_runs = <записи, чей срок настал, — на следующий раз> WHERE id = … AND enabled AND next_run_at <= now
+AND next_run_at = <прочитанное> — на PostgreSQL второй процесс ждёт блокировку строки и после неё условие уже не
+выполняется, на SQLite записи и так идут по очереди. Поэтому несколько планировщиков не выполнят одну запись
+дважды; занявший выполняет действия всех записей, чей срок настал. Ручной запуск во время идущего не начнётся:
+running_since занимается тем же приёмом (begin_running).
+
+Запуск, который идёт дольше RUNNING_TIMEOUT (процесс остановился посреди запуска: перезапуск, сбой), считается
+прерванным: API показывает его «Запуск прерван» (статус interrupted), подключение снова можно запустить, а
+begin_running и планировщик (reclaim_stale) занимают его заново и отмечают такие записи журнала прерванными.
 
 Секреты не попадают ни в журнал сервера, ни в журнал запусков, ни в ответы API: тексты проверки и запуска
 (сообщение, ошибка, подробности, last_error) и журнал неожиданных исключений (сообщение и трассировка —
@@ -44,7 +52,12 @@ log = logging.getLogger("app.integrations")
 PURPOSE = "integration"
 RUNNING_TIMEOUT = timedelta(hours=2)
 MIN_INTERVAL, MAX_INTERVAL = 5, 7 * 24 * 60
+MAX_ENTRIES = 5
+MODES = ("interval", "daily")
 INTERNAL_ERROR = "Внутренняя ошибка коннектора — подробности в журнале сервера"
+INTERRUPTED = ("Запуск прерван: процесс приложения или планировщика остановился до окончания запуска (перезапуск, "
+               "сбой) — подключение можно запустить снова")
+WEEKDAY_NAMES = {1: "пн", 2: "вт", 3: "ср", 4: "чт", 5: "пт", 6: "сб", 7: "вс"}
 
 
 def owner(integration_id: int | None) -> str:
@@ -107,44 +120,77 @@ def connector_for(row: Integration, *, detailed: bool = True, config: dict | Non
 
 # ---------------------------------------------------------------- расписание
 
-def normalize_schedule(cls: type[Connector], schedule: dict | None) -> dict:
-    schedule = dict(schedule or {})
+def entries_of(schedule: object) -> list[dict]:
+    """Записи расписания: список (0.4.0) или прежний вид — один объект {mode, …} ({} и mode off — вручную)."""
+    if isinstance(schedule, dict):
+        schedule = schedule["entries"] if isinstance(schedule.get("entries"), list) else [schedule]
+    if not isinstance(schedule, list):
+        return []
+    return [dict(e) for e in schedule if isinstance(e, dict) and e.get("mode") in MODES]
+
+
+def schedule_actions(schedule: object) -> list[str]:
+    """Действия всех записей расписания по порядку, без повторов."""
+    return list(dict.fromkeys(a for e in entries_of(schedule) for a in e.get("actions") or []))
+
+
+def _normalize_entry(cls: type[Connector], schedule: dict, schedulable: list[str], place: str) -> dict | None:
     mode = schedule.get("mode") or "off"
     if mode == "off":
-        return {}
-    schedulable = [a.key for a in cls.actions if a.schedulable]
-    if not schedulable:
-        raise ValidationFailed(f"У подключения «{cls.title}» нет действий по расписанию",
-                               fields={"schedule": "Нет действий по расписанию"})
+        return None
     actions = schedule.get("actions") or schedulable[:1]
     if not isinstance(actions, list) or any(a not in schedulable for a in actions):
         raise ValidationFailed(f"По расписанию выполняются: {', '.join(schedulable)}",
-                               fields={"schedule.actions": "Недопустимое действие"})
+                               fields={f"{place}.actions": "Недопустимое действие"})
     out: dict = {"mode": mode, "actions": list(dict.fromkeys(actions))}
     if mode == "interval":
         try:
             minutes = int(schedule.get("minutes"))
         except (TypeError, ValueError):
-            raise ValidationFailed("Интервал — целое число минут", fields={"schedule.minutes": "Нужно число"}) from None
+            raise ValidationFailed("Интервал — целое число минут", fields={f"{place}.minutes": "Нужно число"}) from None
         if not MIN_INTERVAL <= minutes <= MAX_INTERVAL:
             raise ValidationFailed(f"Интервал — от {MIN_INTERVAL} минут до недели",
-                                   fields={"schedule.minutes": "Вне допустимого"})
+                                   fields={f"{place}.minutes": "Вне допустимого"})
         out["minutes"] = minutes
     elif mode == "daily":
         time_text = str(schedule.get("time") or "")
         if not base.TIME_PATTERN.match(time_text):
-            raise ValidationFailed("Время запуска — ЧЧ:ММ", fields={"schedule.time": "Нужно ЧЧ:ММ"})
+            raise ValidationFailed("Время запуска — ЧЧ:ММ", fields={f"{place}.time": "Нужно ЧЧ:ММ"})
         weekdays = schedule.get("weekdays") or []
         if not isinstance(weekdays, list) or any(not isinstance(d, int) or not 1 <= d <= 7 for d in weekdays):
-            raise ValidationFailed("Дни недели — числа 1…7 (1 — понедельник)", fields={"schedule.weekdays": "1…7"})
+            raise ValidationFailed("Дни недели — числа 1…7 (1 — понедельник)", fields={f"{place}.weekdays": "1…7"})
         out.update(time=time_text, weekdays=sorted(set(weekdays)))
     else:
-        raise ValidationFailed("Расписание: off, interval или daily", fields={"schedule.mode": "Недопустимо"})
+        raise ValidationFailed("Расписание: off, interval или daily", fields={f"{place}.mode": "Недопустимо"})
+    return out
+
+
+def normalize_schedule(cls: type[Connector], schedule: object) -> list[dict]:
+    """Расписание из API: список записей {mode: interval | daily, minutes, time, weekdays, actions} (не больше
+    MAX_ENTRIES) или прежний вид — один объект (становится одной записью; {} и mode off — вручную). Записи с mode
+    off пропускаются. Ошибка — ValidationFailed с полем schedule.<номер записи с 0>.<поле> (у одного объекта —
+    schedule.<поле>)."""
+    single = not isinstance(schedule, list)
+    raw = [schedule or {}] if single else list(schedule)
+    if any(not isinstance(e, dict) for e in raw):
+        raise ValidationFailed("Расписание — список записей {mode, minutes, time, weekdays, actions}",
+                               fields={"schedule": "Нужен список записей"})
+    if all((e.get("mode") or "off") == "off" for e in raw):
+        return []
+    schedulable = [a.key for a in cls.actions if a.schedulable]
+    if not schedulable:
+        raise ValidationFailed(f"У подключения «{cls.title}» нет действий по расписанию",
+                               fields={"schedule": "Нет действий по расписанию"})
+    out = [entry for n, e in enumerate(raw)
+           if (entry := _normalize_entry(cls, e, schedulable, "schedule" if single else f"schedule.{n}"))]
+    if len(out) > MAX_ENTRIES:
+        raise ValidationFailed(f"Не больше {MAX_ENTRIES} записей расписания у подключения",
+                               fields={"schedule": f"Не больше {MAX_ENTRIES}"})
     return out
 
 
 def next_run(schedule: dict | None, after: datetime) -> datetime | None:
-    """Следующий запуск после after (UTC без tzinfo); None — расписания нет."""
+    """Следующий запуск записи расписания после after (UTC без tzinfo); None — записи нет."""
     schedule = schedule or {}
     mode = schedule.get("mode")
     if mode == "interval":
@@ -163,25 +209,89 @@ def next_run(schedule: dict | None, after: datetime) -> datetime | None:
     return None  # pragma: no cover - за неделю день находится всегда
 
 
-def schedule_label(schedule: dict | None) -> str:
-    schedule = schedule or {}
-    if schedule.get("mode") == "interval":
-        return f"Каждые {schedule['minutes']} мин"
-    if schedule.get("mode") == "daily":
-        names = {1: "пн", 2: "вт", 3: "ср", 4: "чт", 5: "пт", 6: "сб", 7: "вс"}
-        days = schedule.get("weekdays") or []
-        return f"В {schedule['time']}" + (f" ({', '.join(names[d] for d in days)})" if days else " ежедневно")
+def entry_label(entry: dict | None) -> str:
+    """Подпись записи: «Каждые 60 мин», «В 06:30 (пн, пт)», «В 06:30 ежедневно»."""
+    entry = entry or {}
+    if entry.get("mode") == "interval":
+        return f"Каждые {entry['minutes']} мин"
+    if entry.get("mode") == "daily":
+        days = entry.get("weekdays") or []
+        return f"В {entry['time']}" + (f" ({', '.join(WEEKDAY_NAMES[d] for d in days)})" if days else " ежедневно")
     return "Вручную"
 
 
+def schedule_label(schedule: object, cls: type[Connector] | None = None) -> str:
+    """Подпись расписания: «Вручную»; одна запись — её подпись; несколько — через «;» с действиями
+    («Каждые 30 мин — Забрать данные из задач; В 06:00 ежедневно — Синхронизировать структуру»)."""
+    entries = entries_of(schedule)
+    if not entries:
+        return "Вручную"
+    if len(entries) == 1:
+        return entry_label(entries[0])
+
+    def what(entry: dict) -> str:
+        labels = {a.key: a.label for a in cls.actions} if cls is not None else {}
+        names = [labels.get(a, a) for a in entry.get("actions") or []]
+        return entry_label(entry) + (f" — {', '.join(names)}" if names else "")
+
+    return "; ".join(what(e) for e in entries)
+
+
+def _stamp(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _parse(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def entry_times(schedule: object, next_runs: object, next_run_at: datetime | None) -> list[datetime | None]:
+    """Следующий запуск каждой записи. Сохранённые до 0.4.0 подключения (одна запись, без next_runs) и
+    рассогласованные данные — по next_run_at подключения."""
+    entries = entries_of(schedule)
+    stored = next_runs if isinstance(next_runs, list) else []
+    if len(stored) != len(entries):
+        return [next_run_at] * len(entries)
+    return [_parse(v) for v in stored]
+
+
+def _set_times(row: Integration, times: list[datetime | None]) -> None:
+    row.next_runs = [_stamp(t) for t in times]
+    known = [t for t in times if t is not None]
+    row.next_run_at = min(known) if known else None
+
+
 def reschedule(row: Integration, now: datetime | None = None) -> None:
-    row.next_run_at = next_run(row.schedule, now or utcnow()) if row.enabled else None
+    """Следующий запуск каждой записи и ближайший (next_run_at) — после изменения расписания или включения;
+    выключенное подключение по расписанию не запускается."""
+    now = now or utcnow()
+    entries = entries_of(row.schedule)
+    _set_times(row, [next_run(e, now) for e in entries] if row.enabled else [None] * len(entries))
 
 
-def _claim(db: Session, integration_id: int, now: datetime, new_next: datetime | None) -> bool:
-    stmt = (update(Integration)
-            .where(Integration.id == integration_id, Integration.enabled.is_(True), Integration.next_run_at <= now)
-            .values(next_run_at=new_next).execution_options(synchronize_session=False))
+def schedule_out(row: Integration) -> list[dict]:
+    """Записи расписания для API: определение, подпись и следующий запуск записи (у выключенного — нет)."""
+    times = entry_times(row.schedule, row.next_runs, row.next_run_at)
+    return [{**entry, "label": entry_label(entry), "next_run_at": time if row.enabled else None}
+            for entry, time in zip(entries_of(row.schedule), times, strict=True)]
+
+
+def _claim(db: Session, integration_id: int, now: datetime, new_next: datetime | None,
+           next_runs: list[str | None] | None = None, seen: datetime | None = None) -> bool:
+    """Занять запуск подключения одним UPDATE: срок настал (next_run_at <= now) и, если передано seen, ближайший
+    запуск — тот же, что прочитан (расписание не меняли между чтением и занятием)."""
+    conditions = [Integration.id == integration_id, Integration.enabled.is_(True), Integration.next_run_at <= now]
+    if seen is not None:
+        conditions.append(Integration.next_run_at == seen)
+    values: dict = {"next_run_at": new_next}
+    if next_runs is not None:
+        values["next_runs"] = next_runs
+    stmt = update(Integration).where(*conditions).values(**values).execution_options(synchronize_session=False)
     if db.get_bind().dialect.update_returning:
         claimed = db.execute(stmt.returning(Integration.id)).scalar() is not None
     else:  # pragma: no cover - SQLite до 3.35
@@ -191,32 +301,87 @@ def _claim(db: Session, integration_id: int, now: datetime, new_next: datetime |
 
 
 def claim_due(now: datetime | None = None, db: Session | None = None) -> list[tuple[int, list[str]]]:
-    """Подключения, чей запуск настал и занят этим процессом: [(id, действия)]."""
+    """Подключения, у которых настал срок хотя бы одной записи расписания и которые заняты этим процессом:
+    [(id, действия записей, чей срок настал)]. Занятие переносит эти записи на следующий раз одним UPDATE."""
     now = now or utcnow()
     own = db is None
     db = db or core_db.SessionLocal()
     try:
-        due = db.execute(select(Integration.id, Integration.schedule)
+        due = db.execute(select(Integration.id, Integration.schedule, Integration.next_runs, Integration.next_run_at)
                          .where(Integration.enabled.is_(True), Integration.next_run_at.is_not(None),
                                 Integration.next_run_at <= now).order_by(Integration.next_run_at)).all()
         db.commit()
         claimed = []
-        for integration_id, schedule in due:
-            if _claim(db, integration_id, now, next_run(schedule, now)):
-                claimed.append((integration_id, list((schedule or {}).get("actions") or [])))
+        for integration_id, schedule, stored, seen in due:
+            entries = entries_of(schedule)
+            times = entry_times(schedule, stored, seen)
+            ready = [n for n, t in enumerate(times) if t is None or t <= now]
+            new = [next_run(e, now) if n in ready else times[n] for n, e in enumerate(entries)]
+            known = [t for t in new if t is not None]
+            if _claim(db, integration_id, now, min(known) if known else None, [_stamp(t) for t in new], seen):
+                claimed.append((integration_id, list(dict.fromkeys(
+                    a for n in ready if times[n] is not None for a in entries[n].get("actions") or []))))
         return claimed
     finally:
         if own:
             db.close()
 
 
+# ---------------------------------------------------------------- идущий запуск
+
+def running_stale(since: datetime | None, now: datetime | None = None) -> bool:
+    """Запуск идёт дольше RUNNING_TIMEOUT — процесс остановился посреди него: запуск прерван."""
+    return since is not None and since < (now or utcnow()) - RUNNING_TIMEOUT
+
+
+def is_running(row: Integration, now: datetime | None = None) -> bool:
+    """Подключение выполняет запуск (не прерванный): новый запуск не начнётся, удалить нельзя."""
+    return row.running_since is not None and not running_stale(row.running_since, now)
+
+
 def begin_running(db: Session, integration_id: int, now: datetime) -> bool:
+    """Занять подключение для запуска: свободно или идущий запуск прерван (старше RUNNING_TIMEOUT). Записи журнала
+    этого подключения, оставшиеся «выполняется», после занятия — прерванные."""
     result = db.execute(update(Integration).where(
         Integration.id == integration_id,
         or_(Integration.running_since.is_(None), Integration.running_since < now - RUNNING_TIMEOUT))
         .values(running_since=now).execution_options(synchronize_session=False))
+    if result.rowcount == 1:
+        _interrupt(db, IntegrationRun.integration_id == integration_id)
     db.commit()
     return result.rowcount == 1
+
+
+def _interrupt(db: Session, *conditions) -> int:
+    return db.execute(update(IntegrationRun).where(IntegrationRun.status == "running", *conditions)
+                      .values(status="interrupted", message=INTERRUPTED)
+                      .execution_options(synchronize_session=False)).rowcount
+
+
+def reclaim_stale(now: datetime | None = None, db: Session | None = None) -> int:
+    """Прерванные запуски (старше RUNNING_TIMEOUT): подключение освобождается, запись журнала — «Запуск прерван».
+    Вызывает планировщик на каждом такте; то же условие, что у begin_running и у API (running_stale)."""
+    now = now or utcnow()
+    own = db is None
+    db = db or core_db.SessionLocal()
+    try:
+        border = now - RUNNING_TIMEOUT
+        db.execute(update(Integration).where(Integration.running_since < border).values(running_since=None)
+                   .execution_options(synchronize_session=False))
+        count = _interrupt(db, IntegrationRun.started_at < border)
+        db.commit()
+        return count
+    finally:
+        if own:
+            db.close()
+
+
+def current_error(row: Integration) -> str:
+    """Последняя ошибка, если она новее последнего успеха; ошибка до успешного запуска или проверки — только в
+    журнале запусков."""
+    if row.last_error_at and (row.last_ok_at is None or row.last_error_at > row.last_ok_at):
+        return row.last_error or ""
+    return ""
 
 
 # ---------------------------------------------------------------- проверка
@@ -337,11 +502,16 @@ def prune(db: Session, integration_id: int) -> int:
     return len(old)
 
 
-def run_out(run: IntegrationRun) -> dict:
+def run_out(run: IntegrationRun, now: datetime | None = None) -> dict:
+    """Запись журнала для API. «Выполняется» дольше RUNNING_TIMEOUT — «Запуск прерван» (interrupted), как её
+    отметят begin_running и планировщик."""
     from ..services.registry import RUN_STATUS_LABELS, RUN_TRIGGER_LABELS
 
+    status, message = run.status, run.message
+    if status == "running" and running_stale(run.started_at, now):
+        status, message = "interrupted", INTERRUPTED
     return {"id": run.id, "integration_id": run.integration_id, "action": run.action, "trigger": run.trigger,
-            "trigger_label": RUN_TRIGGER_LABELS.get(run.trigger, run.trigger), "status": run.status,
-            "status_label": RUN_STATUS_LABELS.get(run.status, run.status), "started_at": run.started_at,
-            "finished_at": run.finished_at, "summary": run.summary or {}, "message": run.message,
+            "trigger_label": RUN_TRIGGER_LABELS.get(run.trigger, run.trigger), "status": status,
+            "status_label": RUN_STATUS_LABELS.get(status, status), "started_at": run.started_at,
+            "finished_at": run.finished_at, "summary": run.summary or {}, "message": message,
             "error": run.error, "username": run.username}

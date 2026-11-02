@@ -13,13 +13,14 @@ import { integrationsApi } from '@/api/integrations'
 import { useAsync } from '@/composables/useAsync'
 import { useQueryState } from '@/composables/useQueryState'
 import { useAuthStore } from '@/stores/auth'
-import { kindIcon } from '@/domain/integrations'
+import { kindIcon, sortIntegrations } from '@/domain/integrations'
 
 /**
  * «Интеграции» (ADR-0011, администратор и integrations.manage): подключения к корпоративным системам
  * карточками — состояние, проверка, включение, действия «Запустить», расписание, журнал запусков;
- * «Подключить систему» — все виды, которые знает сервер (форма настроек строится по их описанию);
- * ключи для входящих вызовов.
+ * «Подключить систему» — все виды, которые знает сервер, в порядке сервера (форма настроек строится по их
+ * описанию); карточки — в том же порядке видов, внутри вида — по названию; ключи для входящих вызовов.
+ * Вид «только администратор» (Confluence) остальным виден только для чтения.
  */
 const auth = useAuthStore()
 const { state: q } = useQueryState({ tab: 'connections' })
@@ -55,11 +56,11 @@ function pick(kind) {
 }
 function edit(integration) {
   const kind = kindOf(integration.kind) || integration.connector
-  if (kind) editing.value = { kind, integration }
+  if (kind && integration.can_manage !== false) editing.value = { kind, integration }
 }
 function saved(row) {
   const exists = list.value.some((i) => i.id === row.id)
-  data.value = exists ? list.value.map((i) => (i.id === row.id ? row : i)) : [...list.value, row].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  data.value = sortIntegrations(exists ? list.value.map((i) => (i.id === row.id ? row : i)) : [...list.value, row], kinds.data.value || [])
   editing.value = null
 }
 </script>
@@ -104,7 +105,7 @@ function saved(row) {
 
     <InboundKeys v-else-if="tab === 'keys'" />
 
-    <KindPicker v-if="picking" :kinds="kinds.data.value || []" :integrations="list" @close="picking = false" @pick="pick" />
+    <KindPicker v-if="picking" :kinds="kinds.data.value || []" :integrations="list" :is-admin="auth.isAdmin" @close="picking = false" @pick="pick" />
     <IntegrationEditor v-if="editing" :key="editing.integration?.id || `new-${editing.kind.kind}`" :kind="editing.kind" :integration="editing.integration" @close="editing = null" @saved="saved" />
     <RunsJournal v-if="journal" :integration="journal" :kind="kindOf(journal.kind)" @close="journal = null" />
   </div>

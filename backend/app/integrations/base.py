@@ -52,6 +52,24 @@ FIELD_TYPES = ("string", "text", "url", "password", "int", "bool", "select", "mu
 JSON_MAX_BYTES = 64 * 1024
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
+# Подписи счётчиков журнала запусков, общие для коннекторов (Connector.counter_labels дополняет и уточняет их):
+# значения показателей (ctx.plans.indicator_values, _metrics.write), файлы во «Входящие» (ctx.inbox) и их статусы.
+# Счётчик без подписи интерфейс не показывает (номер элемента, служебное число) — подпишите каждый, который
+# должен быть виден.
+INBOX_STATUS_COUNTER_LABELS: dict[str, str] = {
+    "status_received": "не распознано", "status_recognized": "распознано", "status_pending": "ждут подтверждения",
+    "status_applied": "применено сразу", "status_rejected": "отклонено", "status_error": "с ошибкой",
+    "status_duplicate": "повторов",
+}
+COMMON_COUNTER_LABELS: dict[str, str] = {
+    "values": "значений", "created": "новых", "updated": "изменено", "unchanged": "без изменений",
+    "cleared": "очищено", "values_pending": "значений новых показателей", "indicators_created": "создано показателей",
+    "files": "файлов", "added": "во «Входящие»", "seen": "уже забраны", "skipped_type": "пропущено: не данные",
+    "too_large": "пропущено: слишком большие", "duplicates": "повторов", "skipped": "пропущено",
+    "errors": "ошибок", "items": "элементов входящих",
+    **INBOX_STATUS_COUNTER_LABELS,
+}
+
 
 # ---------------------------------------------------------------- описание настроек
 
@@ -359,6 +377,17 @@ class Connector(ABC):
     secret_url_fields: ClassVar[tuple[str, ...] | None] = None
     # Не больше одного подключения этого вида
     singleton: ClassVar[bool] = False
+    # Только администратор создаёт, настраивает, проверяет, запускает, удаляет подключение этого вида и меняет его
+    # расписание (подключение отдаёт наружу данные, которые не видит пользователь с integrations.manage: Confluence
+    # публикует полный сквозной отчёт). Остальным с integrations.manage карточка видна только для чтения
+    admin_only: ClassVar[bool] = False
+    # Почему только администратор — продолжение «Только администратор: …» на карточке и в выборе вида
+    admin_only_reason: ClassVar[str] = ""
+    # Порядок в выборе вида и среди карточек (меньше — выше); виды с одинаковым порядком — по названию
+    order: ClassVar[int] = 1000
+    # Подписи счётчиков журнала запусков (RunResult.counters) по-русски: {"tasks": "задач в списке"}; общие
+    # счётчики (значения, файлы во «Входящие», статусы) подписаны каркасом — COMMON_COUNTER_LABELS
+    counter_labels: ClassVar[dict[str, str]] = {}
     # Только для тестов: не показывается в списке видов
     hidden: ClassVar[bool] = False
 
@@ -377,7 +406,21 @@ class Connector(ABC):
         return {"kind": cls.kind, "title": cls.title, "description": cls.description,
                 "fields": [f.as_dict() for f in cls.fields], "actions": [a.as_dict() for a in cls.actions],
                 "url_field": cls.url_field, "secret_url_fields": list(binding), "singleton": cls.singleton,
-                "allowed_hosts_env": allowed_hosts_env(cls.kind) if cls.url_field or binding else None}
+                "allowed_hosts_env": allowed_hosts_env(cls.kind) if cls.url_field or binding else None,
+                "order": cls.order, "admin_only": cls.admin_only, "admin_only_note": cls.admin_only_note(),
+                "counter_labels": cls.all_counter_labels()}
+
+    @classmethod
+    def admin_only_note(cls) -> str:
+        """«Только администратор: публикует полный сквозной отчёт» — для карточки и выбора вида."""
+        if not cls.admin_only:
+            return ""
+        return "Только администратор" + (f": {cls.admin_only_reason}" if cls.admin_only_reason else "")
+
+    @classmethod
+    def all_counter_labels(cls) -> dict[str, str]:
+        """Подписи счётчиков журнала запусков: общие каркаса и свои коннектора (свои сильнее)."""
+        return {**COMMON_COUNTER_LABELS, **cls.counter_labels}
 
     @classmethod
     def binding_fields(cls) -> tuple[str, ...]:
@@ -578,6 +621,13 @@ def find(kind: str) -> type[Connector] | None:
     return _CONNECTORS.get(kind)
 
 
+def sort_key(cls: type[Connector]) -> tuple[int, str]:
+    """Порядок видов: Connector.order, затем название."""
+    return cls.order, cls.title.casefold()
+
+
 def all_connectors(*, include_hidden: bool = False) -> list[type[Connector]]:
+    """Виды подключений в порядке Connector.order: «По Делу», «Пульс проекта», Jira, Confluence, Bitrix24,
+    почтовый ящик Exchange, 1С, папка «Входящие»."""
     _load()
-    return [c for c in _CONNECTORS.values() if include_hidden or not c.hidden]
+    return sorted((c for c in _CONNECTORS.values() if include_hidden or not c.hidden), key=sort_key)
