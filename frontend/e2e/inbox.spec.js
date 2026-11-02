@@ -105,6 +105,43 @@ test('загрузка файла → план → применение; пов�
   expect(errors).toEqual([])
 })
 
+test('счётчик «ожидают» — из профиля; строка «Очистить» удаляет значение; текст ожидания загрузки', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  const cell = await planCell(page)
+  await cell.restore()
+  const pending = (await apiGet(page, '/auth/me')).inbox.pending
+  // Меню не делает отдельных запросов за доступом и счётчиком входящих
+  const extra = []
+  page.on('request', (r) => { if (/\/api\/inbox(\?|\/datasets)/.test(r.url())) extra.push(r.url()) })
+  await page.goto('/')
+  await expect(page.getByTestId('nav-inbox')).toBeVisible()
+  expect(extra).toEqual([])
+  const count = page.getByTestId('nav-inbox').locator('.count')
+  if (pending) await expect(count).toHaveText(String(pending))
+  else await expect(count).toHaveCount(0)
+
+  const mark = uniq('clear')
+  const file = { name: `${mark}.csv`, mimeType: 'text/csv',
+    buffer: Buffer.from(`\ufeffПодразделение;Показатель;Период;Значение;Цель;Комментарий;Очистить;Метка\r\nIT;Выполнение плана работ;2026-07;;;;да;${mark}\r\n`) }
+  await page.getByTestId('nav-inbox').click()
+  await upload(page, file)
+  const item = drawer(page)
+  await expect(item.getByTestId('inbox-item-message')).toContainText('Загружено для проверки — посмотрите план и примените')
+  const plan = item.getByTestId('inbox-plan')
+  await expect(plan.getByTestId('plan-clears')).toContainText('Очистить значения · 1')
+  await expect(plan.locator('.badge', { hasText: 'Очистить' })).toBeVisible()
+  await expect(plan).toContainText('значение удалится')
+  await expect(count).toHaveText(String(pending + 1))
+  await item.getByTestId('inbox-apply').click()
+  await expect(item.getByTestId('inbox-item-status')).toHaveText('Применён')
+  expect(await cell.read()).toBeUndefined()
+  if (pending) await expect(count).toHaveText(String(pending))
+  else await expect(count).toHaveCount(0)
+  await cell.restore()
+  expect(errors).toEqual([])
+})
+
 test('нераспознанный файл: выбор набора, план с ошибками, отклонение с причиной', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'admin')

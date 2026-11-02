@@ -1,13 +1,15 @@
 """Bitrix24: сделки CRM → показатели продаж сквозного отчёта (ADR-0011).
 
 Подключение — входящий вебхук REST (https://портал/rest/<пользователь>/<код>/). Код доступа — в самом адресе,
-поэтому вебхук хранится секретом (зашифрован, в сообщениях об ошибках заменяется на «…»). Адрес портала —
+поэтому вебхук хранится секретом (зашифрован); код и «пользователь/код» добавлены к секретам подключения
+(secret_values), и каркас заменяет их на «…» во всех текстах ошибок, журнале сервера и журнале запусков. Адрес портала —
 отдельная настройка: к нему привязан вебхук (сменили адрес — вебхук вводится заново) и по нему проверяется
 BITRIX24_ALLOWED_HOSTS; вебхук должен быть выдан этим же порталом.
 
 «Обновить показатели продаж»: crm.deal.list с фильтром по CLOSEDATE, STAGE_ID (или STAGE_SEMANTIC_ID = S —
 «успешно»), CATEGORY_ID и списком полей select, постранично по 50 (start / next) с паузой между страницами;
-на QUERY_LIMIT_EXCEEDED — пауза и повтор. Ответственный (ASSIGNED_BY_ID) → подразделение: по email сотрудника
+на QUERY_LIMIT_EXCEEDED — пауза и повтор. Методы вызываются POST, но только читают данные, поэтому повтор при
+429/503 разрешён явно (retry=True). Ответственный (ASSIGNED_BY_ID) → подразделение: по email сотрудника
 (user.get → наш пользователь с тем же email) или по отделу Bitrix24 (user.get → UF_DEPARTMENT → соответствие
 отделов или название отдела из department.get); явное соответствие ответственных — сильнее.
 Пишутся (каждый — если задан ключ): выручка — сумма OPPORTUNITY выигранных сделок месяца (финансовый),
@@ -46,27 +48,18 @@ sleep = time.sleep  # подменяется в тестах
 
 
 class Bitrix:
-    """Вызовы REST Bitrix24 через входящий вебхук: ошибки Bitrix24 — понятным текстом, без кода вебхука."""
+    """Вызовы REST Bitrix24 через входящий вебхук: ошибки Bitrix24 — понятным текстом. Код вебхука из текстов
+    вычищает HttpClient (секреты подключения — Bitrix24Connector.secret_values)."""
 
-    def __init__(self, client: HttpClient, base: str, secrets: tuple[str, ...]):
+    def __init__(self, client: HttpClient, base: str):
         self.client = client
         self.base = base
-        self.secrets = tuple(s for s in secrets if s)
-
-    def scrub(self, text: str) -> str:
-        for secret in self.secrets:
-            text = text.replace(secret, "…")
-        return text
-
-    def clean(self, exc: IntegrationError) -> IntegrationError:
-        return IntegrationError(self.scrub(exc.detail), code=exc.code, short=self.scrub(exc.short), status=exc.status)
 
     def call(self, method: str, params: dict | None = None) -> dict:
         for attempt in range(1, LIMIT_ATTEMPTS + 1):
-            try:
-                resp = self.client.request("POST", f"{self.base}{method}.json", json=params or {}, expect=EXPECT)
-            except IntegrationError as exc:
-                raise self.clean(exc) from None
+            # Методы только читают (list, get, profile, scope): повтор при 429/503 безопасен
+            resp = self.client.request("POST", f"{self.base}{method}.json", json=params or {}, expect=EXPECT,
+                                       retry=True)
             try:
                 data = resp.json()
             except (ValueError, UnicodeDecodeError):
@@ -91,7 +84,7 @@ class Bitrix:
         raise AssertionError("unreachable")  # pragma: no cover
 
     def error(self, method: str, status: int, error: str, description: str) -> IntegrationError:
-        text = self.scrub(f"{error}: {description}" if description else error)[:300]
+        text = self.client.scrub(f"{error}: {description}" if description else error)[:300]
         key = error.lower()
         scope = key in SCOPE_ERRORS or (status == 403 and key not in AUTH_ERRORS)
         if scope:
@@ -228,8 +221,22 @@ class Bitrix24Connector(Connector):
         return out
 
     # --- подключение
-    def endpoint(self) -> tuple[str, tuple[str, ...]]:
-        """Адрес методов вебхука и его секретные части (для вычистки из сообщений)."""
+    def secret_values(self) -> tuple[str, ...]:
+        """Вебхук целиком, а также его код и «пользователь/код» — они уходят в адресе каждого запроса."""
+        values = list(super().secret_values())
+        match = self._webhook_match()
+        if match:
+            values += [f"{match.group('user')}/{match.group('code')}", match.group("code")]
+        return tuple(values)
+
+    def _webhook_match(self) -> re.Match | None:
+        raw = (self.secrets.get("webhook") or "").strip()
+        if re.match(r"^https?://", raw, re.IGNORECASE):
+            return WEBHOOK.match(urlsplit(raw).path)
+        return SHORT_WEBHOOK.match(raw) or WEBHOOK.match(raw)
+
+    def endpoint(self) -> str:
+        """Адрес методов вебхука на адресе портала."""
         raw = (self.secrets.get("webhook") or "").strip()
         portal = urlsplit(self.url or "")
         if re.match(r"^https?://", raw, re.IGNORECASE):
@@ -245,12 +252,10 @@ class Bitrix24Connector(Connector):
             raise IntegrationError("Вебхук — адрес вида https://портал/rest/1/код/ (скопируйте его целиком из "
                                    "настроек входящего вебхука)", code="config", short="Вебхук Bitrix24 задан неверно")
         user, code = match.group("user"), match.group("code")
-        base = f"{portal.scheme}://{portal.netloc}{(portal.path or '').rstrip('/')}/rest/{user}/{code}/"
-        return base, (f"{user}/{code}", code)
+        return f"{portal.scheme}://{portal.netloc}{(portal.path or '').rstrip('/')}/rest/{user}/{code}/"
 
     def bitrix(self, client: HttpClient) -> Bitrix:
-        base, secrets = self.endpoint()
-        return Bitrix(client, base, secrets)
+        return Bitrix(client, self.endpoint())
 
     def client(self) -> HttpClient:
         return self.http(sleep=sleep)

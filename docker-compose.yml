@@ -43,6 +43,8 @@ services:
       PDF_CONCURRENCY: ${PDF_CONCURRENCY:-2}
       LOG_JSON: ${LOG_JSON:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Адрес «Дашбордов» для ссылок наружу (Confluence, комментарии «По Делу»); пусто — без ссылок
+      PUBLIC_URL: ${PUBLIC_URL:-}
       # Вход по учётной записи домена; остальные AUTH_LDAP_* и AD_SYNC_* — в docker-compose.override.yml
       AUTH_LDAP_ENABLED: ${AUTH_LDAP_ENABLED:-false}
       AUTH_LDAP_URL: ${AUTH_LDAP_URL:-}

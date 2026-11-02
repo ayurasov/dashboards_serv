@@ -91,16 +91,19 @@ def _rules_out(db: Session) -> list[dict]:
             for d in datasets.all_datasets() for s in INBOX_RULE_SOURCES]
 
 
-@router.get("/rules", summary="Правила «применять сразу»: источник × набор")
+@router.get("/rules", summary="Правила «применять сразу»: источник × набор",
+            description="Ответ {rules: [{source, source_label, dataset, dataset_label, auto_apply}]} — все сочетания.")
 def get_rules(db: Session = Depends(get_db), _: User = Depends(manage)):
-    return _rules_out(db)
+    return {"rules": _rules_out(db)}
 
 
-@router.put("/rules", summary="Изменить правила «применять сразу»")
+@router.put("/rules", summary="Изменить правила «применять сразу»",
+            description="Тело {rules: [{source, dataset, auto_apply}]} — меняются только переданные; ответ — как у "
+                        "GET.")
 def put_rules(body: InboxRulesIn, request: Request, db: Session = Depends(get_db), user: User = Depends(manage)):
     inbox.save_rules(db, user, [r.model_dump() for r in body.rules], request)
     db.commit()
-    return _rules_out(db)
+    return {"rules": _rules_out(db)}
 
 
 @router.get("/folder", summary="Папка «Входящие»: настройка, состояние, последний разбор, планировщик")

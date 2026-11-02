@@ -6,7 +6,9 @@ GET <csrf> → POST /api/auth/login {login, password} с заголовками 
 сессии → запросы (изменения — с X-CSRF-Token) → POST /api/auth/logout. Выход выполняется всегда: и после
 ошибки входа (сессия с CSRF-токеном уже создана), и после ошибки в работе — блоком with. Сеть — только через
 HttpClient каркаса (адрес, <ВИД>_ALLOWED_HOSTS, без перенаправлений, таймауты, предел размера).
-Пароль уходит только в теле запроса входа и нигде не записывается: ни в журнал сервера, ни в тексты ошибок.
+Пароль уходит только в теле запроса входа и нигде не записывается: ни в журнал сервера, ни в тексты ошибок
+(клиент и ошибки ответов партнёра вычищают его — http.scrub). Вход (POST) при 429/503 не повторяется: повтор
+тратил бы ограничение попыток входа у партнёра.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from ...core.config import settings
-from ..http import CONNECT_TIMEOUT, MAX_BYTES, READ_TIMEOUT, HttpClient, HttpResponse, IntegrationError
+from ..http import CONNECT_TIMEOUT, MAX_BYTES, READ_TIMEOUT, HttpClient, HttpResponse, IntegrationError, scrubbed
 
 if TYPE_CHECKING:
     from ...models import InboxItem
@@ -187,7 +189,7 @@ class PartnerSession:
         self._login = login
         self._password = password
         self.client = HttpClient(url, kind=kind, title=title, verify=verify, detailed=detailed, cookies=True,
-                                 max_bytes=max_bytes, timeout=timeout)
+                                 max_bytes=max_bytes, timeout=timeout, secrets=(password,))
         parts = urlsplit(self.client.base_url)
         self.secure = parts.scheme.lower() == "https"
         # Flask-WTF сверяет Referer HTTPS-запросов, меняющих данные, со своим адресом (WTF_CSRF_SSL_STRICT)
@@ -220,7 +222,7 @@ class PartnerSession:
         resp = self.client.request("POST", "api/auth/login", json={"login": self._login, "password": self._password},
                                    headers={"X-CSRF-Token": token}, expect=ANY_STATUS)
         if resp.status != 200:
-            raise partner_error(self.title, resp, "api/auth/login", login=True)
+            raise scrubbed(partner_error(self.title, resp, "api/auth/login", login=True), (self._password,))
         data = self.client.parse(resp, dict)
         self._check_cookies(required=True)
         self.user = data.get("user") if isinstance(data.get("user"), dict) else {}
@@ -258,7 +260,7 @@ class PartnerSession:
             headers = {**(headers or {}), "X-CSRF-Token": self.csrf}
         resp = self.client.request(method, path, params=params, json=json, headers=headers, expect=ANY_STATUS)
         if resp.status not in expect:
-            raise partner_error(self.title, resp, path, denied=denied, not_found=not_found)
+            raise scrubbed(partner_error(self.title, resp, path, denied=denied, not_found=not_found), (self._password,))
         return resp
 
     def get_json(self, path: str, *, kind: type | tuple[type, ...] = dict, **kwargs) -> Any:
@@ -269,7 +271,7 @@ class PartnerSession:
         return self.client.parse(self.request("POST", path, json=body, expect=expect, **kwargs), kind)
 
 
-def secret_url(*urls: str | None) -> str:
-    """Адреса, к которым привязан секрет: «основной → для запросов сервера». Каркас привязывает секрет к одному
-    полю (url_field), поэтому коннектор с несколькими адресами хранит их сочетание в скрытом поле."""
+def joined_urls(*urls: str | None) -> str:
+    """Адрес привязки секрета, который уходит на несколько адресов: «основной → для запросов сервера»
+    (Connector.secret_url у «По Делу» и Exchange)."""
     return " → ".join(u for u in urls if u)

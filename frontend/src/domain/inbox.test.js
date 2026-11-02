@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  cloneMatrix, fileSize, filterPlanRows, folderState, folderTree, itemSummary, optionValues, optionsChanged, optionsPayload,
-  planBlocked, planChips, planErrors, planHeads, planNewDepartments, planRows, rowAction, rulesChanges, rulesMatrix,
+  CLEARED_TEXT, cloneMatrix, fileSize, filterPlanRows, folderState, folderTree, itemSummary, optionValues, optionsChanged, optionsPayload,
+  planBlocked, planChips, planClears, planErrors, planHeads, planNewDepartments, planRows, rowAction, rulesChanges, rulesMatrix,
   scanText, sourceInfo, statusBadge, summaryText, workerState,
 } from './inbox'
 
@@ -32,6 +32,33 @@ const EMPLOYEES = {
   records: [{ key: 'a@x.ru', line: 2, action: 'create', name: 'Входящий Сотрудник', email: 'a@x.ru', unresolved: false, changes: [{ field: 'position', label: 'Должность', old: '', new: 'Аналитик' }], conflicts: [], errors: [], warnings: [] }],
   can_apply: true,
 }
+
+// План значений показателей со строкой «очистить» (Пульс проекта: нет проектов в работе)
+const CLEARING = {
+  summary: { rows: 2, create: 0, update: 1, cleared: 1, unchanged: 0, errors: 0 },
+  rows: [
+    { line: 1, department: 'PROJ', department_path: 'АЛМИ Партнер / Проектная служба', indicator: 'puls.progress', indicator_name: 'Средний прогресс проектов', period: '2026-11', clear: true, action: 'clear', before: { value: 50, target: null, comment: 'из «Пульса проекта»' }, after: null, errors: [] },
+    { line: 2, department: 'PROJ', department_path: 'АЛМИ Партнер / Проектная служба', indicator: 'puls.projects', indicator_name: 'Проекты в работе', period: '2026-11', clear: false, action: 'update', before: { value: 2, target: null, comment: '' }, after: { value: 0, target: null, comment: '' }, errors: [] },
+  ],
+  can_apply: true,
+}
+
+describe('строка «очистить» в плане значений', () => {
+  it('действие «Очистить», «Станет» — значение удалится; видна среди изменений', () => {
+    const rows = planRows(CLEARING)
+    expect(rowAction(rows[0])).toEqual({ label: 'Очистить', tone: 'red' })
+    expect(rows[0].before).toBe('50 · «из «Пульса проекта»»')
+    expect(rows[0].after).toBe(CLEARED_TEXT)
+    expect(rows[1].after).toBe('0')
+    expect(filterPlanRows(rows, 'changes')).toHaveLength(2)
+    expect(planClears(rows)).toBe(1)
+  })
+  it('сводка: «Очистится» чипом и строкой списка', () => {
+    expect(planChips(CLEARING.summary).find((c) => c.label === 'Очистится')).toEqual({ label: 'Очистится', value: 1, tone: 'red' })
+    expect(planChips({ ...CLEARING.summary, cleared: 0 }).some((c) => c.label === 'Очистится')).toBe(false)
+    expect(summaryText(CLEARING.summary)).toBe('изменится 1 · очистится 1')
+  })
+})
 
 describe('статусы и источники', () => {
   it('статус — подпись сервера и тон', () => {

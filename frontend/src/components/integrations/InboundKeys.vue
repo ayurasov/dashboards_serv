@@ -9,7 +9,7 @@ import { integrationsApi } from '@/api/integrations'
 import { useAsync } from '@/composables/useAsync'
 import { confirm } from '@/composables/useConfirm'
 import { toastOk } from '@/composables/useToast'
-import { SCOPES, curlExample, keyState } from '@/domain/integrations'
+import { SCOPES, curlExample, keyState, rateLimitText } from '@/domain/integrations'
 import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
 
 /**
@@ -20,6 +20,8 @@ import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
 const { data, loading, error, reload } = useAsync(() => integrationsApi.keys())
 const keys = computed(() => data.value || [])
 const active = computed(() => keys.value.filter((k) => k.active).length)
+// Частота вызовов — настройка сервера INBOUND_RATE_LIMIT (одна на все ключи; приходит с каждым ключом)
+const rateLimit = computed(() => keys.value.find((k) => k.rate_limit)?.rate_limit || null)
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
 const example = computed(() => curlExample({ origin, dataset: 'indicators', filename: 'Показатели из 1С.csv', apply: true }))
 
@@ -147,6 +149,7 @@ async function revoke(key) {
           <li><b>Ответ</b> — номер элемента, статус (<code>pending</code>, <code>applied</code>, <code>error</code>, <code>duplicate</code>), сводка плана и ошибки. Тот же файл второй раз — <code>200</code> со статусом «повтор».</li>
           <li><b>Статус позже</b> — <code>GET /api/inbound/v1/files/{id}</code> (область «Чтение статусов»), проверка ключа — <code>GET /api/inbound/v1/ping</code>.</li>
           <li><b>1С</b> — регламентное задание отправляет выгрузку тем же запросом: <code>HTTPСоединение</code> + <code>HTTPЗапрос</code>, заголовок <code>Authorization: Bearer dash_…</code>, тело <code>multipart/form-data</code> с полем <code>file</code>.</li>
+          <li><b>Частота</b> — {{ rateLimitText(rateLimit).toLowerCase() }}; чаще — ответ <code>429</code> с заголовком <code>Retry-After</code>.</li>
           <li><b>Ошибки</b> — <code>401</code> ключ неверен или отозван, <code>403</code> не хватает области, <code>413</code> файл слишком большой, <code>429</code> слишком часто (смотрите <code>Retry-After</code>).</li>
         </ul>
       </div>

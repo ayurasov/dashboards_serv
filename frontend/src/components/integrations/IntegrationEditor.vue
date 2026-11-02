@@ -10,8 +10,8 @@ import CheckResult from './CheckResult.vue'
 import { integrationsApi } from '@/api/integrations'
 import { toastOk } from '@/composables/useToast'
 import {
-  initialSecrets, initialValues, kindIcon, quoted, rebindSecrets, scheduleDraft, scheduleErrors, schedulePayload, settingsPayload,
-  urlChanged, validateSettings,
+  bindingChanges, initialSecrets, initialValues, kindIcon, quoted, rebindSecrets, scheduleDraft, scheduleErrors, schedulePayload,
+  settingsPayload, validateSettings,
 } from '@/domain/integrations'
 
 /**
@@ -38,9 +38,17 @@ const check = ref(null)
 const checkedSignature = ref('')
 const saved = computed(() => props.integration?.secret_fields || [])
 
-// Сохранённый секрет не читается (сменился SECRET_KEY, адрес) — его нужно ввести заново
+// Сохранённый секрет не читается (сменился SECRET_KEY, адрес) — его нужно ввести заново. Секреты привязаны
+// к адресу из полей secret_url_fields: изменили любое из них — секреты вводятся заново (предупреждение — до сохранения)
 const forceRebind = ref(!!props.integration?.secret_problem)
-const rebind = computed(() => forceRebind.value || urlChanged(props.kind, values.value, props.integration))
+const changedBinding = computed(() => bindingChanges(props.kind, values.value, props.integration))
+const rebind = computed(() => forceRebind.value || changedBinding.value.length > 0)
+const savedSecretLabels = computed(() => props.kind.fields.filter((f) => f.secret && saved.value.includes(f.key)).map((f) => f.label))
+const rebindText = computed(() => {
+  const fields = changedBinding.value.map((f) => `«${f.label}»`).join(', ')
+  const what = savedSecretLabels.value.map((l) => `«${l}»`).join(', ') || 'секреты'
+  return `Изменено: ${fields}. Сохранённые секреты (${what}) привязаны к прежнему адресу и на новый не уйдут — введите их заново, иначе сохранить не получится.`
+})
 watch(rebind, (now) => {
   if (now) secrets.value = rebindSecrets(secrets.value)
   else secrets.value = Object.fromEntries(Object.entries(secrets.value).map(([k, s]) => [k, saved.value.includes(k) && s.mode === 'replace' && !s.value ? { mode: 'keep', value: '' } : s]))
@@ -132,6 +140,7 @@ async function save() {
     <form class="editor" novalidate @submit.prevent="save">
       <RichText v-if="kind.description" :text="kind.description" class="kdesc" data-testid="kind-description" />
       <TransferBanner v-if="integration?.secret_problem" tone="warn" title="Сохранённый секрет не подходит" :text="`${integration.secret_problem}. Введите его заново и сохраните.`" data-testid="editor-secret-problem" />
+      <TransferBanner v-else-if="changedBinding.length" tone="warn" title="Секреты нужно ввести заново" :text="rebindText" data-testid="editor-rebind" />
 
       <section class="sec">
         <h3>Название</h3>

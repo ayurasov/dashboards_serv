@@ -351,3 +351,39 @@ def test_run_failures_log_out(admin, fake, db):
     assert run["status"] == "error" and "«Пульс проекта» вернула ошибку 500 (/api/projects)" in run["error"]
     assert fake.logouts == 1
     assert db.scalar(select(Indicator).where(Indicator.key == "puls.projects")) is None
+
+
+def test_unit_without_projects_in_work_gets_progress_and_share_cleared(admin, fake, db):
+    item = _create(admin, fake)
+    _run(admin, item)
+    values = _values(db)
+    assert values[("PROJ", "puls.progress")].value == 50 and values[("PROJ", "puls.on_time_share")].value == 50
+    # Оба проекта внедрения завершены: в работе у «Проектной службы» ничего нет
+    for project in fake.projects[:2]:
+        project["stats"].update(done=project["stats"]["total"], overdue=0, blocked=0, progress=100)
+    run = _run(admin, item)
+    assert run["status"] == "ok", run
+    assert run["summary"]["values_cleared"] == 2 and "очищено 2 (нет проектов в работе)" in run["message"]
+    values = _values(db)
+    assert ("PROJ", "puls.progress") not in values and ("PROJ", "puls.on_time_share") not in values, \
+        "среднего прогресса и доли в срок без проектов в работе нет — старое значение не остаётся"
+    assert values[("PROJ", "puls.projects")].value == 0 and values[("PROJ", "puls.overdue")].value == 0, \
+        "количества — ноль, а не пусто"
+    assert values[("ALMI", "puls.progress")].value == 40, "у корня проекты в работе остались"
+    from app.models import AuditEntry
+
+    entry = db.scalar(select(AuditEntry).where(AuditEntry.entity_type == "indicator_value",
+                                               AuditEntry.action == "import").order_by(AuditEntry.id.desc()))
+    assert "очищено 2" in entry.summary and entry.username == "Подключение «Пульс»"
+    again = _run(admin, item)
+    assert again["summary"]["values_cleared"] == 0 and again["summary"]["values_create"] == 0
+    assert "очищено" not in again["message"]
+
+
+def test_indicator_name_taken_gets_puls_suffix(admin, fake, db):
+    taken = admin.post("/api/reports/indicators", json={"key": "ops.projects", "name": "Проекты в работе",
+                                                        "owner_service": "project_product"})
+    assert taken.status_code == 201, taken.text
+    run = _run(admin, _create(admin, fake))
+    assert run["status"] == "ok" and run["summary"]["indicators_created"] == 5
+    assert db.scalar(select(Indicator.name).where(Indicator.key == "puls.projects")) == "Проекты в работе («Пульс»)"

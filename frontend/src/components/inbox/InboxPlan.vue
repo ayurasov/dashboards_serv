@@ -4,7 +4,7 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import PlanChips from '@/components/transfer/PlanChips.vue'
 import TransferBanner from '@/components/transfer/TransferBanner.vue'
 import {
-  PLAN_FILTERS, filterPlanRows, planChips, planErrors, planHeads, planNewDepartments, planRows, rowAction,
+  PLAN_FILTERS, filterPlanRows, planChips, planClears, planErrors, planHeads, planNewDepartments, planRows, rowAction,
 } from '@/domain/inbox'
 import { CHOICE_LABELS, decisionFor, displayValue, visibleChoices, withFieldChoice, withIdentity } from '@/domain/org'
 
@@ -29,6 +29,7 @@ const hasValues = computed(() => rows.value.some((r) => r.before !== null || r.a
 const heads = computed(() => planHeads(props.plan))
 const newDepartments = computed(() => planNewDepartments(props.plan))
 const notes = computed(() => (Array.isArray(props.plan.notes) ? props.plan.notes : []))
+const clears = computed(() => planClears(rows.value))
 
 const filter = ref(props.plan.summary?.errors || props.plan.summary?.unresolved ? 'errors' : 'changes')
 watch(() => props.plan, (plan) => { if (plan.summary?.errors || plan.summary?.unresolved) filter.value = 'errors' })
@@ -77,6 +78,9 @@ const emptyText = computed(() => {
       </button>
     </TransferBanner>
 
+    <TransferBanner v-if="clears" tone="warn" :title="`Очистить значения · ${clears}`" data-testid="plan-clears"
+                    text="Строки «Очистить» удалят сохранённые значения показателей за месяц — в отчёте у этих подразделений значения не будет." />
+
     <TransferBanner v-if="notes.length" tone="info" title="Обратите внимание">
       <ul class="err-list"><li v-for="n in notes" :key="n">{{ n }}</li></ul>
     </TransferBanner>
@@ -108,7 +112,7 @@ const emptyText = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in visible" :key="r.key" :class="{ err: r.errors.length || r.unresolved }">
+            <tr v-for="r in visible" :key="r.key" :class="{ err: r.errors.length || r.unresolved, clear: r.action === 'clear' }">
               <td class="num muted line">{{ r.line ?? '—' }}</td>
               <td class="what">
                 <b>{{ r.title }}</b>
@@ -183,8 +187,9 @@ const emptyText = computed(() => {
 .val { white-space: nowrap; }
 .lbl { display: none; color: var(--muted); }
 .act { min-width: 180px; }
-.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
 tr.err td { background: color-mix(in srgb, var(--light-red) 5%, transparent); }
+tr.clear td.val:not(.muted) { color: var(--text-2); font-style: italic; }
 .lines { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-xs); color: var(--text-2); overflow-wrap: anywhere; }
 .errs { color: var(--light-red); }
 .warns { color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }

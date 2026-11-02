@@ -13,7 +13,7 @@ from ...core.security import burn_password_check, hash_password, verify_password
 from ...models import User, UserSession
 from ...schemas.common import Ok
 from ...schemas.users import ChangePasswordIn, LoginIn, MeOut, ProfileIn, SessionOut
-from ...services import access, audit, ldap_auth, org, sessions
+from ...services import access, audit, inbox, ldap_auth, org, sessions
 from ...services.users import find_local, serialize_user, validate_password
 from ..deps import current_session, current_user
 
@@ -26,7 +26,7 @@ def me_payload(db: Session, user: User, session: UserSession) -> MeOut:
     access.invalidate(user)
     data = serialize_user(user, org.snapshot(db)).model_dump()
     return MeOut(**data, avatar=user.avatar, csrf_token=session.csrf_token,
-                 effective_access=access.effective(user).as_dict())
+                 effective_access=access.effective(user).as_dict(), inbox=inbox.badge(db, user))
 
 
 def _set_cookies(response: Response, token: str, csrf: str) -> None:
@@ -110,7 +110,10 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     return Ok(message="Вы вышли из системы")
 
 
-@router.get("/me", response_model=MeOut, summary="Текущий пользователь и его действующий доступ")
+@router.get("/me", response_model=MeOut, summary="Текущий пользователь, его действующий доступ и счётчик входящих",
+            description="inbox — «Входящие данные»: available (полномочие data.manage или право применять хотя бы "
+                        "один набор) и pending — сколько ожидающих элементов пользователь может применить (с "
+                        "data.manage — все, иначе — своих наборов).")
 def me(session: UserSession = Depends(current_session), user: User = Depends(current_user),
        db: Session = Depends(get_db)):
     return me_payload(db, user, session)

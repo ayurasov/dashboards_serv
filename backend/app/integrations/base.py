@@ -24,7 +24,8 @@
 
 Коннектор не пишет в таблицы служб сам: он отдаёт файлы в конвейер входящих (ctx.inbox.add) или
 план/применение движкам загрузки (ctx.plans). Секреты (поля secret=True) приходят расшифрованными
-в self.secrets — только для адреса, для которого их ввели; наружу (API, журнал) они не выходят.
+в self.secrets — только для адреса, для которого их ввели; наружу (API, журнал) они не выходят:
+HttpClient из self.http() и runner вычищают их (и secret_values()) из текстов ошибок и журнала.
 """
 from __future__ import annotations
 
@@ -45,6 +46,7 @@ from .http import HttpClient, IntegrationError, allowed_hosts_env, check_base_ur
 
 if TYPE_CHECKING:
     from ..models import InboxItem, Integration, User
+    from ..services.reports import IndicatorDef
 
 FIELD_TYPES = ("string", "text", "url", "password", "int", "bool", "select", "multiselect", "list", "time", "json")
 JSON_MAX_BYTES = 64 * 1024
@@ -161,13 +163,16 @@ class InboxGateway:
         self.added: list[int] = []
 
     def add(self, content: bytes, filename: str, dataset: str | None = None, *, source_ref: str = "",
-            content_type: str = "", options: dict | None = None, apply: bool | None = None) -> InboxItem:
+            content_type: str = "", options: dict | None = None, apply: bool | None = None,
+            note: str = "") -> InboxItem:
+        """note — откуда файл для человека (до 500 символов): «Задача «…» · автор», «Письмо «…» от …»;
+        показывается под именем файла в списке «Входящих» и в карточке элемента."""
         from ..services import inbox
 
         db = self.ctx.db
         item = inbox.add(db, content, filename, source="integration", source_ref=source_ref, dataset=dataset,
                          integration_id=self.ctx.integration.id if self.ctx.integration else None,
-                         label=self.ctx.label, content_type=content_type, options=options, apply=apply)
+                         label=self.ctx.label, content_type=content_type, options=options, apply=apply, note=note)
         db.commit()
         self.added.append(item.id)
         return item
@@ -187,7 +192,8 @@ class InboxGateway:
 class PlanEngines:
     """Движки загрузки для коннектора — те же, что у ручной загрузки. apply=False — план без записи;
     apply=True — применение одной транзакцией (commit при успехе, откат при ошибках плана) от имени
-    подключения. Возвращают план или итог (словарь со summary, can_apply, applied)."""
+    подключения. Возвращают план или итог (словарь со summary, can_apply, applied).
+    ensure_indicator — показатель каталога сквозных отчётов (создать недостающий)."""
 
     def __init__(self, ctx: RunContext):
         self.ctx = ctx
@@ -226,27 +232,69 @@ class PlanEngines:
                                                                    decisions=decisions), apply)
 
     def org_list(self, rows: list, *, apply: bool = False, create_missing: bool = False,
-                 deactivate_missing: bool = False, manager_refs: dict | None = None) -> dict:
+                 deactivate_missing: bool = False, manager_refs: dict | None = None,
+                 keep: set[str] | None = None) -> dict:
         """Быстрая загрузка списком (app/services/org_import.py, Row): источник — вид подключения
-        (сопоставление по внешнему ID этого источника, затем email)."""
+        (сопоставление по внешнему ID этого источника, затем email). deactivate_missing — отключить сотрудников
+        этого источника, которых нет в rows (умеют источники org_import.DEACTIVATING_SOURCES: ad, podelu);
+        keep — логины и email служебных учётных записей, которые не отключаются никогда."""
         from ..services import org_import
 
         source = self.ctx.kind
         options = {"source": source, "create_missing": create_missing, "deactivate_missing": deactivate_missing,
-                   "manager_refs": manager_refs}
+                   "manager_refs": manager_refs, "keep": set(keep or ())}
         actor = self.ctx.actor
         return self._run(lambda: org_import.plan_import(self.ctx.db, rows, **options).as_dict(),
                          lambda: org_import.apply_import(self.ctx.db, actor, rows, **options), apply)
 
     def indicator_values(self, rows: list[dict], *, apply: bool = False, filename: str = "") -> dict:
         """rows — [{"line", "department" (путь или код), "indicator" (ключ или название), "period" (ГГГГ-ММ),
-        "value", "target", "comment"}] текстом (app/services/report_admin.py)."""
+        "value", "target", "comment"}] текстом (app/services/report_admin.py). Строка {"clear": True} без
+        значения, цели и комментария удаляет сохранённое значение показателя подразделения за месяц
+        (в плане — действие clear, в сводке — cleared); пустое значение без clear ничего не стирает."""
         from ..services import report_admin
 
         actor = self.ctx.actor
         name = filename or self.ctx.label
         return self._run(lambda: report_admin.plan_import(self.ctx.db, actor, rows)[0],
                          lambda: report_admin.apply_import(self.ctx.db, actor, rows, name), apply)
+
+    def ensure_indicator(self, body: dict) -> IndicatorDef:
+        """Показатель каталога сквозных отчётов по ключу body["key"]: есть — возвращается как есть (настройки
+        каталога подключение не меняет: их правят в разделе «Показатели»); нет — создаётся функцией каталога
+        (report_admin.create_indicator: те же проверки и запись в журнал изменений) от имени подключения.
+
+        body — поля IndicatorCreateIn: key, name, unit, data_class, direction, rollup, rule_type, границы,
+        source_type ("manual"), owner_service, description, sort_order… Ошибки — ValidationFailed (недопустимое
+        описание) или Conflict (название занято другим показателем); транзакция при них откатывается.
+
+        Созданный показатель фиксируется сразу (commit) — это единственный commit коннектора помимо ctx.inbox
+        и движков загрузки: каталог для плана значений (reports.state) берётся по ревизии сквозных отчётов,
+        а она растёт только при фиксации. Без commit план значений в этом же запуске показателя не увидит."""
+        from pydantic import ValidationError as PydanticError
+
+        from ..core.errors import AppError
+        from ..schemas.reports import IndicatorCreateIn
+        from ..services import report_admin, reports
+
+        db = self.ctx.db
+        key = str(body.get("key") or "")
+        found = next((i for i in reports.state(db).catalog if i.key == key), None)
+        if found is not None:
+            return found
+        try:
+            data = IndicatorCreateIn(**body)
+        except PydanticError as exc:
+            place = ".".join(map(str, exc.errors()[0]["loc"]))
+            raise ValidationFailed(f"Показатель «{key}» не создан: недопустимое значение поля «{place}»",
+                                   fields={place: "Недопустимое значение"}) from None
+        try:
+            report_admin.create_indicator(db, self.ctx.actor, data)
+            db.commit()
+        except AppError:
+            db.rollback()
+            raise
+        return next(i for i in reports.state(db).catalog if i.key == key)
 
 
 @dataclass
@@ -303,8 +351,12 @@ class Connector(ABC):
     description: ClassVar[str] = ""
     fields: ClassVar[tuple[Field, ...]] = ()
     actions: ClassVar[tuple[Action, ...]] = ()
-    # Поле адреса: секреты привязаны к нему; адрес проверяется по <ВИД>_ALLOWED_HOSTS. None — адреса нет
+    # Поле адреса для self.http(); проверяется по <ВИД>_ALLOWED_HOSTS. None — адреса нет. По умолчанию
+    # секреты привязаны к нему (secret_url)
     url_field: ClassVar[str | None] = "base_url"
+    # Поля, от которых зависит адрес привязки секретов (secret_url): их изменение требует ввести секреты заново.
+    # None — (url_field,). Перечисляются в /api/integrations/kinds — форма предупреждает до сохранения
+    secret_url_fields: ClassVar[tuple[str, ...] | None] = None
     # Не больше одного подключения этого вида
     singleton: ClassVar[bool] = False
     # Только для тестов: не показывается в списке видов
@@ -321,10 +373,31 @@ class Connector(ABC):
     # --- описание
     @classmethod
     def meta(cls) -> dict:
+        binding = cls.binding_fields()
         return {"kind": cls.kind, "title": cls.title, "description": cls.description,
                 "fields": [f.as_dict() for f in cls.fields], "actions": [a.as_dict() for a in cls.actions],
-                "url_field": cls.url_field, "singleton": cls.singleton,
-                "allowed_hosts_env": allowed_hosts_env(cls.kind) if cls.url_field else None}
+                "url_field": cls.url_field, "secret_url_fields": list(binding), "singleton": cls.singleton,
+                "allowed_hosts_env": allowed_hosts_env(cls.kind) if cls.url_field or binding else None}
+
+    @classmethod
+    def binding_fields(cls) -> tuple[str, ...]:
+        """secret_url_fields или (url_field,)."""
+        if cls.secret_url_fields is not None:
+            return tuple(cls.secret_url_fields)
+        return (cls.url_field,) if cls.url_field else ()
+
+    @classmethod
+    def secret_url(cls, config: dict) -> str:
+        """Адрес, к которому привязаны секреты (seal/unseal в app/core/secrets.py): сменился — секреты вводятся
+        заново, сохранённый токен не уходит на адрес, для которого его не вводили. По умолчанию — значение
+        url_field. Коннектор, чей секрет уходит на несколько адресов или на адрес, зависящий от режима
+        («По Делу»: адрес и адрес для запросов сервера; Exchange: EWS, Graph или IMAP), переопределяет метод
+        и перечисляет поля в secret_url_fields."""
+        return str((config or {}).get(cls.url_field) or "") if cls.url_field else ""
+
+    @classmethod
+    def config_keys(cls) -> set[str]:
+        return {f.key for f in cls.fields if not f.secret}
 
     @classmethod
     def secret_fields(cls) -> tuple[Field, ...]:
@@ -373,12 +446,20 @@ class Connector(ABC):
     def url(self) -> str | None:
         return self.config.get(self.url_field) if self.url_field else None
 
+    def secret_values(self) -> tuple[str, ...]:
+        """Значения, которые не должны попасть в тексты ошибок, журнал сервера и журнал запусков: секреты
+        подключения. Переопределите, если секрет уходит в запросы в производном виде (код вебхука в адресе,
+        подпись) — добавьте эти части."""
+        return tuple(str(v) for v in self.secrets.values() if v)
+
     def http(self, **kwargs) -> HttpClient:
         """HTTP-клиент на адрес подключения с сетевыми правилами ADR-0011; verify — из настройки verify_tls,
-        если она есть. kwargs — auth, headers, timeout, cookies и т. п."""
+        если она есть; секреты подключения (secret_values) вычищаются из текстов его ошибок. kwargs — auth,
+        headers, timeout, cookies и т. п."""
         if not self.url:
             raise IntegrationError("Не задан адрес подключения", code="config")
         kwargs.setdefault("verify", bool(self.config.get("verify_tls", True)))
+        kwargs["secrets"] = (*self.secret_values(), *kwargs.get("secrets", ()))
         return HttpClient(self.url, kind=self.kind, title=self.title, detailed=self.detailed, **kwargs)
 
     @abstractmethod
@@ -470,12 +551,18 @@ def unregister(kind: str) -> None:
     _CONNECTORS.pop(kind, None)
 
 
-def _load() -> None:
+def load_connectors() -> None:
+    """Импорт встроенных коннекторов (один раз на процесс): модули регистрируют свои классы (@register) и чужие
+    форматы JSON входящих (inbox_datasets.register_json_format). Вызывается реестром и распознаванием набора —
+    в любом процессе (сервер, планировщик, командная строка), без отдельного шага при старте."""
     global _loaded
     if not _loaded:
         from . import connectors  # noqa: F401 — модули коннекторов регистрируются при импорте
 
         _loaded = True
+
+
+_load = load_connectors
 
 
 def get(kind: str) -> type[Connector]:

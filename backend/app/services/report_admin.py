@@ -50,7 +50,11 @@ IMPORT_ALIASES = {
     "value": ("значение", "value", "факт"),
     "target": ("цель", "target", "план"),
     "comment": ("комментарий", "comment", "примечание"),
+    "clear": ("очистить", "clear", "удалить значение"),
 }
+# Столбец «Очистить»: «да» (1, true, x, +, очистить) — удалить сохранённое значение; пусто или «нет» — обычная строка
+CLEAR_TRUE = {"1", "true", "yes", "y", "да", "д", "+", "x", "х", "очистить", "удалить"}
+CLEAR_FALSE = {"0", "false", "no", "n", "нет", "-"}
 NOT_FOUND = "Показатель не найден"
 
 
@@ -501,8 +505,9 @@ def parse_table(table: list[list[str]]) -> list[dict]:
     if missing:
         raise org_import.ImportFormatError(f"Нужен столбец «{missing[0]}» (столбцы: Подразделение, Показатель, "
                                            "Период, Значение, Цель, Комментарий)")
-    if not {"value", "target", "comment"} & set(mapping):
-        raise org_import.ImportFormatError("Нужен хотя бы один из столбцов «Значение», «Цель», «Комментарий»")
+    if not {"value", "target", "comment", "clear"} & set(mapping):
+        raise org_import.ImportFormatError("Нужен хотя бы один из столбцов «Значение», «Цель», «Комментарий», "
+                                           "«Очистить»")
     rows = []
     for line, values in enumerate(table[1:], start=2):
         if not any((v or "").strip() for v in values):
@@ -556,9 +561,21 @@ def _unit_resolver(snap: org.OrgSnapshot):
     return resolve
 
 
+def clear_flag(value) -> bool | None:
+    """Признак «очистить» строки загрузки: True / False; None — непонятное значение."""
+    if value is True or value is False or value is None:
+        return bool(value)
+    text = str(value).strip().casefold()
+    if not text or text in CLEAR_FALSE:
+        return False
+    return True if text in CLEAR_TRUE else None
+
+
 def plan_import(db: Session, user: User, rows: list[dict]) -> tuple[dict, list[dict]]:
     """План загрузки без записи в базу и ячейки для записи (если ошибок нет). Пустая ячейка файла
-    не стирает сохранённое значение."""
+    не стирает сохранённое значение. Стереть его можно явно: строка с clear (столбец «Очистить» = «да»
+    в файле, {"clear": true} у коннектора) без значения, цели и комментария удаляет сохранённое значение
+    показателя подразделения за месяц — действие clear («очистить»); если значения нет — unchanged."""
     st = reports.state(db)
     snap = st.snap
     resolve_unit = _unit_resolver(snap)
@@ -567,11 +584,14 @@ def plan_import(db: Session, user: User, rows: list[dict]) -> tuple[dict, list[d
     parsed: list[dict] = []
     for row in rows:
         errors: list[str] = []
+        clear = clear_flag(row.get("clear"))
         out = {"line": row["line"], "department": row["department"] or "", "department_id": None,
                "department_path": "", "indicator": row["indicator"] or "", "indicator_id": None,
                "indicator_key": None, "indicator_name": "", "period": row["period"] or "", "value": None,
-               "target": None, "comment": row["comment"], "action": "error", "before": None, "after": None,
-               "errors": errors}
+               "target": None, "comment": row["comment"], "clear": bool(clear), "action": "error", "before": None,
+               "after": None, "errors": errors}
+        if clear is None:
+            errors.append(f"«Очистить» — «да» или пусто: {row.get('clear')}")
         unit_id, unit_error = resolve_unit(row["department"] or "")
         if unit_error:
             errors.append(unit_error)
@@ -607,10 +627,14 @@ def plan_import(db: Session, user: User, rows: list[dict]) -> tuple[dict, list[d
                 out[column] = numbers[column]
             except ValueError:
                 errors.append(f"«{title}» — не число: {text}")
-        if not errors and numbers["value"] is None and numbers["target"] is None and not row["comment"]:
+        empty = numbers.get("value") is None and numbers.get("target") is None and not row["comment"] \
+            and not row["value"] and not row["target"]
+        if clear and not empty:
+            errors.append("Строка «очистить» — без значения, цели и комментария")
+        elif not errors and not clear and empty:
             errors.append("Нет значения, цели и комментария")
         parsed.append({"out": out, "indicator": ind, "unit": unit_id, "period": period, "numbers": numbers,
-                       "comment": row["comment"]})
+                       "comment": row["comment"], "clear": bool(clear)})
     # Повтор ячейки в файле — ошибка у второй строки
     first_line: dict[tuple, int] = {}
     for item in parsed:
@@ -636,6 +660,14 @@ def plan_import(db: Session, user: User, rows: list[dict]) -> tuple[dict, list[d
         key = (item["indicator"].id, item["unit"], item["period"])
         row = existing.get(key)
         before = _cell_state(row)
+        if item["clear"]:
+            out["before"], out["after"] = before, None
+            out["action"] = "clear" if row is not None else "unchanged"
+            if row is not None:
+                cells.append({"indicator": item["indicator"], "unit": item["unit"],
+                              "unit_name": snap.units[item["unit"]].name, "period": item["period"], "row": row,
+                              "value": None, "target": None, "comment": "", "clear": True})
+            continue
         after = dict(before or {"value": None, "target": None, "comment": ""})
         for column in ("value", "target"):
             if item["numbers"][column] is not None:
@@ -650,29 +682,39 @@ def plan_import(db: Session, user: User, rows: list[dict]) -> tuple[dict, list[d
     actions = [r["action"] for r in plan_rows]
     errors = sum(1 for r in plan_rows if r["errors"])
     summary = {"rows": len(plan_rows), "create": actions.count("create"), "update": actions.count("update"),
-               "unchanged": actions.count("unchanged"), "errors": errors}
+               "cleared": actions.count("clear"), "unchanged": actions.count("unchanged"), "errors": errors}
     return {"summary": summary, "rows": plan_rows, "can_apply": errors == 0}, cells
 
 
 def apply_import(db: Session, user: User, rows: list[dict], filename: str = "",
                  request: Request | None = None) -> tuple[dict, bool]:
+    """(план, применён ли). Без изменений (все строки «без изменений») ничего не пишется: ни значений,
+    ни записи журнала, ревизия отчётов не растёт — повторная загрузка того же файла не засоряет журнал."""
     plan, cells = plan_import(db, user, rows)
     if not plan["can_apply"]:
         return {**plan, "applied": False}, False
-    totals = {"created": 0, "updated": 0}
+    totals = {"created": 0, "updated": 0, "cleared": 0}
+    cleared: list[dict] = []
     by_period: dict[date, list[dict]] = defaultdict(list)
     for cell in cells:
-        if cell["row"] is None or (cell["row"].value, cell["row"].target, cell["row"].comment or "") != \
+        if cell.get("clear") or cell["row"] is None or \
+                (cell["row"].value, cell["row"].target, cell["row"].comment or "") != \
                 (cell["value"], cell["target"], cell["comment"]):
             by_period[cell["period"]].append(cell)
     for period, period_cells in sorted(by_period.items()):
         result = _write_cells(db, user, period, period_cells, "import")
         totals["created"] += result["created"]
         totals["updated"] += result["updated"]
+        totals["cleared"] += result["deleted"]
+        cleared += [{**c, "period": reports.period_key(period)} for c in result["changes"] if c["after"] is None]
+    if not any(totals.values()):
+        return {**plan, "applied": True}, True
     name = f"«{filename}»" if filename else "из файла"
-    audit.record(db, user, entity_type="indicator_value", action="import",
-                 summary=f"Загружены значения показателей {name}: новых {totals['created']}, "
-                         f"обновлено {totals['updated']}",
+    text = f"Загружены значения показателей {name}: новых {totals['created']}, обновлено {totals['updated']}"
+    if totals["cleared"]:
+        text += f", очищено {totals['cleared']}"
+    audit.record(db, user, entity_type="indicator_value", action="import", summary=text,
+                 before={"cleared": cleared[:200]} if cleared else None,
                  after={"filename": filename, **plan["summary"],
                         "periods": [reports.period_key(p) for p in sorted(by_period)]}, request=request)
     return {**plan, "applied": True}, True

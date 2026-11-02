@@ -4,9 +4,10 @@
 панель статуса (tip / note / warning) с «почему такой статус», таблица подразделений и показателей с макросами
 статуса Green / Yellow / Red / Grey, нарушения полноты данных, заметки руководителей и ссылка на отчёт.
 
-Публикуется полный сквозной отчёт, как его видит администратор (вся компания или выбранная ветка, все уровни,
-все классы данных, кроме скрытых настройкой «Скрыть финансовые показатели»): права читателей страницы
-настраиваются в Confluence. Период — последний завершённый месяц (со сдвигом «Сдвиг периода»).
+Публикуется полный сквозной отчёт, как его видит администратор (reports.company_scorecard: вся компания или
+выбранная ветка, все уровни, все классы данных, кроме скрытых настройкой «Скрыть финансовые показатели»): права
+читателей страницы настраиваются в Confluence. Период — последний завершённый месяц (со сдвигом «Сдвиг периода»).
+Ссылка «Открыть сквозной отчёт» ведёт на PUBLIC_URL/reports (переменная окружения сервера; не задана — без ссылки).
 
 Публикация: страница ищется по сохранённому id (ctx.state, режим «одна страница»), затем по названию
 в пространстве; найдена — обновляется с версией + 1 (на 409 «версия устарела» — перечитать и повторить один
@@ -20,6 +21,7 @@ import re
 from datetime import timedelta
 from urllib.parse import quote
 
+from ...core.config import settings
 from ...core.errors import ValidationFailed
 from ...core.timeutil import local_now
 from ...services import reports, traffic_light
@@ -236,8 +238,6 @@ class ConfluenceConnector(Connector):
         Field("hide_financial", "Скрыть финансовые показатели", "bool", default=True,
               hint="Выручка, затраты, ФОТ и другие показатели класса «Финансовые» не попадут на страницу. "
                    + RIGHTS_HINT),
-        Field("app_url", "Адрес «Дашбордов компании»", placeholder="https://dashboards.company.ru",
-              hint="Для ссылки «Открыть сквозной отчёт» на странице; пусто — без ссылки"),
     )
     actions = (Action("publish", "Опубликовать сквозной отчёт",
                       "Отчёт за последний завершённый месяц — страницей в Confluence: обновить её (версия + 1) "
@@ -257,11 +257,6 @@ class ConfluenceConnector(Connector):
                                    fields={"config.parent_id": "Число"})
         out["title"] = " ".join((out.get("title") or DEFAULT_TITLE).split())[:200]
         metrics.check_template(out["title"], TITLE_VARS, "Название страницы", "config.title")
-        app_url = (out.get("app_url") or "").strip().rstrip("/")
-        if app_url and (not re.match(r"^https?://[^\s/?#@]+(/[^\s?#]*)?$", app_url, re.IGNORECASE)):
-            raise ValidationFailed("Адрес «Дашбордов компании» — http(s)://узел[/путь]",
-                                   fields={"config.app_url": "Нужен адрес http(s)://…"})
-        out["app_url"] = app_url
         return out
 
     def client(self) -> HttpClient:
@@ -317,10 +312,8 @@ class ConfluenceConnector(Connector):
                 raise IntegrationError(f"Вершина отчёта: {problem}", code="config",
                                        short="Вершина отчёта в подключении не найдена")
         hide = bool(self.config.get("hide_financial", True))
-        classes = frozenset(c for c in DATA_CLASSES if not (hide and c == "financial"))
-        viewer = reports.Viewer(user_id=0, scope="company", roots=tuple(st.snap.roots()), depth=None, classes=classes,
-                                services=(), can_records=False, can_export=False, can_manage=True)
-        data = reports.scorecard_data(ctx.db, st, viewer, period, root_id)
+        classes = [c for c in DATA_CLASSES if not (hide and c == "financial")]
+        data = reports.company_scorecard(ctx.db, period, root_id, classes=classes)
         root_name = st.snap.units[root_id].name if root_id else (
             st.snap.units[st.snap.roots()[0]].name if len(st.snap.roots()) == 1 else "вся компания")
         scope = f"«{root_name}» с вложенными подразделениями" if root_id else "вся компания"
@@ -333,7 +326,7 @@ class ConfluenceConnector(Connector):
         data, root_name, scope = self.report(ctx)
         title = self.page_title(data["period_label"], data["period"], root_name)
         body = report_storage(data, scope_text=scope, updated=local_now().strftime("%d.%m.%Y %H:%M"),
-                              app_url=self.config.get("app_url") or "")
+                              app_url=settings.public_url)
         space, mode = self.config["space"], self.config.get("mode") or "single"
         saved = ctx.state
         stored_id = saved.get("page_id") if mode == "single" and saved.get("space") == space and \

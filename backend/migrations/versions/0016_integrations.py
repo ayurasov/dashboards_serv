@@ -6,8 +6,9 @@
 - integration_runs — журнал запусков (повод, итог, счётчики, ошибка);
 - inbound_keys — ключи для входящих вызовов (SHA-256 и префикс, область, отзыв);
 - inbox_items — элементы входящих: источник, файл (содержимое до срока хранения), SHA-256, набор,
-  статус, план и итог (и краткая сводка для списка); частичный уникальный индекс (набор, SHA-256) по «живым» элементам
-  распознаёт повтор файла;
+  статус, план и итог (и краткая сводка для списка), пояснение источника (note: «Задача «…» · автор»);
+  частичный уникальный индекс (набор, SHA-256) по «живым» элементам распознаёт повтор файла; индекс
+  (статус, набор) — счётчик «ожидают» в меню (/api/auth/me) одним COUNT по индексу;
 - inbox_rules — «применять сразу» для источника и набора.
 
 Откат удаляет таблицы и снимает новые полномочия data.manage и integrations.manage
@@ -127,6 +128,7 @@ def upgrade() -> None:
         sa.Column("plan_ok", sa.Boolean(), nullable=True),
         sa.Column("error", sa.Text(), nullable=False),
         sa.Column("message", sa.Text(), nullable=False),
+        sa.Column("note", sa.String(500), nullable=False, server_default=""),
         sa.Column("duplicate_of_id", BIG_ID, nullable=True),
         sa.Column("received_at", sa.DateTime(), nullable=False),
         sa.Column("received_by_id", sa.Integer(), nullable=True),
@@ -156,7 +158,7 @@ def upgrade() -> None:
     op.create_index("ix_inbox_items_inbound_key_id", "inbox_items", ["inbound_key_id"])
     op.create_index("ix_inbox_items_sha256", "inbox_items", ["sha256"])
     op.create_index("ix_inbox_items_dataset", "inbox_items", ["dataset"])
-    op.create_index("ix_inbox_items_status", "inbox_items", ["status"])
+    op.create_index("ix_inbox_items_status_dataset", "inbox_items", ["status", "dataset"])
     op.create_index("ix_inbox_items_received_at", "inbox_items", ["received_at"])
     op.create_index("uq_inbox_items_dataset_sha256", "inbox_items", ["dataset", "sha256"], unique=True,
                     sqlite_where=LIVE, postgresql_where=LIVE)
@@ -184,7 +186,7 @@ def downgrade() -> None:
                          .values(capabilities=[c for c in caps if c not in NEW_CAPABILITIES]))
     op.drop_table("inbox_rules")
     op.drop_index("uq_inbox_items_dataset_sha256", table_name="inbox_items")
-    for column in ("received_at", "status", "dataset", "sha256", "inbound_key_id", "integration_id"):
+    for column in ("received_at", "status_dataset", "dataset", "sha256", "inbound_key_id", "integration_id"):
         op.drop_index(f"ix_inbox_items_{column}", table_name="inbox_items")
     op.drop_table("inbox_items")
     op.drop_table("inbound_keys")

@@ -287,3 +287,18 @@ def test_overloaded_error_has_retry_after(app, client):
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"
     assert response.json()["code"] == "overloaded"
+
+
+def test_public_url_setting_is_validated():
+    """PUBLIC_URL — адрес, по которому пользователи открывают «Дашборды»: пусто или http(s) без «/» в конце."""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    assert Settings(public_url="").public_url == ""
+    assert Settings(public_url=" https://dash.company.ru ").public_url == "https://dash.company.ru"
+    assert Settings(public_url="http://10.0.0.5:8000/dashboards").public_url == "http://10.0.0.5:8000/dashboards"
+    for bad in ("https://dash.company.ru/", "ftp://dash.company.ru", "dash.company.ru", "https://u:p@dash.ru",
+                "https://dash.ru/?a=1", "https://dash.ru/#x"):
+        with pytest.raises(ValidationError, match="PUBLIC_URL"):
+            Settings(public_url=bad)

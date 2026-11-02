@@ -79,6 +79,7 @@ const SUMMARY_KEYS = [
   { key: 'update', label: 'Изменится', tone: 'blue', base: true },
   { key: 'unchanged', label: 'Без изменений', base: true },
   { key: 'delete', label: 'Удалится', tone: 'red' },
+  { key: 'cleared', label: 'Очистится', tone: 'red' },
   { key: 'create_months', label: 'Новых месяцев', tone: 'green' },
   { key: 'hired', label: 'Приёмов' },
   { key: 'fired', label: 'Увольнений' },
@@ -117,6 +118,7 @@ export function summaryText(summary) {
   add('create', 'новых')
   add('update', 'изменится')
   add('delete', 'удалится')
+  add('cleared', 'очистится')
   add('unresolved', 'нужно решение')
   add('errors', 'ошибок')
   if (!parts.length) {
@@ -144,11 +146,19 @@ export const ROW_ACTIONS = {
   unchanged: { label: 'Без изменений', tone: 'gray' },
   skip: { label: 'Пропущено', tone: 'gray' },
   delete: { label: 'Удалится', tone: 'red' },
+  // Значения показателей: строка «очистить» удаляет сохранённое значение за месяц
+  clear: { label: 'Очистить', tone: 'red' },
   error: { label: 'Ошибка', tone: 'red' },
   add: { label: 'Назначить', tone: 'green' },
   exists: { label: 'Уже назначен', tone: 'gray' },
   pending: { label: 'Нет в системе', tone: 'yellow' },
 }
+
+/** «Станет» у строки «очистить»: сохранённое значение удаляется. */
+export const CLEARED_TEXT = 'значение удалится'
+
+/** Строки «очистить» в плане (значения показателей). */
+export const planClears = (rows = []) => rows.filter((r) => r.action === 'clear').length
 
 export const PLAN_FILTERS = [
   { value: 'changes', label: 'Изменения и ошибки' },
@@ -219,7 +229,8 @@ export function planRows(plan) {
   return planRowsSource(plan).map((row, index) => {
     const { title, subtitle } = rowTitle(row)
     const before = row.before !== undefined ? valueText(row.before) : null
-    const after = row.after !== undefined ? (row.action === 'error' ? '—' : valueText(row.after)) : null
+    let after = row.after !== undefined ? (row.action === 'error' ? '—' : valueText(row.after)) : null
+    if (row.action === 'clear') after = CLEARED_TEXT
     return {
       key: `${row.key ?? row.id ?? row.number ?? row.period ?? ''}-${row.line ?? index}-${index}`,
       line: row.line ?? null,

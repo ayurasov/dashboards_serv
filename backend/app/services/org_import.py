@@ -11,7 +11,11 @@
 Явный руководитель записывается, только если он отличается от руководителя по структуре:
 последующие переводы и смены руководителей подразделений тогда работают сами. Новые
 сотрудники создаются без пароля: из списка — «без доступа», из AD — со входом по домену.
-Отключаются только сотрудники, пришедшие из AD (org_source = 'ad'); включать загрузка не может.
+Отключать умеют синхронизации (DEACTIVATING_SOURCES: AD и «По Делу») — и только сотрудников, пришедших
+из того же источника (org_source = source): отключённых в каталоге (Row.disabled) и, с deactivate_missing,
+отсутствующих в выгрузке. Не отключаются никогда: тот, кто запускает загрузку, последний активный
+администратор, служебные учётные записи (keep — логины и email) и сотрудники других источников.
+Включать загрузка не может.
 """
 from __future__ import annotations
 
@@ -35,7 +39,11 @@ TRUE_VALUES = {"1", "true", "yes", "да", "y", "+", "руководитель",
 FALSE_VALUES = {"0", "false", "no", "нет", "n", "-"}
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 LOGIN = re.compile(r"^[A-Za-z0-9._@-]{2,100}$")
-SOURCE_LABELS = {"csv": "загрузка списком", "ad": "синхронизация с AD"}
+SOURCE_LABELS = {"csv": "загрузка списком", "ad": "синхронизация с AD", "podelu": "синхронизация с «По Делу»"}
+# Источники, которые отключают своих сотрудников (отключённых в каталоге и, по запросу, отсутствующих)
+DEACTIVATING_SOURCES = ("ad", "podelu")
+SOURCE_BY = {"ad": "синхронизацией с AD", "podelu": "синхронизацией с «По Делу»"}
+MISSING_TEXT = {"ad": "нет в каталоге", "podelu": "нет среди активных в «По Делу»"}
 
 # Заголовки столбцов: русские и английские варианты (без учёта регистра)
 COLUMN_ALIASES = {
@@ -334,8 +342,15 @@ def _match(rows: list[Row], snap: org.OrgSnapshot, source: str) -> dict[int, int
 
 def plan_import(db: Session, rows: list[Row], *, source: str = "csv", create_missing: bool = False,
                 deactivate_missing: bool = False, manager_refs: dict[str, str] | None = None,
-                actor_id: int | None = None) -> ImportPlan:
+                actor_id: int | None = None, keep: set[str] | frozenset[str] = frozenset()) -> ImportPlan:
+    """keep — логины и email служебных учётных записей: их нет в выгрузке, но отключать их нельзя."""
     plan = ImportPlan(source=source)
+    deactivating = source in DEACTIVATING_SOURCES
+    protected = {k.strip().lower() for k in keep if k and k.strip()}
+
+    def service_account(person) -> bool:
+        return person.username.lower() in protected or (person.email or "").lower() in protected
+
     snap = org.build_snapshot(db)
     settings = org_admin.get_settings(db)
     paths = plan.paths = Paths(snap, settings["unit_kinds"])
@@ -442,20 +457,22 @@ def plan_import(db: Session, rows: list[Row], *, source: str = "csv", create_mis
         if row.disabled:
             if person is None:
                 disable = True
-            elif person.org_source == "ad":
-                disable = person.is_active and person.id != actor_id and not (person.is_admin and admins_left <= 1)
+            elif deactivating and person.org_source == source:
+                disable = person.is_active and person.id != actor_id and not service_account(person) \
+                    and not (person.is_admin and admins_left <= 1)
                 if person.is_active and not disable:
-                    warnings.append("отключён в каталоге, но это ваша учётная запись или последний администратор — "
-                                    "не отключается")
+                    warnings.append("отключён в каталоге, но это ваша или служебная учётная запись или последний "
+                                    "администратор — не отключается")
                 admins_left -= 1 if disable and person.is_admin else 0
             else:
-                warnings.append("отключён в каталоге, но учётная запись создана не синхронизацией с AD — "
-                                "не отключается")
+                warnings.append(f"отключён в каталоге, но учётная запись создана не {SOURCE_BY.get(source, source)} "
+                                "— не отключается")
         head = bool(row.is_head and department is not None)
         target = {"department": department, "position": row.position, "manager": explicit.get(key),
                   "head": head, "name": row.name or None, "email": row.email or None, "login": row.login,
                   "external_id": row.external_id or None, "disabled": disable, "row_disabled": row.disabled,
-                  "adopt": person is not None and source != "csv" and not (row.disabled and person.org_source != "ad")}
+                  "adopt": person is not None and source != "csv"
+                  and not (row.disabled and person.org_source != source)}
         changes = []
         if person is not None:
             if department != person.department_id:
@@ -490,10 +507,11 @@ def plan_import(db: Session, rows: list[Row], *, source: str = "csv", create_mis
         })
 
     plan.admins_left = admins_left
-    if deactivate_missing and source == "ad":
+    if deactivate_missing and deactivating:
         present = {person.id for _row, person, *_ in entries if person is not None}
         candidates = [p for p in snap.people.values()
-                      if p.org_source == "ad" and p.is_active and p.id not in present and p.id != actor_id]
+                      if p.org_source == source and p.is_active and p.id not in present and p.id != actor_id
+                      and not service_account(p)]
         for person in sorted(candidates, key=lambda p: p.full_name.casefold()):
             if person.is_admin and plan.admins_left <= 1:
                 continue    # последний активный администратор не отключается
@@ -512,11 +530,12 @@ def _name(snap: org.OrgSnapshot, key) -> str:
 
 def apply_import(db: Session, actor: User | None, rows: list[Row], *, source: str = "csv",
                  create_missing: bool = False, deactivate_missing: bool = False,
-                 manager_refs: dict[str, str] | None = None, request: Request | None = None) -> tuple[dict, bool]:
+                 manager_refs: dict[str, str] | None = None, request: Request | None = None,
+                 keep: set[str] | frozenset[str] = frozenset()) -> tuple[dict, bool]:
     """(план, применён ли). При ошибках ничего не записывается."""
     plan = plan_import(db, rows, source=source, create_missing=create_missing,
                        deactivate_missing=deactivate_missing, manager_refs=manager_refs,
-                       actor_id=actor.id if actor else None)
+                       actor_id=actor.id if actor else None, keep=keep)
     result = plan.as_dict()
     if plan.errors:
         return result, False
@@ -598,7 +617,8 @@ def apply_import(db: Session, actor: User | None, rows: list[Row], *, source: st
             user.is_active = False
             sessions.revoke_all(db, user.id)
             audit.record(db, actor, entity_type="user", entity_id=user.id, action="org_import",
-                         summary=f"Отключён сотрудник {user.full_name}: нет в каталоге ({comment})",
+                         summary=f"Отключён сотрудник {user.full_name}: {MISSING_TEXT.get(source, 'нет в выгрузке')} "
+                                 f"({comment})",
                          before={"is_active": True}, after={"is_active": False}, request=request)
     normalize_single_heads(db, touched_units, primaries)
     summary = result["summary"]

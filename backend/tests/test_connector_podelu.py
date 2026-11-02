@@ -277,14 +277,16 @@ def _user(db, email):
 
 # ---------------------------------------------------------------- описание и настройки
 
-def test_kind_fields_and_hidden_secret_binding(admin):
+def test_kind_fields_and_secret_binding_fields(admin):
     kinds = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}
     meta = kinds["podelu"]
     fields = {f["key"]: f for f in meta["fields"]}
     assert meta["title"] == "По Делу" and meta["allowed_hosts_env"] == "PODELU_ALLOWED_HOSTS"
     assert fields["password"]["secret"] and not fields["login"]["secret"]
     assert fields["deactivate_missing"]["default"] is False and fields["create_missing_units"]["default"] is True
-    assert fields["secret_url"]["show_if"] == {"base_url": []}, "поле привязки пароля не показывается"
+    assert "secret_url" not in fields, "привязка пароля — механизм каркаса (secret_url), а не скрытое поле"
+    assert meta["url_field"] == "base_url" and meta["secret_url_fields"] == ["base_url", "server_url"], \
+        "форма предупреждает: смена любого из адресов требует ввести пароль заново"
     assert [a["key"] for a in meta["actions"]] == ["sync", "pull"]
     assert [a["label"] for a in meta["actions"]] == ["Синхронизировать структуру", "Забрать данные из задач"]
 
@@ -298,6 +300,19 @@ def test_password_is_bound_to_both_addresses(admin, fake):
     rebound = admin.patch(f"/api/integrations/{item['id']}", json={"config": {"server_url": "http://10.0.0.5:5000"},
                                                                     "secrets": {"password": PASSWORD}}).json()
     assert rebound["secret_bound_url"] == f"{fake.server.url} → http://10.0.0.5:5000"
+    assert "secret_url" not in rebound["config"] and rebound["secret_problem"] is None
+    base = admin.patch(f"/api/integrations/{item['id']}", json={"config": {"base_url": "https://podelu.company.ru"}})
+    assert base.status_code == 422 and base.json()["code"] == "secret_rebind_required", "и при смене основного адреса"
+    # Настройка ранней сборки 0.4.0 (скрытое поле привязки) не мешает сохранить подключение
+    db_config = {**rebound["config"], "secret_url": "устаревшее"}
+    from app.core import db as core_db
+
+    with core_db.SessionLocal() as session:
+        session.execute(update(Integration).where(Integration.id == item["id"]).values(config=db_config))
+        session.commit()
+    renamed = admin.patch(f"/api/integrations/{item['id']}", json={"config": {"data_list": "L1"}})
+    assert renamed.status_code == 200, renamed.text
+    assert "secret_url" not in renamed.json()["config"] and renamed.json()["secret_problem"] is None
 
 
 # ---------------------------------------------------------------- проверка
@@ -470,14 +485,45 @@ def test_sync_without_creating_units(admin, fake, db):
                        "структуре — сотрудник не создаётся"]
 
 
-def test_sync_deactivate_missing_is_reported(admin, fake, db):
+def test_sync_deactivates_missing_podelu_employees_only(admin, fake, db):
     _rules(db, "structure", "employees")
+    # Служебная учётная запись когда-то попала в «Дашборды» из «По Делу»; сотрудник из AD; сотрудник вручную
+    db.add_all([
+        User(username="svc", full_name="Синхронизация дашбордов", email="svc@company.ru", role="user", is_active=True,
+             org_source="podelu", external_id="u-svc", auth_source="local", must_change_password=False),
+        User(username="ad.user", full_name="Сотрудник из AD", email="ad.user@company.ru", role="user", is_active=True,
+             org_source="ad", external_id="guid-1", auth_source="ldap", must_change_password=False),
+    ])
+    db.commit()
     item = _create(admin, fake, deactivate_missing=True)
+    first = _run(admin, item, "sync")
+    assert first["status"] == "ok" and first["summary"]["users_deactivate"] == 0
+    assert "отключено" not in first["message"]
+    fake.employees[1]["isActive"] = False      # Иванову отключили в «По Делу»: в выгрузке активных её нет
+    run = _run(admin, item, "sync")
+    assert run["status"] == "ok", run
+    assert run["summary"]["users_deactivate"] == 1 and "отключено 1" in run["message"]
+    assert not any("отключает только" in n for n in run["summary"]["details"].get("notes", [])), \
+        "обходной заметки больше нет — движок отключает сам"
+    assert _user(db, "ivanova@company.ru").is_active is False
+    assert _user(db, "svc@company.ru").is_active, "служебная учётная запись подключения не отключается"
+    assert _user(db, "ad.user@company.ru").is_active, "сотрудник из AD не отключается синхронизацией «По Делу»"
+    assert db.scalar(select(User).where(User.username == "viewer")).is_active, "заведённые вручную — тоже"
+    assert _user(db, "pm@company.ru").is_active and _user(db, "product@company.ru").is_active
+    from app.models import AuditEntry
+
+    entry = db.scalar(select(AuditEntry).where(AuditEntry.entity_type == "user",
+                                               AuditEntry.summary.like("Отключён сотрудник Иванова Анна%")))
+    assert entry is not None and "нет среди активных в «По Делу»" in entry.summary
+
+
+def test_sync_without_deactivate_missing_keeps_everyone(admin, fake, db):
+    _rules(db, "structure", "employees")
+    item = _create(admin, fake)
     _run(admin, item, "sync")
     fake.employees[1]["isActive"] = False
     run = _run(admin, item, "sync")
-    assert any("отключает только сотрудников из AD" in n and "Иванова Анна" in n
-               for n in run["summary"]["details"]["notes"])
+    assert run["summary"]["users_deactivate"] == 0 and _user(db, "ivanova@company.ru").is_active
 
 
 def test_sync_missing_right_fails_and_logs_out(admin, fake, db):
@@ -494,10 +540,8 @@ def test_sync_missing_right_fails_and_logs_out(admin, fake, db):
 
 
 def test_podelu_files_dropped_into_inbox_are_recognized(db, fake):
-    # Форматы регистрируются при импорте модуля коннектора (base._load); пока каркас не загружает коннекторы при
-    # старте, файл «По Делу», положенный вручную, распознаётся только после первого обращения к подключениям
-    from app.integrations.connectors import podelu  # noqa: F401
-
+    # Форматы «По Делу» регистрирует модуль коннектора; распознавание само загружает коннекторы
+    # (свежий процесс без обращения к подключениям — test_inbox.test_podelu_format_recognized_in_fresh_process)
     bundle = {"format": "podelu.org-structure", "version": 1, "exportedAt": _now(), "app": "1.9.2", "settings": {},
               "departments": [{"key": "a", "name": "АЛМИ Партнер", "parent": None, "kind": "company", "sortOrder": 0,
                                "heads": []}]}
@@ -541,10 +585,15 @@ def test_pull_takes_task_and_result_files_and_marks_task(admin, fake, db):
     assert tp.source_ref == f"podelu:T1:a1:{hashlib.sha256(tp_file()).hexdigest()}"
     assert items["показатели.csv"].dataset == "indicators" and items["показатели.csv"].status == "pending"
     assert fake.comments == [("T1", "Файл «tp-week.xlsx» принят в «Дашборды»: применён\n"
-                                    "Файл «показатели.csv» принят в «Дашборды»: ожидает подтверждения")]
+                                    "Файл «показатели.csv» принят в «Дашборды»: ожидает подтверждения")], \
+        "без PUBLIC_URL — без ссылки"
+    assert tp.note == "Задача «Недельный отчёт ТП» · Иванова Анна", "откуда файл — пояснением элемента"
+    assert items["показатели.csv"].note == "Задача «Недельный отчёт ТП» · Иванова Анна"
     files = summary["details"]["files"]
-    assert files[0]["task"] == "Недельный отчёт ТП" and files[0]["author"] == "Иванова Анна"
-    assert files[0]["task_author"] == "Петров Пётр"
+    assert files[0] == {"item": tp.id, "file": "tp-week.xlsx", "status": "применён"}, \
+        "задача и автор — в пояснении элемента, а не в подробностях запуска"
+    detail = admin.get(f"/api/inbox/{tp.id}").json()
+    assert detail["note"] == tp.note
     assert not any("/api/tasks/T3/" in r.path for r in fake.server.requests), "задачи другого списка не трогаются"
     tasks_query = next(r for r in fake.server.requests if r.path == "/api/v2/tasks").query
     assert tasks_query["listId"] == ["L1"] and tasks_query["sort"] == ["updatedAt"]
@@ -552,6 +601,23 @@ def test_pull_takes_task_and_result_files_and_marks_task(admin, fake, db):
     state = db.get(Integration, item["id"]).state
     assert state["list"] == "L1" and state["since"] and state["tasks"]["T1"]["n"] == 3
     assert fake.logouts == 1
+
+
+def test_pull_comment_links_to_inbox_with_public_url(admin, fake, db, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "public_url", "https://dash.company.ru")
+    fake.add_task("T9", "Очень длинное название задачи " * 30, created_by="p-pm")
+    fake.add_file("T9", "z1", "показатели.csv", csv_bytes([["Подразделение", "Показатель", "Период", "Значение"],
+                                                           ["COMM", "fin.revenue", "2031-03", "5"]]), uploaded_by="")
+    item = _create(admin, fake)
+    run = _run(admin, item, "pull")
+    assert run["status"] == "ok", run
+    assert fake.comments == [("T9", "Файл «показатели.csv» принят в «Дашборды»: ожидает подтверждения\n"
+                                    "Входящие данные: https://dash.company.ru/inbox")]
+    taken = db.scalar(select(InboxItem).where(InboxItem.integration_id == item["id"]))
+    assert len(taken.note) <= 500 and taken.note.startswith("Задача «Очень длинное название задачи")
+    assert taken.note.endswith("…» · Петров Пётр"), "без загрузившего — автор задачи; длинное название сокращено"
 
 
 def test_pull_cursor_dedup_and_new_attachment(admin, fake, db):

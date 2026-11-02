@@ -14,9 +14,10 @@
 задачи или срок окончания прошёл при прогрессе меньше 100 %), заблокированные задачи, средний прогресс и доля
 проектов в срок. Светофор проекта выводится здесь же: красный — просрочен, жёлтый — есть заблокированные задачи
 или до окончания не больше 14 дней при прогрессе меньше 80 %, зелёный — остальные в работе и завершённые,
-серый — без задач. Показатели каталога создаются при первом запуске (служба-владелец — проектный и продуктовый
-офис, вводимые, операционные); значения пишет движок загрузки (ctx.plans.indicator_values) с комментарием
-«из «Пульса проекта»».
+серый — без задач. Показатели каталога создаются при первом запуске (ctx.plans.ensure_indicator; служба-владелец —
+проектный и продуктовый офис, вводимые, операционные); значения пишет движок загрузки (ctx.plans.indicator_values)
+с комментарием «из «Пульса проекта»». У подразделения без проектов в работе средний прогресс и доля в срок не
+определены: сохранённое прошлым запуском значение очищается (строка clear), а не остаётся старым.
 """
 from __future__ import annotations
 
@@ -25,17 +26,14 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from ...core import db as core_db
 from ...core.config import settings
 from ...core.errors import AppError, Conflict, ValidationFailed
-from ...models import Indicator, name_key
-from ...schemas.reports import IndicatorCreateIn
-from ...services import org, report_admin, reports
+from ...models import name_key
+from ...services import org, reports
 from ...services.inbox import plan_errors
 from ...services.org_import import split_path
+from ...services.reports import IndicatorDef
 from ..base import Action, CheckResult, Connector, Field, Option, RunContext, RunResult, register
 from ..http import HttpClient, IntegrationError
 from .common import ANY_STATUS, PartnerSession, partner_error, rule_lines
@@ -209,31 +207,29 @@ def _number(value: float) -> str:
 
 # ---------------------------------------------------------------- каталог показателей
 
-def ensure_indicators(db: Session, actor, notes: list[str]) -> tuple[dict[str, Indicator], list[str]]:
-    """Показатели puls.* в каталоге: недостающие создаются функциями каталога (report_admin.create_indicator)
-    и фиксируются сразу — значения пишутся отдельной транзакцией движка загрузки."""
-    rows = {r.key: r for r in db.scalars(select(Indicator).where(Indicator.key.in_(INDICATOR_KEYS)))}
+def ensure_indicators(ctx: RunContext, notes: list[str]) -> tuple[dict[str, IndicatorDef], list[str]]:
+    """Показатели puls.* в каталоге: недостающие создаёт каркас (ctx.plans.ensure_indicator — функция каталога,
+    журнал от имени подключения, фиксация сразу), значения пишутся отдельной транзакцией движка загрузки.
+    Название занято другим показателем — пробуется «<название> («Пульс»)»."""
+    catalog = {i.key: i for i in reports.state(ctx.db).catalog if i.key in INDICATOR_KEYS}
     created: list[str] = []
     for spec in INDICATORS:
-        if spec.key in rows:
+        if spec.key in catalog:
             continue
         for name in (spec.name, f"{spec.name} («Пульс»)"):
-            body = IndicatorCreateIn(key=spec.key, name=name, description=spec.description, unit=spec.unit,
-                                     data_class="operational", direction=spec.direction, rollup=spec.rollup,
-                                     rule_type="threshold", green_threshold=spec.green, yellow_threshold=spec.yellow,
-                                     source_type="manual", owner_service="project_product", sort_order=spec.sort_order)
+            body = {"key": spec.key, "name": name, "description": spec.description, "unit": spec.unit,
+                    "data_class": "operational", "direction": spec.direction, "rollup": spec.rollup,
+                    "rule_type": "threshold", "green_threshold": spec.green, "yellow_threshold": spec.yellow,
+                    "source_type": "manual", "owner_service": "project_product", "sort_order": spec.sort_order}
             try:
-                with db.begin_nested():
-                    rows[spec.key] = report_admin.create_indicator(db, actor, body)
-                created.append(spec.key)
-                break
+                catalog[spec.key] = ctx.plans.ensure_indicator(body)
             except Conflict:
                 continue
+            created.append(spec.key)
+            break
         else:
             notes.append(f"Показатель {spec.key} не создан: название «{spec.name}» занято другим показателем")
-    if created:
-        db.commit()
-    return rows, created
+    return catalog, created
 
 
 # ---------------------------------------------------------------- коннектор
@@ -425,16 +421,16 @@ class PulsConnector(Connector):
         targets = {root}
         for _direction, unit_id in mapping:
             targets.update(snap.path(unit_id))
-        catalog, created = ensure_indicators(ctx.db, ctx.actor, notes)
+        catalog, created = ensure_indicators(ctx, notes)
         usable = {}
         for key in INDICATOR_KEYS:
-            row = catalog.get(key)
-            if row is None:
+            ind = catalog.get(key)
+            if ind is None:
                 continue
-            if not row.is_active or row.source_type != "manual":
-                notes.append(f"показатель {key} {'выключен' if not row.is_active else 'вычисляемый'} — не обновляется")
+            if not ind.is_active or ind.computed:
+                notes.append(f"показатель {key} {'выключен' if not ind.is_active else 'вычисляемый'} — не обновляется")
                 continue
-            usable[key] = row
+            usable[key] = ind
         # Ограничения режима ключа — сведения, а не ошибка настройки: запуск от них не становится «частичным»
         limits: list[str] = []
         if info["mode"] == "key":
@@ -461,7 +457,8 @@ class PulsConnector(Connector):
         result = ctx.plans.indicator_values(rows, apply=True, filename=name)
         summary = result.get("summary") or {}
         counters.update(values_create=summary.get("create", 0), values_update=summary.get("update", 0),
-                        values_unchanged=summary.get("unchanged", 0), values_errors=summary.get("errors", 0))
+                        values_cleared=summary.get("cleared", 0), values_unchanged=summary.get("unchanged", 0),
+                        values_errors=summary.get("errors", 0))
         if not result.get("applied"):
             errors = plan_errors(result, 5) or ["план значений не применён"]
             return RunResult.failed(f"Показатели проектов не записаны: {'; '.join(errors)}", counters=counters,
@@ -471,6 +468,8 @@ class PulsConnector(Connector):
                    f"{sum(1 for p in projects if p.in_work)}, красных {lights['red']}, жёлтых {lights['yellow']}), "
                    f"подразделений {counters['units']}; значений новых {counters['values_create']}, изменено "
                    f"{counters['values_update']}, без изменений {counters['values_unchanged']}")
+        if counters["values_cleared"]:
+            message += f", очищено {counters['values_cleared']} (нет проектов в работе)"
         if created:
             message += f"; созданы показатели: {', '.join(created)}"
         if limits:
@@ -493,13 +492,18 @@ class PulsConnector(Connector):
             mine = [p for p in projects if (p.unit if p.unit is not None else root) in branch]
             active = [p for p in mine if p.in_work]
             late = [p for p in active if p.late(today)]
-            values = {"puls.projects": len(active), "puls.overdue": len(late),
-                      "puls.blocked": sum(p.blocked or 0 for p in mine)}
-            if active:
-                values["puls.progress"] = sum(p.progress for p in active) / len(active)
-                values["puls.on_time_share"] = (len(active) - len(late)) / len(active) * 100
+            values: dict[str, float | None] = {"puls.projects": len(active), "puls.overdue": len(late),
+                                               "puls.blocked": sum(p.blocked or 0 for p in mine)}
+            # Без проектов в работе среднего прогресса и доли в срок нет: значение прошлого запуска очищается
+            values["puls.progress"] = sum(p.progress for p in active) / len(active) if active else None
+            values["puls.on_time_share"] = (len(active) - len(late)) / len(active) * 100 if active else None
             for key, value in values.items():
-                if key in usable:
+                if key not in usable:
+                    continue
+                if value is None:
+                    rows.append({"line": len(rows) + 1, "department": ref, "indicator": key, "period": period,
+                                 "value": None, "target": None, "comment": None, "clear": True})
+                else:
                     rows.append({"line": len(rows) + 1, "department": ref, "indicator": key, "period": period,
                                  "value": _number(value), "target": "", "comment": COMMENT})
         return rows

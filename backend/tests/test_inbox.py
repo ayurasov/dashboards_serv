@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
@@ -146,6 +147,37 @@ def test_filename_pattern_breaks_ties():
     content = xlsx([["Партнёр", "Статус"], ["ООО", "В работе"]])
     assert datasets.detect("x.xlsx", content)[0] is None
     assert datasets.get("partnerships").score(datasets.peek("реестр партнёрств.xlsx", content)) == 20
+
+
+def test_podelu_format_recognized_in_fresh_process(tmp_path, db_url):
+    """Свежий процесс, подключения не трогали: файл podelu.org-structure во входящих распознаётся как «Структура»
+    (форматы регистрируют модули коннекторов — распознавание загружает их само)."""
+    import os
+    import subprocess
+    import sys
+
+    from tests.conftest import _TMP
+
+    script = tmp_path / "fresh.py"
+    script.write_text(
+        "import json, sys\n"
+        "from app.services import inbox, inbox_datasets\n"
+        "from app.integrations import base\n"
+        "assert not inbox_datasets.JSON_FORMATS and not base._loaded, 'коннекторы ещё не загружены'\n"
+        "from app.core import db as core_db\n"
+        "doc = {'format': 'podelu.org-structure', 'version': 1, 'exportedAt': '2026-10-20T09:00:00Z', "
+        "'app': '1.9.2', 'settings': {}, 'departments': [{'key': 'a', 'name': 'АЛМИ Партнер', 'parent': None, "
+        "'kind': 'company', 'sortOrder': 0, 'heads': []}]}\n"
+        "with core_db.SessionLocal() as db:\n"
+        "    item = inbox.add(db, json.dumps(doc).encode(), 'export.json', source='folder', label='папка')\n"
+        "    print(json.dumps({'dataset': item.dataset, 'status': item.status, 'plan_ok': item.plan_ok}))\n",
+        encoding="utf-8")
+    env = {**os.environ, "DATABASE_URL": db_url, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    done = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=120,
+                          cwd=str(_TMP))
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    assert result == {"dataset": "structure", "status": "pending", "plan_ok": True}
 
 
 def test_json_format_converter_extension_point(db):
@@ -357,6 +389,77 @@ def test_api_upload_plan_apply_and_download(login, db):
     assert next(m for m in month["metrics"] if m["key"] == "total_employees")["value"] == 205
 
 
+def test_upload_without_apply_waits_with_ui_wording_api_keeps_its_own(login, db):
+    lead = login("tp_lead")
+    item = lead.post("/api/inbox", files={"file": ("w.xlsx", tp_file())}, data={"apply": "false"}).json()
+    assert item["status"] == "pending" and item["message"] == "Загружено для проверки — посмотрите план и примените"
+    assert "отправитель" not in item["message"]
+    api = inbox.add(db, partnerships_file(), "p.xlsx", source="api", label="Ключ «1С»", apply=False)
+    db.commit()
+    assert api.message == "Ожидает подтверждения: отправитель попросил только план"
+    retried = lead.post(f"/api/inbox/{item['id']}/retry", json={}).json()
+    assert retried["status"] == "pending" and retried["message"] == "План построен заново — посмотрите его и примените"
+
+
+def test_note_is_stored_cleaned_and_returned(admin, db):
+    noisy = "Задача «Отчёт\nза неделю»\t· Иванова " + "х" * 600
+    item = inbox.add(db, tp_file(), "w.xlsx", source="integration", label="Подключение «По Делу»", note=noisy)
+    db.commit()
+    assert "\n" not in item.note and "\t" not in item.note and len(item.note) == 500 and item.note.endswith("…")
+    assert item.note.startswith("Задача «Отчёт за неделю» · Иванова")
+    listed = admin.get("/api/inbox").json()["items"]
+    assert next(i for i in listed if i["id"] == item.id)["note"] == item.note
+    assert admin.get(f"/api/inbox/{item.id}").json()["note"] == item.note
+    plain = admin.post("/api/inbox", files={"file": ("p.xlsx", partnerships_file())}).json()
+    assert plain["note"] == "", "у загрузки пояснения нет"
+    twin = inbox.add(db, tp_file(), "w2.xlsx", source="integration", label="x", note="Письмо «Повтор» от a@b.ru")
+    assert twin.status == "duplicate" and twin.note == "Письмо «Повтор» от a@b.ru", "у повтора — своё пояснение"
+
+
+def test_me_reports_inbox_availability_and_pending(login, admin, db):
+    me = admin.get("/api/auth/me").json()
+    assert me["inbox"] == {"available": True, "pending": 0}
+    for name, build in (("w.xlsx", tp_file), ("p.xlsx", partnerships_file), ("m.xlsx", hr_months_file)):
+        assert admin.post("/api/inbox", files={"file": (name, build())}).status_code == 201
+    assert admin.get("/api/auth/me").json()["inbox"] == {"available": True, "pending": 3}, "всё — с data.manage"
+    lead = login("tp_lead")
+    assert lead.get("/api/auth/me").json()["inbox"] == {"available": True, "pending": 1}, "только свои наборы"
+    hr = login("hr_head")
+    assert hr.get("/api/auth/me").json()["inbox"]["pending"] == 1
+    assert login("viewer").get("/api/auth/me").json()["inbox"] == {"available": False, "pending": 0}
+    login_response = login("tp_lead").get("/api/auth/me").json()
+    assert login_response["inbox"]["pending"] == 1
+    item = next(i for i in admin.get("/api/inbox").json()["items"] if i["dataset"] == "tp-weekly")
+    assert lead.post(f"/api/inbox/{item['id']}/apply").status_code == 200
+    assert lead.get("/api/auth/me").json()["inbox"]["pending"] == 0
+    assert admin.get("/api/auth/me").json()["inbox"]["pending"] == 2
+
+
+def test_me_inbox_count_is_one_indexed_query(login, admin, db, engine):
+    from sqlalchemy import event
+
+    for name, build in (("w.xlsx", tp_file), ("p.xlsx", partnerships_file)):
+        admin.post("/api/inbox", files={"file": (name, build())})
+    lead = login("tp_lead")
+    statements: list[str] = []
+
+    def remember(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", remember)
+    try:
+        assert lead.get("/api/auth/me").json()["inbox"]["pending"] == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", remember)
+    counts = [s for s in statements if "inbox_items" in s]
+    assert len(counts) == 1 and "count(" in counts[0].lower(), counts
+    with engine.connect() as conn:
+        plan = " ".join(str(r) for r in conn.exec_driver_sql(
+            "EXPLAIN QUERY PLAN SELECT count(*) FROM inbox_items WHERE status = 'pending' "
+            "AND dataset IN ('tp-weekly', 'naumen', 'indicators')").all())
+    assert "ix_inbox_items_status_dataset" in plan, plan
+
+
 def test_api_upload_with_apply_flag_and_options(login):
     lead = login("tp_lead")
     response = lead.post("/api/inbox", files={"file": ("w.xlsx", tp_file())},
@@ -439,12 +542,20 @@ def test_api_apply_conflict_returns_fresh_plan(admin):
 
 
 def test_api_rules(admin, login):
-    rules = admin.get("/api/inbox/rules").json()
+    response = admin.get("/api/inbox/rules").json()
+    assert set(response) == {"rules"}, "как в спецификации: {rules: […]}"
+    rules = response["rules"]
     assert len(rules) == 3 * 8 and not any(r["auto_apply"] for r in rules)
     saved = admin.put("/api/inbox/rules", json={"rules": [{"source": "folder", "dataset": "naumen",
                                                            "auto_apply": True}]})
     assert saved.status_code == 200
-    assert next(r for r in saved.json() if r["source"] == "folder" and r["dataset"] == "naumen")["auto_apply"]
+    assert next(r for r in saved.json()["rules"] if r["source"] == "folder" and r["dataset"] == "naumen")["auto_apply"]
+    # PUT принимает тот же вид, что отдаёт GET (с подписями): правило можно вернуть как получено
+    echoed = {**next(r for r in rules if r["source"] == "api" and r["dataset"] == "tp-weekly"), "auto_apply": True}
+    assert {"source_label", "dataset_label"} <= set(echoed)
+    again = admin.put("/api/inbox/rules", json={"rules": [echoed]})
+    assert again.status_code == 200, again.text
+    assert next(r for r in again.json()["rules"] if r["source"] == "api" and r["dataset"] == "tp-weekly")["auto_apply"]
     assert admin.put("/api/inbox/rules", json={"rules": [{"source": "upload", "dataset": "naumen",
                                                           "auto_apply": True}]}).status_code == 422
     assert admin.put("/api/inbox/rules", json={"rules": [{"source": "api", "dataset": "nope",

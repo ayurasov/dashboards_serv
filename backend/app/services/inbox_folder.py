@@ -91,7 +91,8 @@ def status() -> dict:
     out = {"enabled": root is not None, "path": str(root) if root else "", "exists": False, "writable": False,
            "settle_seconds": settings.inbox_settle_seconds, "max_mb": settings.inbox_max_mb,
            "retention_days": settings.inbox_retention_days, "waiting_files": 0,
-           "folders": [{"folder": d.key, "dataset": d.key, "label": d.label} for d in datasets.all_datasets()]}
+           "folders": [{"folder": d.key, "dataset": d.key, "label": d.label, "patterns": list(d.patterns)}
+                       for d in datasets.all_datasets()]}
     if root is not None and root.is_dir():
         out["exists"] = True
         out["writable"] = os.access(root, os.W_OK | os.X_OK)

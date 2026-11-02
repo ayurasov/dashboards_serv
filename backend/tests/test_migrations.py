@@ -431,6 +431,17 @@ def _check_0016_roundtrip(url: str) -> None:
         conn.execute(text(insert), {"status": "pending", "content": b"abc"})
     with engine.connect() as conn, pytest.raises(IntegrityError):
         conn.execute(text(insert), {"status": "unknown", "content": None})
+    with engine.begin() as conn:
+        # Пояснение источника: без значения — пустая строка; до 500 символов
+        assert set(conn.execute(text("SELECT note FROM inbox_items")).scalars()) == {""}
+        conn.execute(text("INSERT INTO inbox_items (source, source_ref, filename, content_type, size, sha256, status, "
+                          "options, error, message, note, received_at, received_by, applied_by) VALUES ('integration', "
+                          "'', 'b.csv', '', 1, 'f01', 'pending', '{}', '', '', :note, CURRENT_TIMESTAMP, '', '')"),
+                     {"note": "Задача «Отчёт» · Иванова Анна"})
+        assert conn.execute(text("SELECT note FROM inbox_items WHERE sha256 = 'f01'")).scalar() == \
+            "Задача «Отчёт» · Иванова Анна"
+        indexes = {i["name"]: i["column_names"] for i in inspect(conn).get_indexes("inbox_items")}
+        assert indexes["ix_inbox_items_status_dataset"] == ["status", "dataset"], "счётчик «ожидают» — по индексу"
     engine.dispose()
 
     command.downgrade(alembic_config(url), "0015_reports")

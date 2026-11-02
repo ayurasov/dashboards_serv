@@ -160,6 +160,9 @@ test('ключи для входящих вызовов: выпуск, пока�
   expect(key).toMatch(/^dash_[\w-]{20,}$/)
   await expect(shown).toContainText('показывается один раз')
   await expect(shown).toContainText(`Bearer ${key}`)
+  // Частота вызовов — с сервера (INBOUND_RATE_LIMIT), а не числом в интерфейсе
+  const keys = await apiGet(page, '/integrations/keys')
+  await expect(shown).toContainText(`не больше ${keys[0].rate_limit} запросов в минуту на ключ`)
   await shown.getByTestId('key-done').click()
 
   const row = page.getByTestId('keys-table').locator(`tr[data-key="${name}"]`)
@@ -194,5 +197,34 @@ test('ключи для входящих вызовов: выпуск, пока�
   await expect(row).toContainText('Отозван')
   await expect(row.getByRole('button', { name: 'Отозвать' })).toHaveCount(0)
   expect((await page.request.get('/api/inbound/v1/ping', { headers: auth })).status()).toBe(401)
+  expect(errors).toEqual([])
+})
+
+test('«По Делу»: смена любого из адресов — предупреждение до сохранения, пароль вводится заново', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  const kinds = await apiGet(page, '/integrations/kinds')
+  expect(kinds.find((k) => k.kind === 'podelu').secret_url_fields).toEqual(['base_url', 'server_url'])
+  const name = uniq('По Делу')
+  const created = await api(page, 'POST', '/integrations', {
+    kind: 'podelu', name, config: { base_url: 'https://podelu.company.ru', login: 'svc' }, secrets: { password: 'Пароль-42' },
+  })
+  try {
+    await page.goto('/admin/integrations')
+    await page.locator(`article[data-integration="${created.id}"]`).getByTestId('integration-edit').click()
+    const editor = page.getByRole('dialog').filter({ has: page.getByTestId('editor-save') })
+    await expect(editor.getByTestId('secret-set-password')).toBeVisible()
+    await expect(editor.getByTestId('editor-rebind')).toHaveCount(0)
+    await editor.locator('[data-field=server_url] input').fill('http://10.0.0.5:5000')
+    await expect(editor.getByTestId('editor-rebind')).toContainText('Изменено: «Адрес для запросов сервера»')
+    await expect(editor.locator('[data-field=password]')).toContainText('Адрес изменён')
+    await editor.getByTestId('editor-save').click()
+    await expect(editor.getByTestId('editor-error')).toContainText('Проверьте отмеченные поля')
+    await expect(editor.locator('[data-field=password]')).toContainText('Обязательное поле')
+    await editor.locator('[data-field=server_url] input').fill('')
+    await expect(editor.getByTestId('editor-rebind')).toHaveCount(0)
+  } finally {
+    await api(page, 'DELETE', `/integrations/${created.id}`)
+  }
   expect(errors).toEqual([])
 })

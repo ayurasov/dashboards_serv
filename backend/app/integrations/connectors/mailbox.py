@@ -424,7 +424,7 @@ class GraphBox(Mailbox):
 
     def _client(self, url: str, **kwargs) -> HttpClient:
         return HttpClient(url, kind="exchange", title=GRAPH_TITLE, cookies=False, verify=self.verify,
-                          detailed=self.detailed, **kwargs)
+                          detailed=self.detailed, secrets=(self._secret,), **kwargs)
 
     def open(self) -> None:
         with self._client(self.login_url) as client:

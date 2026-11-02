@@ -169,10 +169,18 @@ def report_data(db):
     db.commit()
 
 
+@pytest.fixture(autouse=True)
+def public_url(monkeypatch):
+    """Адрес «Дашбордов» для ссылки со страницы — настройка сервера PUBLIC_URL."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "public_url", "https://dash.company.ru")
+
+
 def create(admin, fake, name="Confluence", **config) -> dict:
     body = {"kind": "confluence", "name": name, "config": {
         "base_url": fake.url, "instance": fake.mode, "login": fake.login, "space": "REP", "parent_id": "500",
-        "app_url": "https://dash.company.ru/", **config}, "secrets": {"token": fake.token}}
+        **config}, "secrets": {"token": fake.token}}
     response = admin.post("/api/integrations", json=body)
     assert response.status_code == 201, response.text
     return response.json()
@@ -202,7 +210,8 @@ def test_kind_is_described_in_russian(admin):
     meta = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}["confluence"]
     fields = {f["key"]: f for f in meta["fields"]}
     assert meta["allowed_hosts_env"] == "CONFLUENCE_ALLOWED_HOSTS"
-    assert {"space", "parent_id", "title", "mode", "root", "period_offset", "hide_financial", "app_url"} <= set(fields)
+    assert {"space", "parent_id", "title", "mode", "root", "period_offset", "hide_financial"} <= set(fields)
+    assert "app_url" not in fields, "адрес «Дашбордов» — общая настройка сервера PUBLIC_URL"
     assert fields["hide_financial"]["default"] is True and fields["token"]["secret"]
     assert "как его видит администратор" in fields["space"]["hint"] and "права" in fields["hide_financial"]["hint"]
     assert [o["value"] for o in fields["mode"]["options"]] == ["single", "weekly"]
@@ -212,12 +221,12 @@ def test_kind_is_described_in_russian(admin):
 
 def test_validate_config():
     base = {"base_url": "https://confluence.company.ru", "instance": "server", "space": "REP"}
-    out = ConfluenceConnector.validate_config({**base, "app_url": "https://dash.company.ru/"})
-    assert out["title"] == "Сквозной отчёт компании" and out["app_url"] == "https://dash.company.ru"
+    out = ConfluenceConnector.validate_config(base)
+    assert out["title"] == "Сквозной отчёт компании" and "app_url" not in out
     assert out["hide_financial"] is True and out["mode"] == "single" and out["period_offset"] == 0
     for bad, field in (({"instance": "cloud", "login": "a@b.ru", "base_url": "https://x.atlassian.net"}, "base_url"),
                        ({"space": "R E P"}, "space"), ({"parent_id": "abc"}, "parent_id"),
-                       ({"title": "Отчёт {month}"}, "title"), ({"app_url": "ftp://x"}, "app_url")):
+                       ({"title": "Отчёт {month}"}, "title"), ({"app_url": "https://x.ru"}, "app_url")):
         with pytest.raises(ValidationFailed) as exc:
             ConfluenceConnector.validate_config({**base, **bad})
         assert f"config.{field}" in exc.value.fields
@@ -281,6 +290,16 @@ def test_publish_creates_page_with_report(admin, fake, db, report_data):
     assert saved["page_id"] == page["id"] and saved["version"] == 1 and saved["space"] == "REP"
     assert saved["page_url"].endswith(f"/pages/viewpage.action?pageId={page['id']}")
     assert data["summary"]["created"] == 1 and data["summary"]["details"]["url"] == saved["page_url"]
+
+
+def test_without_public_url_page_has_no_link(admin, fake, db, report_data, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "public_url", "")
+    data = publish(admin, create(admin, fake))
+    assert data["status"] == "ok", data
+    body = next(p for p in fake.pages.values() if p["id"] != "500")["body"]
+    assert "<a href=" not in body and "Подробности — в разделе «Сквозной отчёт»" in body
 
 
 def test_second_publish_updates_same_page(admin, fake, db, report_data):

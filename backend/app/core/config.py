@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -109,6 +110,10 @@ class Settings(BaseSettings):
     # Часовой пояс компании: границы дней в фильтрах журнала, время в PDF-отчётах
     timezone: str = "Europe/Moscow"
 
+    # Адрес, по которому пользователи открывают «Дашборды» (https://dashboards.company.ru), — для ссылок наружу:
+    # страница сквозного отчёта в Confluence, комментарий в задаче «По Делу». Пусто — ссылки не ставятся
+    public_url: str = ""
+
     cors_origins: str = ""
     log_level: str = "INFO"
     log_json: bool = False
@@ -145,6 +150,18 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             value = "postgresql+psycopg://" + value[len("postgresql://"):]
         return value
+
+    @field_validator("public_url")
+    @classmethod
+    def _check_public_url(cls, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        if text.endswith("/"):
+            raise ValueError("PUBLIC_URL — без «/» в конце: https://dashboards.company.ru")
+        if not re.match(r"^https?://[^\s/?#@]+(/[^\s?#]*)?$", text, re.IGNORECASE):
+            raise ValueError("PUBLIC_URL — адрес http(s)://узел[:порт][/путь] без логина, «?» и «#»")
+        return text
 
     @model_validator(mode="after")
     def _check_production(self) -> Settings:

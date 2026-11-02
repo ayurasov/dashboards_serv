@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  allowedHostsHint, checkDetails, checkHint, curlExample, fieldVisible, healthInfo, initialSecrets, initialValues,
+  allowedHostsHint, bindingChanges, bindingFields, checkDetails, checkHint, curlExample, fieldVisible, healthInfo, initialSecrets, initialValues,
   intervalText, isLongText, isMonospace, jsonRows, jsonText, kindIcon, normalizeUrl, parseJsonField, pingExample, quoted, richBlocks, richPreview, rebindSecrets, runCounters, runCountersText, runDuration, runStatus,
-  scheduleDraft, scheduleErrors, scheduleLabel, schedulePayload, settingsPayload, shortError, toConfigValue, toFormValue,
+  rateLimitText, scheduleDraft, scheduleErrors, scheduleLabel, schedulePayload, settingsPayload, shortError, toConfigValue, toFormValue,
   toggleWeekday, urlChanged, validateSettings, visibleFields,
 } from './integrations'
 
@@ -96,14 +96,68 @@ describe('секреты: задан / заменить / очистить', () 
   })
 
   it('смена адреса: сохранённые секреты привязаны к старому адресу — их нужно ввести заново', () => {
-    const integration = { has_secret: true, secret_bound_url: 'https://jira.company.ru' }
+    const integration = { has_secret: true, secret_bound_url: 'https://jira.company.ru', config: { base_url: 'https://jira.company.ru' } }
     expect(urlChanged(KIND, { base_url: 'HTTPS://JIRA.company.ru/' }, integration)).toBe(false)
     expect(urlChanged(KIND, { base_url: 'https://jira2.company.ru' }, integration)).toBe(true)
     expect(urlChanged(KIND, { base_url: 'https://jira2.company.ru' }, { has_secret: false })).toBe(false)
     expect(urlChanged({ ...KIND, url_field: null }, { base_url: 'x' }, integration)).toBe(false)
+    expect(bindingFields(KIND)).toEqual(['base_url'])
+    expect(bindingFields({ ...KIND, secret_url_fields: [] })).toEqual([])
     expect(rebindSecrets({ token: { mode: 'keep', value: '' }, password: { mode: 'clear', value: '' } }))
       .toEqual({ token: { mode: 'replace', value: '' }, password: { mode: 'clear', value: '' } })
     expect(normalizeUrl(' https://Host.RU/path/ ')).toBe('https://host.ru/path')
+  })
+})
+
+describe('привязка секретов к нескольким адресам (secret_url_fields)', () => {
+  const PODELU = {
+    kind: 'podelu', url_field: 'base_url', secret_url_fields: ['base_url', 'server_url'],
+    fields: [
+      { key: 'base_url', label: 'Адрес «По Делу»', type: 'url' },
+      { key: 'server_url', label: 'Адрес для запросов сервера', type: 'url' },
+      { key: 'login', label: 'Служебная учётная запись', type: 'string' },
+      { key: 'password', label: 'Пароль', type: 'password', secret: true },
+    ],
+  }
+  const EXCHANGE = {
+    kind: 'exchange', url_field: null, secret_url_fields: ['mode', 'ews_url', 'imap_host', 'imap_port', 'imap_ssl'],
+    fields: [
+      { key: 'mode', label: 'Подключение', type: 'select', default: 'imap' },
+      { key: 'ews_url', label: 'Адрес EWS', type: 'url', show_if: { mode: ['ews'] } },
+      { key: 'imap_host', label: 'Сервер IMAP', type: 'string', show_if: { mode: ['imap'] } },
+      { key: 'imap_port', label: 'Порт', type: 'int', default: 993, show_if: { mode: ['imap'] } },
+      { key: 'imap_ssl', label: 'SSL/TLS', type: 'bool', default: true, show_if: { mode: ['imap'] } },
+      { key: 'folder', label: 'Папка', type: 'string' },
+      { key: 'password', label: 'Пароль', type: 'password', secret: true },
+    ],
+  }
+
+  it('любой из адресов «По Делу»; остальные поля секреты не трогают', () => {
+    const integration = { has_secret: true, config: { base_url: 'https://podelu.ru', server_url: null, login: 'svc' } }
+    const values = initialValues(PODELU.fields, integration.config)
+    expect(bindingChanges(PODELU, values, integration)).toEqual([])
+    expect(bindingChanges(PODELU, { ...values, login: 'другой' }, integration)).toEqual([])
+    expect(bindingChanges(PODELU, { ...values, server_url: 'http://10.0.0.5:5000' }, integration)).toEqual([{ key: 'server_url', label: 'Адрес для запросов сервера' }])
+    expect(bindingChanges(PODELU, { ...values, base_url: 'https://PODELU.ru/' }, integration)).toEqual([])
+    expect(bindingChanges(PODELU, { ...values, base_url: 'https://new.ru' }, { ...integration, has_secret: false })).toEqual([])
+  })
+
+  it('Exchange: способ подключения и поля его адреса; скрытые поля не считаются', () => {
+    const integration = { has_secret: true, config: { mode: 'imap', imap_host: 'imap.company.ru', imap_port: 993, imap_ssl: true, ews_url: null, folder: 'Входящие' } }
+    const values = initialValues(EXCHANGE.fields, integration.config)
+    expect(bindingChanges(EXCHANGE, values, integration)).toEqual([])
+    expect(bindingChanges(EXCHANGE, { ...values, folder: 'Входящие/1С' }, integration)).toEqual([])
+    expect(bindingChanges(EXCHANGE, { ...values, imap_port: '143', imap_ssl: false }, integration).map((c) => c.key)).toEqual(['imap_port', 'imap_ssl'])
+    expect(bindingChanges(EXCHANGE, { ...values, mode: 'ews', ews_url: 'https://mail.company.ru/EWS/Exchange.asmx' }, integration).map((c) => c.key))
+      .toEqual(['mode', 'ews_url'])
+  })
+})
+
+describe('частота вызовов ключа', () => {
+  it('из rate_limit ключа, со склонением', () => {
+    expect(rateLimitText(120)).toBe('Частота вызовов ограничена: не больше 120 запросов в минуту на ключ')
+    expect(rateLimitText(21)).toBe('Частота вызовов ограничена: не больше 21 запроса в минуту на ключ')
+    expect(rateLimitText(undefined)).toBe('Частота вызовов ограничена настройкой сервера')
   })
 })
 

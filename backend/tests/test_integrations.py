@@ -117,6 +117,10 @@ def test_registry_and_kinds(admin, demo):
     assert fields["mode"]["options"] == [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}]
     assert fields["login"]["show_if"] == {"mode": ["a"]}
     assert kinds["demo"]["allowed_hosts_env"] == "DEMO_ALLOWED_HOSTS"
+    assert kinds["demo"]["secret_url_fields"] == ["base_url"], "по умолчанию секрет привязан к url_field"
+    assert folder["secret_url_fields"] == [] and folder["allowed_hosts_env"] is None
+    assert DemoConnector.secret_url({"base_url": "https://demo.ru"}) == "https://demo.ru"
+    assert runner.url_of(DemoConnector, {"base_url": "https://demo.ru"}) == "https://demo.ru"
     with pytest.raises(Exception, match="Неизвестный вид"):
         base.get("nope")
 
@@ -566,3 +570,196 @@ def test_json_field_accepts_parsed_and_text_values():
     with pytest.raises(ValidationFailed) as exc:
         _coerce(Connector, f, [{"x": "я" * 40000}])
     assert "64 КБ" in exc.value.detail
+
+
+# ---------------------------------------------------------------- секреты не выходят наружу
+
+LEAK = "S3cr3t-Hook-0042"
+
+
+class LeakyConnector(Connector):
+    """Коннектор, чей секрет уходит в пути адреса (как вебхук Bitrix24) и возвращается в текстах ошибок."""
+
+    kind = "leaky"
+    title = "Протекающая система"
+    fields = (Field("base_url", "Адрес", "url", required=True),
+              Field("hook", "Код вебхука", "password", required=True, secret=True))
+    actions = (Action("pull", "Забрать"), Action("crash", "Упасть"), Action("echo", "Эхо"), Action("raise", "Ошибка"))
+
+    def check(self) -> CheckResult:
+        with self.http() as c:
+            c.get_json(f"rest/{self.secrets['hook']}/profile")
+        return CheckResult(True, "Подключено")
+
+    def run(self, action: str, ctx: RunContext) -> RunResult:
+        hook = self.secrets["hook"]
+        if action == "crash":
+            raise RuntimeError(f"сбой при обращении к {self.config['base_url']}/rest/{hook}/x")
+        if action == "echo":
+            return RunResult.partial(f"ответ системы: ключ {hook} принят частично", error=f"код {hook} устарел",
+                                     details={"url": f"{self.config['base_url']}/rest/{hook}/", "note": [hook]})
+        if action == "raise":
+            raise IntegrationError(f"Система вернула {hook}", code="http_error", short=f"Ошибка ({hook})")
+        with self.http() as c:
+            c.post_json(f"rest/{hook}/pull", {})
+        return RunResult.ok("Забрано")
+
+
+@pytest.fixture()
+def leaky(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    base.register(LeakyConnector)
+    server = FakeServer()
+    server.route("GET", f"/rest/{LEAK}/profile", lambda r: (500, {"message": f"hook {LEAK} is invalid"}))
+    server.route("POST", f"/rest/{LEAK}/pull", lambda r: (503, {"message": f"busy, retry {LEAK}"},
+                                                         {"Retry-After": "1"}))
+    with server:
+        yield server
+    base.unregister("leaky")
+
+
+def test_secret_never_leaks_to_logs_rows_or_api(admin, leaky, db, caplog):
+    import json as jsonlib
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    body = {"kind": "leaky", "name": "Протечка", "config": {"base_url": leaky.url}, "secrets": {"hook": LEAK}}
+    created = admin.post("/api/integrations", json=body)
+    assert created.status_code == 201, created.text
+    item = created.json()
+    responses = [created.text,
+                 admin.post("/api/integrations/check", json={"kind": "leaky", "config": {"base_url": leaky.url},
+                                                             "secrets": {"hook": LEAK}}).text,
+                 admin.post(f"/api/integrations/{item['id']}/check").text,
+                 admin.post(f"/api/integrations/{item['id']}/check", json={"secrets": {"hook": LEAK}}).text]
+    runs = {}
+    for action in ("pull", "crash", "echo", "raise"):
+        response = admin.post(f"/api/integrations/{item['id']}/run", json={"action": action})
+        assert response.status_code == 200, response.text
+        runs[action] = response.json()
+        responses.append(response.text)
+    responses += [admin.get(f"/api/integrations/{item['id']}").text, admin.get("/api/integrations").text,
+                  admin.get(f"/api/integrations/{item['id']}/runs").text]
+    assert runs["pull"]["status"] == "error" and "временно недоступна (503)" in runs["pull"]["error"]
+    assert sum(1 for r in leaky.requests if r.path.endswith("/pull")) == 1, "POST при 503 не повторяется"
+    assert runs["crash"]["error"] == runner.INTERNAL_ERROR
+    assert runs["echo"]["status"] == "partial" and "ключ … принят" in runs["echo"]["message"]
+    assert "…" in runs["raise"]["error"]
+    assert "сбой при обращении к" in caplog.text and "Traceback" in caplog.text, "в журнале — сообщение и трассировка"
+    db.expire_all()
+    row = db.get(Integration, item["id"])
+    stored = [row.last_error, jsonlib.dumps(row.state, ensure_ascii=False), row.secret_bound_url or ""]
+    for run in db.scalars(select(IntegrationRun).where(IntegrationRun.integration_id == item["id"])):
+        stored += [run.message, run.error, jsonlib.dumps(run.summary, ensure_ascii=False)]
+    stored += [f"{e.summary} {jsonlib.dumps(e.after, ensure_ascii=False)}"
+               for e in db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "integration"))]
+    for where, content in (("журнал сервера", caplog.text), *(("ответ API", t) for t in responses),
+                           *(("база", t) for t in stored)):
+        assert LEAK not in content, f"{where}: {content[:300]}"
+
+
+# ---------------------------------------------------------------- каталог показателей через каркас
+
+def test_ensure_indicator_creates_as_source_commits_and_returns_existing(db, demo):
+    from app.core import db as core_db
+    from app.core.errors import Conflict
+    from app.models import Indicator
+    from app.services import reports
+
+    integration = Integration(kind="demo", name="Демо", enabled=False, config={}, schedule={}, state={},
+                              last_error="")
+    db.add(integration)
+    db.commit()
+    ctx = RunContext(db=db, integration=integration)
+    body = {"key": "demo.tickets", "name": "Заявки демо", "unit": "шт.", "owner_service": "tech",
+            "source_type": "manual", "description": "Значения загружает подключение «Демо»"}
+    ind = ctx.plans.ensure_indicator(body)
+    assert isinstance(ind, reports.IndicatorDef) and ind.key == "demo.tickets" and ind.is_active and not ind.computed
+    with core_db.SessionLocal() as other:
+        assert other.scalar(select(Indicator.name).where(Indicator.key == "demo.tickets")) == "Заявки демо", \
+            "создан и зафиксирован: виден другим сессиям и плану значений"
+    entry = db.scalar(select(AuditEntry).where(AuditEntry.entity_type == "indicator", AuditEntry.action == "create")
+                      .order_by(AuditEntry.id.desc()))
+    assert entry.username == "Подключение «Демо»" and entry.user_id is None, "журнал — от имени подключения"
+    plan = ctx.plans.indicator_values([{"line": 1, "department": "TECH", "indicator": "demo.tickets",
+                                        "period": "2026-07", "value": "5", "target": None, "comment": ""}])
+    assert plan["can_apply"] and plan["summary"]["create"] == 1, "план значений в том же запуске видит показатель"
+    again = ctx.plans.ensure_indicator({**body, "name": "Другое название", "unit": "%"})
+    assert again.id == ind.id and again.name == "Заявки демо" and again.unit == "шт.", "существующий — как есть"
+    computed = ctx.plans.ensure_indicator({"key": "tech.in_work", "name": "x"})
+    assert computed.computed, "вычисляемый возвращается, решение — за коннектором"
+    with pytest.raises(Conflict):
+        ctx.plans.ensure_indicator({**body, "key": "demo.other"})          # название занято
+    with pytest.raises(ValidationFailed) as exc:
+        ctx.plans.ensure_indicator({"key": "Bad Key", "name": "Плохой"})
+    assert "не создан" in exc.value.detail
+    assert db.scalar(select(func.count()).select_from(Indicator).where(Indicator.key == "demo.other")) == 0
+    assert ctx.plans.ensure_indicator(body).id == ind.id, "после ошибки сессия работает"
+
+
+def test_zero_fill_writes_zero_not_clear(db, demo):
+    """zero_fill: сумма, у которой данных больше нет, становится 0 — значение остаётся (не очищается)."""
+    from app.integrations.connectors import _metrics as metrics
+    from app.services import report_admin
+    from app.services.inbox import source_actor
+
+    integration = Integration(kind="demo", name="Демо", enabled=False, config={}, schedule={}, state={},
+                              last_error="")
+    db.add(integration)
+    db.commit()
+    ctx = RunContext(db=db, integration=integration)
+    units = metrics.Units.load(db)
+    month = metrics.Month(datetime(2026, 7, 1).date())
+    tech = units.by_code["tech"]
+    report_admin.apply_import(db, source_actor("x"), [{"line": 1, "department": "TECH", "indicator": "ops.plan",
+                                                       "period": "2026-07", "value": "5", "target": None,
+                                                       "comment": ""}])
+    db.commit()
+    ctx.state["written"] = {f"ops.plan|{month.key}": [tech]}
+    cells = metrics.zero_fill(ctx, [], [month], {"ops.plan"}, units, "из демо")
+    assert [(c.unit, c.value) for c in cells] == [(tech, 0.0)]
+    result = metrics.write(ctx, cells, units, apply=True, label="демо")
+    assert (result.update, result.cleared) == (1, 0) and result.applied
+    assert result.sample[0]["action"] == "update"
+
+
+class DualConnector(DemoConnector):
+    """Секрет уходит на два адреса: основной и «для запросов сервера» (как у «По Делу»)."""
+
+    kind = "dual"
+    fields = (*DemoConnector.fields, Field("server_url", "Адрес для запросов сервера", "url"))
+    secret_url_fields = ("base_url", "server_url")
+
+    @classmethod
+    def secret_url(cls, config: dict) -> str:
+        return " → ".join(u for u in (config.get("base_url"), config.get("server_url")) if u)
+
+    @property
+    def url(self) -> str | None:
+        return self.config.get("server_url") or self.config.get("base_url")
+
+
+def test_secret_binding_by_connector_secret_url(admin, fake, db):
+    base.register(DualConnector)
+    try:
+        kinds = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}
+        assert kinds["dual"]["secret_url_fields"] == ["base_url", "server_url"]
+        created = admin.post("/api/integrations", json={
+            "kind": "dual", "name": "Два адреса", "config": {"base_url": "https://demo.company.ru", "login": "svc",
+                                                            "server_url": fake.url},
+            "secrets": {"token": TOKEN}})
+        assert created.status_code == 201, created.text
+        item = created.json()
+        assert item["secret_bound_url"] == f"https://demo.company.ru → {fake.url}"
+        assert admin.post(f"/api/integrations/{item['id']}/check").json()["ok"], "секрет — для обоих адресов"
+        moved = admin.patch(f"/api/integrations/{item['id']}", json={"config": {"server_url": "http://10.0.0.9"}})
+        assert moved.status_code == 422 and moved.json()["code"] == "secret_rebind_required"
+        draft = admin.post(f"/api/integrations/{item['id']}/check", json={"config": {"server_url": "http://10.0.0.9"}})
+        assert not draft.json()["ok"] and draft.json()["details"]["code"] == "secret_missing", \
+            "проверка с другим адресом не берёт сохранённый секрет"
+        db.execute(update(Integration).where(Integration.id == item["id"]).values(config={
+            **item["config"], "server_url": "http://10.0.0.9"}))
+        db.commit()
+        assert admin.get(f"/api/integrations/{item['id']}").json()["secret_problem"]
+    finally:
+        base.unregister("dual")

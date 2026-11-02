@@ -7,8 +7,13 @@ Microsoft Graph (приложение: тенант, client id, секрет; п
 «Забрать вложения»: письма папки от разрешённых отправителей (email или домен; по заголовку From) — непрочитанные,
 если включено «Помечать прочитанными», иначе новые после курсора (ctx.state); файлы данных (Excel, CSV, JSON) →
 «Входящие» с source_ref exchange:<Message-ID>:<имя вложения>:<sha256> (повтор — ctx.inbox.seen — не кладётся);
-набор — по правилу «шаблон темы = набор» или распознаётся по файлу. Обработанное письмо помечается прочитанным
-и/или переносится в папку; письма других отправителей не трогаются.
+набор — по правилу «шаблон темы = набор» или распознаётся по файлу; у элемента — пояснение «Письмо «<тема>» от
+<отправитель>». Обработанное письмо помечается прочитанным и/или переносится в папку; письма других отправителей
+не трогаются.
+
+Секрет (пароль или секрет приложения) привязан к адресу, куда он уходит (secret_url): адрес EWS, адреса входа
+и Graph с тенантом или imap(s)://сервер:порт — у каждого способа подключения свой; изменили способ или адрес —
+секрет вводится заново.
 """
 from __future__ import annotations
 
@@ -19,7 +24,7 @@ from ...core.errors import AppError, ValidationFailed
 from ...services import inbox_datasets
 from ..base import Action, CheckResult, Connector, Field, Option, RunContext, RunResult, register
 from ..http import IntegrationError, allowed_hosts, allowed_hosts_env, host_allowed
-from .common import is_data_file, matches, rule_lines, secret_url, sha256, status_text
+from .common import is_data_file, joined_urls, matches, rule_lines, sha256, status_text
 from .mailbox import GRAPH_URL, LOGIN_URL, EwsBox, GraphBox, ImapBox, Mail, Mailbox
 
 TITLE = "Почтовый ящик (Exchange)"
@@ -28,6 +33,7 @@ HOST = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(
                   r"[A-Za-z0-9])?)*$")
 SENDER = re.compile(r"^(?:[^@\s]+@)?[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 MAX_DETAILS = 50
+NOTE_LIMIT = 500
 MAX_PROCESS = 100        # писем от разрешённых отправителей за запуск
 # Ошибки связи и доступа — общие для ящика: на них запуск останавливается; прочие — ошибка одного письма
 SYSTEMIC = ("auth", "connect", "connect_timeout", "read_timeout", "tls", "session", "forbidden", "rate_limited",
@@ -52,6 +58,16 @@ def sender_allowed(sender: str, allowed: list[str]) -> bool:
         return False
     domain = address.rsplit("@", 1)[1]
     return any(address == a if "@" in a else (domain == a or domain.endswith("." + a)) for a in allowed)
+
+
+def mail_note(subject: str, sender: str) -> str:
+    """Пояснение элемента входящих: «Письмо «<тема>» от <отправитель>» (до 500 символов)."""
+    tail = f" от {sender}" if sender else ""
+    room = NOTE_LIMIT - len("Письмо «»") - len(tail)
+    text = " ".join((subject or "без темы").split())
+    if len(text) > room:
+        text = text[:max(room - 1, 1)] + "…"
+    return f"Письмо «{text}»{tail}"[:NOTE_LIMIT]
 
 
 def subject_rules(text: str | None) -> list[tuple[str, str]]:
@@ -124,17 +140,17 @@ class ExchangeConnector(Connector):
         Field("subject_rules", "Тема → набор", "text", placeholder="Недельный отчёт* = tp-weekly\n*ЗУП* = hr-months",
               hint="Необязательно: по строке «шаблон темы = набор» (* — любые символы); без правила набор "
                    "распознаётся по файлу"),
-        # Секрет привязан к адресу, куда он уходит, — у каждого способа подключения свой (поле не показывается)
-        Field("endpoint", "Секрет привязан к адресу", show_if={"mode": ()}),
     )
     actions = (Action("fetch", "Забрать вложения",
                       "Вложения писем разрешённых отправителей — во «Входящие»; письмо помечается прочитанным и/или "
                       "переносится"),)
-    url_field = "endpoint"
+    # Адрес у каждого способа подключения свой: секрет привязан к нему (secret_url), а не к одному полю
+    url_field = None
+    secret_url_fields = ("mode", "ews_url", "tenant", "login_url", "graph_url", "imap_host", "imap_port", "imap_ssl")
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
-        out = super().validate_config({k: v for k, v in (config or {}).items() if k != "endpoint"})
+        out = super().validate_config(config)
         mode = out["mode"]
         if mode == "graph" and not out.get("mailbox"):
             raise ValidationFailed("Обязательное поле: Почтовый ящик", fields={"config.mailbox": "Обязательное поле"})
@@ -153,17 +169,17 @@ class ExchangeConnector(Connector):
             raise ValidationFailed(f"Разрешённые отправители: «{bad[0]}» — нужен email или домен",
                                    fields={"config.allowed_senders": "Недопустимое значение"})
         subject_rules(out.get("subject_rules"))
-        out["endpoint"] = cls.endpoint(out)
         return out
 
-    @staticmethod
-    def endpoint(config: dict) -> str:
+    @classmethod
+    def secret_url(cls, config: dict) -> str:
+        """Куда уходит секрет: адрес EWS; адреса входа (с тенантом) и Graph; imap(s)://сервер:порт."""
         mode = config.get("mode")
         if mode == "ews":
             return config.get("ews_url") or ""
         if mode == "graph":
             login = (config.get("login_url") or LOGIN_URL).rstrip("/")
-            return secret_url(f"{login}/{config.get('tenant') or ''}", config.get("graph_url") or GRAPH_URL)
+            return joined_urls(f"{login}/{config.get('tenant') or ''}", config.get("graph_url") or GRAPH_URL)
         scheme = "imaps" if config.get("imap_ssl", True) else "imap"
         return f"{scheme}://{config.get('imap_host') or ''}:{config.get('imap_port') or 993}"
 
@@ -212,7 +228,7 @@ class ExchangeConnector(Connector):
         rules = subject_rules(self.config.get("subject_rules"))
         unread_only = bool(self.config.get("mark_read", True))
         move_to = self.config.get("move_to") or ""
-        fingerprint = f"{self.config.get('endpoint')}|{self.folder}"
+        fingerprint = f"{self.secret_url(self.config)}|{self.folder}"
         state = ctx.state
         cursor = state.get("cursor") if state.get("source") == fingerprint else None
         counters = {"messages": 0, "processed": 0, "skipped_sender": 0, "files": 0, "added": 0, "seen": 0,
@@ -289,8 +305,7 @@ class ExchangeConnector(Connector):
                 counters["seen"] += 1
                 continue
             item = ctx.inbox.add(attachment.content, attachment.name, dataset=dataset, source_ref=ref,
-                                 content_type=attachment.content_type)
+                                 content_type=attachment.content_type, note=mail_note(mail.subject, mail.sender))
             counters["added"] += 1
             counters[f"status_{item.status}"] = counters.get(f"status_{item.status}", 0) + 1
-            details.append({"item": item.id, "file": attachment.name, "subject": mail.subject, "sender": mail.sender,
-                            "received": mail.received, "status": status_text(item)})
+            details.append({"item": item.id, "file": attachment.name, "status": status_text(item)})

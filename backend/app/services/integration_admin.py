@@ -3,7 +3,8 @@
 
 Секреты подключения:
 - поля коннектора с secret=True шифруются вместе (app/core/secrets.py) и привязываются к адресу
-  (поле url_field коннектора); в ответах — has_secret, secret_fields (какие заданы) и secret_problem;
+  (Connector.secret_url: по умолчанию поле url_field; у коннектора с несколькими адресами — их сочетание,
+  поля перечислены в secret_url_fields); в ответах — has_secret, secret_fields (какие заданы) и secret_problem;
 - пустое значение секрета при сохранении оставляет сохранённое, только если адрес не изменился;
   адрес изменён — секреты нужно ввести заново («Адрес … изменён — введите токен или пароль заново»);
 - clear_secrets — список полей, которые нужно стереть.
@@ -26,6 +27,7 @@ from fastapi import Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings
 from ..core.db import utcnow
 from ..core.errors import Conflict, NotFound, ValidationFailed
 from ..core.secrets import SecretError, normalize_url, problem, rebind_message, seal, unseal
@@ -104,6 +106,13 @@ def _check_name(db: Session, name: str, exclude: int | None = None) -> str:
     return name[:200]
 
 
+def _stored_config(cls: type[Connector], row: Integration) -> dict:
+    """Сохранённые настройки без полей, которых у коннектора больше нет (переименованы или убраны в новой
+    версии): иначе их не удалось бы сохранить заново («Неизвестная настройка»)."""
+    known = cls.config_keys()
+    return {k: v for k, v in (row.config or {}).items() if k in known}
+
+
 def _snapshot(row: Integration) -> dict:
     return {"name": row.name, "enabled": row.enabled, "config": row.config, "schedule": row.schedule,
             "has_secret": bool(row.secret_encrypted)}
@@ -150,7 +159,7 @@ def update(db: Session, actor: User, row: Integration, body: dict, request: Requ
     if "name" in body and body["name"] is not None:
         row.name = _check_name(db, body["name"], row.id)
     if body.get("config") is not None:
-        config = cls.validate_config({**(row.config or {}), **body["config"]})
+        config = cls.validate_config({**_stored_config(cls, row), **body["config"]})
         if config != row.config:
             row.config, changed_settings = config, True
     new_url = runner.url_of(cls, row.config)
@@ -228,11 +237,11 @@ def check(db: Session, actor: User, row: Integration, body: dict | None = None,
     draft = bool(body.get("config") is not None or body.get("secrets"))
     config = secrets = None
     if draft:
-        config = cls.validate_config({**(row.config or {}), **(body.get("config") or {})})
+        config = cls.validate_config({**_stored_config(cls, row), **(body.get("config") or {})})
         incoming = cls.validate_secrets(body.get("secrets") or {})
         same_url = normalize_url(runner.url_of(cls, config)) == normalize_url(row.secret_bound_url)
         secrets = {**(_current_secrets(row) if same_url else {}), **incoming}
-        draft = config != row.config or bool(incoming)
+        draft = config != _stored_config(cls, row) or bool(incoming)
     result = runner.check(row, detailed=True, config=config if draft else None, secrets=secrets if draft else None)
     now = utcnow()
     if not draft:
@@ -285,7 +294,9 @@ def key_out(db: Session, row: InboundKey) -> dict:
     return {"id": row.id, "name": row.name, "prefix": row.prefix, "scopes": row.scopes or [],
             "scope_labels": [INBOUND_SCOPE_LABELS.get(s, s) for s in row.scopes or []],
             "issued_at": row.issued_at, "issued_by": row.issued_by, "last_used_at": row.last_used_at,
-            "revoked_at": row.revoked_at, "active": row.revoked_at is None, "items_received": received}
+            "revoked_at": row.revoked_at, "active": row.revoked_at is None, "items_received": received,
+            # Частота вызовов ключа: не больше стольких запросов в минуту (INBOUND_RATE_LIMIT)
+            "rate_limit": settings.inbound_rate_limit}
 
 
 def keys_out(db: Session) -> list[dict]:

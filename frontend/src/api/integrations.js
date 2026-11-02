@@ -12,7 +12,10 @@ import { api } from './client'
 export const HANDLED_ERRORS = ['check_required', 'secret_rebind_required', 'singleton']
 
 export const integrationsApi = {
-  /** [{ kind, title, description, fields, actions, url_field, singleton, allowed_hosts_env }]. */
+  /**
+   * [{ kind, title, description, fields, actions, url_field, secret_url_fields, singleton, allowed_hosts_env }];
+   * secret_url_fields — поля адреса привязки секретов: их изменение требует ввести секреты заново.
+   */
   kinds: () => api.get('/integrations/kinds'),
   list: () => api.get('/integrations'),
   get: (id) => api.get(`/integrations/${id}`),
@@ -29,6 +32,7 @@ export const integrationsApi = {
   run: (id, action) => api.post(`/integrations/${id}/run`, { action }),
   runs: (id, limit = 50) => api.get(`/integrations/${id}/runs`, { limit }),
 
+  /** Ключи без значений; rate_limit — сколько запросов в минуту разрешено ключу (INBOUND_RATE_LIMIT). */
   keys: () => api.get('/integrations/keys'),
   /** { name, scopes: ['files', 'status'] } → ключ с полем key (показывается один раз). */
   issueKey: (body) => api.post('/integrations/keys', body),

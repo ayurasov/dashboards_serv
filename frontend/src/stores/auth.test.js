@@ -100,28 +100,30 @@ describe('права текущего пользователя', () => {
     expect(visible('hr')).toContain('/hr/registry')
   })
 
-  it('входящие данные: с data.manage — сразу; иначе — по ответу сервера (набор с can_apply), до смены пользователя', async () => {
-    const replies = []
+  it('входящие данные: доступ и счётчик — из профиля /api/auth/me, без отдельных запросов', async () => {
+    const calls = []
     globalThis.fetch = vi.fn(async (url) => {
-      replies.push(url)
-      if (url.startsWith('/api/inbox/datasets')) return new Response(JSON.stringify({ datasets: [{ key: 'hr-months', can_apply: true }], can_manage: false }), { status: 200, headers: { 'content-type': 'application/json' } })
-      return new Response(JSON.stringify({ items: [], total: 0, counts: { pending: 3 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      calls.push(url)
+      return new Response(JSON.stringify({ ...EMPLOYEE, inbox: { available: true, pending: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } })
     })
-    auth.setUser({ id: 1, role: 'user', capabilities: ['data.manage'], effective_access: { services: {} } })
+    auth.setUser({ id: 1, role: 'user', capabilities: ['data.manage'], effective_access: { services: {} }, inbox: { available: true, pending: 3 } })
     expect(await auth.loadInboxAccess()).toBe(true)
-    expect(replies.some((u) => u.startsWith('/api/inbox/datasets'))).toBe(false)
     expect(auth.inboxPending).toBe(3)
-
-    auth.setUser(EMPLOYEE)
-    expect(auth.inbox).toBeNull()
+    auth.setUser({ ...EMPLOYEE, inbox: { available: true, pending: 4 } })
+    expect(auth.inbox).toBe(true)
     expect(await auth.loadInboxAccess()).toBe(true)
-    const calls = replies.length
-    expect(await auth.loadInboxAccess()).toBe(true)
-    expect(replies).toHaveLength(calls) // запомнено
-
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: 'Входящие данные вам недоступны', code: 'forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }))
-    auth.setUser({ ...EMPLOYEE, id: 10 })
+    expect(auth.inboxPending).toBe(4)
+    expect(calls).toEqual([]), 'меню не делает запросов /api/inbox/datasets и /api/inbox'
+    // после применения, отклонения или загрузки — счётчик тем же /api/auth/me; одновременные вызовы — один запрос
+    await Promise.all([auth.refreshInbox(), auth.refreshInbox()])
+    expect(calls).toEqual(['/api/auth/me'])
+    expect(auth.inboxPending).toBe(1)
+    expect(auth.user.username).toBe('engineer')
+    auth.setUser({ ...EMPLOYEE, id: 10, inbox: { available: false, pending: 0 } })
     expect(await auth.loadInboxAccess()).toBe(false)
+    expect(auth.inbox).toBe(false)
+    expect(auth.inboxPending).toBe(0)
+    auth.setUser({ ...EMPLOYEE, id: 11 })
     expect(auth.inbox).toBe(false)
   })
 })

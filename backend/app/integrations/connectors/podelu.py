@@ -14,12 +14,18 @@ POST /api/auth/login (X-CSRF-Token, Referer, Origin) → запросы → POST
   строки быстрой загрузки, источник podelu (ctx.plans.org_list): сопоставление по id «По Делу» (external_id
   сотрудника с org_source = podelu), затем по email; новые сотрудники — «Без доступа» (без пароля); роли,
   полномочия и активность из «По Делу» не переносятся. Применение — по правилу «Подключение» × «Сотрудники»
-  и только когда структура уже совпадает с «По Делу» (иначе — план без записи).
+  и только когда структура уже совпадает с «По Делу» (иначе — план без записи). «Отключать отсутствующих» —
+  отключаются сотрудники, пришедшие из «По Делу» (org_source = podelu), которых нет среди активных в выгрузке;
+  служебная учётная запись подключения и сотрудники других источников не отключаются.
+
+Пароль привязан к обоим адресам (secret_url: «адрес → адрес для запросов сервера»): изменили любой из них —
+пароль вводится заново.
 
 «Забрать данные из задач»: задачи списка data_list (и меток data_tags) с вложениями → файлы задачи и её
 результатов (только Excel, CSV, JSON) → «Входящие» с source_ref podelu:<задача>:<вложение>:<sha256>;
-повтор (ctx.inbox.seen) не скачивается; задача отмечается комментарием «Файл «…» принят в «Дашборды»: <статус>».
-Курсор (ctx.state): since — самое позднее updatedAt задач списка, tasks — число вложений и SHA-256 уже
+повтор (ctx.inbox.seen) не скачивается; у элемента — пояснение «Задача «<название>» · <кто положил файл>»;
+задача отмечается комментарием «Файл «…» принят в «Дашборды»: <статус>» (и ссылкой на «Входящие», если задан
+PUBLIC_URL). Курсор (ctx.state): since — самое позднее updatedAt задач списка, tasks — число вложений и SHA-256 уже
 забранных файлов по задачам: загрузка вложения в «По Делу» не меняет updatedAt задачи, поэтому задача берётся
 и тогда, когда изменилось число её вложений.
 """
@@ -29,6 +35,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from ...core.config import settings
 from ...models import InboxRule, name_key
 from ...services import inbox_datasets, org, org_admin
 from ...services.inbox import plan_errors
@@ -42,8 +49,8 @@ from .common import (
     download_limit,
     inbox_limit,
     is_data_file,
+    joined_urls,
     parse_time,
-    secret_url,
     sha256,
     status_text,
 )
@@ -62,6 +69,7 @@ PAGE_SIZE = 200
 MAX_PAGES = 50
 MAX_TRACKED_TASKS = 5000
 MAX_DETAILS = 50
+NOTE_LIMIT = 500
 
 
 # ---------------------------------------------------------------- форматы «По Делу» → наши
@@ -136,6 +144,16 @@ def find_list(lists: list, ref: str) -> dict | None:
     return found
 
 
+def task_note(title: Any, author: str = "") -> str:
+    """Пояснение элемента входящих: «Задача «<название>» · <кто положил файл>» (до 500 символов)."""
+    tail = f" · {author}" if author else ""
+    room = NOTE_LIMIT - len("Задача «»") - len(tail)
+    name = " ".join(str(title or "без названия").split())
+    if len(name) > room:
+        name = name[:max(room - 1, 1)] + "…"
+    return f"Задача «{name}»{tail}"[:NOTE_LIMIT]
+
+
 def comments_allowed(item: dict) -> bool:
     settings = item.get("settings") if isinstance(item.get("settings"), dict) else {}
     return settings.get("allowComments", True) is not False
@@ -155,7 +173,7 @@ class PodeluConnector(Connector):
               hint="Адрес, по которому сотрудники открывают «По Делу»"),
         Field("server_url", "Адрес для запросов сервера", "url", placeholder="http://host.docker.internal:5000",
               hint="Необязательно: если сервер «Дашбордов» видит «По Делу» по другому адресу (например, оба в Docker "
-                   "на одной машине). Пароль привязан к обоим адресам"),
+                   "на одной машине). Пароль привязан к обоим адресам: изменили любой — введите пароль заново"),
         Field("login", "Служебная учётная запись", required=True, placeholder="dashboards-sync",
               hint="Логин или email в «По Делу»: полномочия «Ведёт структуру компании» и «Ведёт учётные записи», "
                    "участник (просмотр) списка с данными; роль администратора не нужна"),
@@ -173,11 +191,8 @@ class PodeluConnector(Connector):
         Field("deactivate_missing", "Отключать отсутствующих сотрудников", "bool", default=False,
               hint="Сотрудники, пришедшие из «По Делу», которых там больше нет среди активных, отключаются"),
         Field("mark_processed", "Отмечать задачу комментарием", "bool", default=True,
-              hint="Комментарий в задаче: «Файл «…» принят в «Дашборды»: <статус>»; в списке должны быть "
-                   "разрешены комментарии"),
-        # Пароль уходит на адрес для запросов сервера, а каркас привязывает секрет к одному полю: сочетание
-        # адресов хранится здесь (поле не показывается, его заполняет validate_config)
-        Field("secret_url", "Пароль привязан к адресам", show_if={"base_url": ()}),
+              hint="Комментарий в задаче: «Файл «…» принят в «Дашборды»: <статус>» (со ссылкой на «Входящие», если "
+                   "на сервере задан PUBLIC_URL); в списке должны быть разрешены комментарии"),
     )
     actions = (
         Action("sync", "Синхронизировать структуру",
@@ -186,15 +201,20 @@ class PodeluConnector(Connector):
         Action("pull", "Забрать данные из задач",
                "Новые вложения задач выделенного списка — во «Входящие»; задача отмечается комментарием"),
     )
-    url_field = "secret_url"
+    url_field = "base_url"
+    # Пароль уходит на адрес для запросов сервера (если он задан): привязка — к обоим адресам
+    secret_url_fields = ("base_url", "server_url")
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
-        out = super().validate_config({k: v for k, v in (config or {}).items() if k != "secret_url"})
+        out = super().validate_config(config)
         if out.get("server_url") == out.get("base_url"):
             out["server_url"] = None
-        out["secret_url"] = secret_url(out.get("base_url"), out.get("server_url"))
         return out
+
+    @classmethod
+    def secret_url(cls, config: dict) -> str:
+        return joined_urls(config.get("base_url"), config.get("server_url"))
 
     # --- сессия
     def session(self) -> PartnerSession:
@@ -376,7 +396,9 @@ class PodeluConnector(Connector):
                       "«Входящие» → «Правила»)")
         apply = not reason
         deactivate = bool(self.config.get("deactivate_missing"))
-        result = ctx.plans.org_list(rows, apply=apply, create_missing=True, deactivate_missing=deactivate)
+        keep = self._service_account(account)
+        result = ctx.plans.org_list(rows, apply=apply, create_missing=True, deactivate_missing=deactivate,
+                                    keep=keep)
         errors: list[str] = []
         if apply and not result.get("applied") and result["summary"]["errors"]:
             # Строки с ошибками пропускаются — остальные сотрудники применяются (ошибки — в журнале запуска)
@@ -385,7 +407,8 @@ class PodeluConnector(Connector):
                 if user["errors"]:
                     skipped.append(f"{user['name'] or user['email']}: {'; '.join(user['errors'])}")
             rows = [r for r in rows if r.line not in bad]
-            result = ctx.plans.org_list(rows, apply=True, create_missing=True, deactivate_missing=deactivate)
+            result = ctx.plans.org_list(rows, apply=True, create_missing=True, deactivate_missing=deactivate,
+                                        keep=keep)
             if not result.get("applied"):
                 errors = [f"сотрудники: {e}" for e in plan_errors(result, 5)] or ["сотрудники: план не применён"]
         summary = result["summary"]
@@ -393,8 +416,6 @@ class PodeluConnector(Connector):
                         users_unchanged=summary["unchanged"], users_deactivate=summary["deactivate_users"],
                         users_departments=summary["create_departments"], users_errors=summary["errors"],
                         users_skipped=len(skipped))
-        if deactivate and not result.get("deactivate"):
-            self._deactivate_note(snap, rows, notes)
         if not apply and summary["errors"]:
             notes.extend(f"план сотрудников: {e}" for e in plan_errors(result, 5))
         numbers = (f"создано {summary['create_users']}, изменено {summary['update_users']}, без изменений "
@@ -418,8 +439,7 @@ class PodeluConnector(Connector):
         """Записи podelu.employees → строки быстрой загрузки (источник podelu). Строки, которые движок отверг бы
         целиком (нет email, нет подразделения у нового, путь глубже предела), пропускаются с пояснением;
         служебная учётная запись подключения сотрудником не считается."""
-        account = account or {}
-        service = {str(account.get(k) or "").strip().lower() for k in ("login", "email")} - {""}
+        service = self._service_account(account)
         ids = {str(p.get("email") or "").strip().lower(): str(p.get("id")) for p in people
                if isinstance(p, dict) and p.get("id") and p.get("email") and not p.get("isSystem")}
         by_external = {p.external_id: p for p in snap.people.values() if p.org_source == "podelu" and p.external_id}
@@ -473,15 +493,11 @@ class PodeluConnector(Connector):
                 row.manager_email = ""
         return rows, skipped
 
-    def _deactivate_note(self, snap: org.OrgSnapshot, rows: list[Row], notes: list[str]) -> None:
-        present_ids = {r.external_id for r in rows if r.external_id}
-        present_emails = {r.email for r in rows}
-        absent = sorted(p.full_name for p in snap.people.values()
-                        if p.org_source == "podelu" and p.is_active and p.external_id not in present_ids
-                        and (p.email or "").lower() not in present_emails)
-        if absent:
-            notes.append(f"Отключение отсутствующих: движок загрузки пока отключает только сотрудников из AD — "
-                         f"не отключены ({len(absent)}): {', '.join(absent[:20])}")
+    @staticmethod
+    def _service_account(account: dict | None) -> set[str]:
+        """Логин и email служебной учётной записи «По Делу»: её нет в строках сотрудников (rows), и отключать её
+        как «отсутствующую» нельзя."""
+        return {str((account or {}).get(k) or "").strip().lower() for k in ("login", "email")} - {""}
 
     # ================================================================ данные из задач
 
@@ -601,18 +617,20 @@ class PodeluConnector(Connector):
             if ctx.inbox.seen(ref) is not None:
                 counters["seen"] += 1
                 continue
-            item = ctx.inbox.add(content, name, source_ref=ref, content_type=str(attachment.get("mimeType") or ""))
+            author = self._name(s, attachment.get("uploadedBy") or task.get("createdBy"), names)
+            item = ctx.inbox.add(content, name, source_ref=ref, content_type=str(attachment.get("mimeType") or ""),
+                                 note=task_note(task.get("title"), author))
             counters["added"] += 1
             counters[f"status_{item.status}"] = counters.get(f"status_{item.status}", 0) + 1
             status = status_text(item)
             lines.append(f"Файл «{name}» принят в «Дашборды»: {status}")
-            details.append({"item": item.id, "file": name, "status": status, "task": task.get("title"),
-                            "task_id": task_id, "author": self._name(s, attachment.get("uploadedBy"), names),
-                            "task_author": self._name(s, task.get("createdBy"), names)})
+            details.append({"item": item.id, "file": name, "status": status})
+        if lines and settings.public_url:
+            lines.append(f"Входящие данные: {settings.public_url}/inbox")
         return lines
 
     def _name(self, s: PartnerSession, user_id: Any, names: dict) -> str:
-        """Имя сотрудника «По Делу» по id — для журнала запуска (кто положил файл)."""
+        """Имя сотрудника «По Делу» по id — для пояснения элемента входящих (кто положил файл)."""
         key = str(user_id or "")
         if not key:
             return ""

@@ -230,3 +230,81 @@ def test_non_latin_header_is_a_config_error(server):
     with pytest.raises(IntegrationError) as exc:
         client(server, headers={"Authorization": "Bearer токен"}).get_json("x")
     assert exc.value.code == "config" and "латиница" in exc.value.detail
+
+
+# ---------------------------------------------------------------- повтор только безопасных запросов
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("status", [429, 503])
+def test_changing_requests_are_not_retried(server, method, status):
+    server.route(method, "/api/auth/login", lambda r: (status, {"message": "too many"}, {"Retry-After": "1"}))
+    c = client(server)
+    with pytest.raises(IntegrationError) as exc:
+        c.request(method, "api/auth/login", json={"login": "svc"})
+    assert exc.value.status == status
+    assert len(server.requests) == 1, "вход у партнёра не повторяется — его ограничение попыток не тратится"
+    assert c.sleeps == []
+
+
+def test_changing_request_retried_only_on_request(server):
+    answers = iter([(503, {}), (200, {"result": []})])
+    server.route("POST", "/rest/crm.deal.list.json", lambda r: next(answers))
+    c = client(server)
+    assert c.post_json("rest/crm.deal.list.json", {}, retry=True) == {"result": []}, "чтение через POST — retry=True"
+    assert len(server.requests) == 2 and c.sleeps == [1.0]
+
+
+def test_safe_request_retry_can_be_turned_off(server):
+    server.route("GET", "/x", lambda r: (429, {}))
+    c = client(server)
+    with pytest.raises(IntegrationError):
+        c.request("GET", "x", retry=False)
+    assert len(server.requests) == 1
+
+
+# ---------------------------------------------------------------- секреты не выходят в тексты ошибок
+
+def test_scrub_values_userinfo_and_path_segments():
+    text = ("Ошибка https://svc:pa55word@host.ru/rest/7/abc/profile.json?code=abc — ответ: неверный ключ "
+            "s3cr3t-key; путь /hooks/abc/ и %D0%BA%D0%BB%D1%8E%D1%87-42")
+    clean = http.scrub(text, ["s3cr3t-key", "abc", "ключ-42"])
+    assert "pa55word" not in clean and "svc:" not in clean and "https://…@host.ru" in clean
+    assert "s3cr3t-key" not in clean and "%D0%BA%D0%BB" not in clean
+    assert "/rest/7/…/profile.json" in clean and "/hooks/…/" in clean, "короткий секрет — как целый сегмент пути"
+    assert "неверный ключ" in clean, "обычные слова не портятся"
+    assert http.scrub("сообщение без секретов", []) == "сообщение без секретов"
+    assert http.scrub_data({"a": ["x s3cr3t-key"], "n": 1}, ["s3cr3t-key"]) == {"a": ["x …"], "n": 1}
+
+
+def test_client_errors_never_contain_secrets(server):
+    secret = "Tk-9f8e7d6c5b4a"
+    server.route("GET", f"/hook/{secret}/me", lambda r: (500, {"message": f"токен {secret} недействителен"}))
+    server.route("GET", f"/hook/{secret}/gone", lambda r: (404, {}))
+    server.route("GET", f"/hook/{secret}/html", lambda r: (200, f"<p>{secret}</p>"))
+    server.route("GET", f"/hook/{secret}/moved", lambda r: (302, b"", {"Location": f"https://a:{secret}@sso.ru/x"}))
+    for detailed in (True, False):
+        c = client(server, secrets=(secret,), detailed=detailed)
+        for path in ("me", "gone", "html", "moved"):
+            with pytest.raises(IntegrationError) as exc:
+                c.get_json(f"hook/{secret}/{path}")
+            texts = (exc.value.detail, exc.value.short, exc.value.message(False), str(exc.value))
+            assert not any(secret in t for t in texts), (path, texts)
+    # Пароль Basic и токен Authorization — секреты клиента и без явного списка
+    server.route("GET", "/echo", lambda r: (400, {"error": "bad password pa55-W0rd, token Bearer-xyz-123"}))
+    with pytest.raises(IntegrationError) as exc:
+        client(server, auth=("svc", "pa55-W0rd")).get_json("echo")
+    assert "pa55-W0rd" not in exc.value.detail
+    with pytest.raises(IntegrationError) as exc:
+        client(server, headers={"Authorization": "Bearer Bearer-xyz-123"}).get_json("echo")
+    assert "Bearer-xyz-123" not in exc.value.detail
+
+
+def test_connection_error_text_is_scrubbed(server):
+    secret = "hook-code-778899"
+    port = server.server.server_address[1]
+    server.stop()
+    c = HttpClient(f"http://127.0.0.1:{port}", title="Bitrix24", secrets=(secret,))
+    with pytest.raises(IntegrationError) as exc:
+        c.request("POST", f"rest/1/{secret}/profile.json", retry=True)
+    assert exc.value.code == "connect" and secret not in exc.value.detail
+    server.start()

@@ -4,7 +4,7 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { toastError } from '@/composables/useToast'
-import { curlExample, pingExample } from '@/domain/integrations'
+import { curlExample, pingExample, rateLimitText } from '@/domain/integrations'
 import { writeClipboard } from '@/utils/clipboard'
 
 /** Ключ для входящих вызовов: значение показывается один раз — с копированием и примером вызова. */
@@ -39,7 +39,7 @@ async function copy() {
     <ul class="notes">
       <li><AppIcon name="eye-off" :size="15" />Ключ показывается один раз — после закрытия окна посмотреть его снова нельзя: сохраните его в настройках системы, которая будет отправлять файлы.</li>
       <li v-if="reissued"><AppIcon name="alert" :size="15" />Прежнее значение ключа больше не работает.</li>
-      <li><AppIcon name="shield" :size="15" />Области: {{ (item.scope_labels || item.scopes || []).join(', ') }}. Частота вызовов ограничена (по умолчанию — 120 в минуту на ключ).</li>
+      <li><AppIcon name="shield" :size="15" />Области: {{ (item.scope_labels || item.scopes || []).join(', ') }}. {{ rateLimitText(item.rate_limit) }}.</li>
     </ul>
     <div class="stack ex">
       <CodeBlock :code="example" label="Отправить файл" />

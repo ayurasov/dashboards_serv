@@ -8,7 +8,7 @@ import TransferBanner from '@/components/transfer/TransferBanner.vue'
 import TransferFile from '@/components/transfer/TransferFile.vue'
 import { reportsApi } from '@/api/reports'
 import { toastOk } from '@/composables/useToast'
-import { IMPORT_ACTIONS, IMPORT_COLUMNS, IMPORT_FILTERS, cellStateText, filterImportRows, importChips } from '@/domain/reports'
+import { IMPORT_ACTIONS, IMPORT_CLEAR_COLUMN, IMPORT_COLUMNS, IMPORT_FILTERS, cellStateText, filterImportRows, importChips } from '@/domain/reports'
 import { monthLabel } from '@/utils/format'
 
 /**
@@ -59,7 +59,7 @@ async function apply() {
     return
   }
   const s = applied.summary
-  result.value = `Новых значений: ${s.create} · изменено: ${s.update} · без изменений: ${s.unchanged}`
+  result.value = `Новых значений: ${s.create} · изменено: ${s.update}${s.cleared ? ` · очищено: ${s.cleared}` : ''} · без изменений: ${s.unchanged}`
   toastOk('Значения показателей загружены')
   emit('applied')
 }
@@ -73,8 +73,9 @@ const unitName = (path) => String(path || '').split(' / ').at(-1)
     <div class="imp">
       <ul class="columns" aria-label="Столбцы файла">
         <li v-for="c in IMPORT_COLUMNS" :key="c"><code>{{ c }}</code><small v-if="c === 'Подразделение'">путь через «/» или код</small><small v-else-if="c === 'Показатель'">название или ключ</small><small v-else-if="c === 'Период'">ГГГГ-ММ</small></li>
+        <li class="optional"><code>{{ IMPORT_CLEAR_COLUMN }}</code><small>необязательно: «да» — удалить значение</small></li>
       </ul>
-      <p class="hint">Пустая ячейка файла не стирает сохранённое значение. Проверка ничего не записывает: сначала — план, затем «Применить».
+      <p class="hint">Пустая ячейка файла не стирает сохранённое значение; чтобы удалить его, оставьте значение, цель и комментарий пустыми и напишите «да» в столбце «{{ IMPORT_CLEAR_COLUMN }}». Проверка ничего не записывает: сначала — план, затем «Применить».
         <button type="button" class="link-btn" data-testid="import-template" @click="emit('template')"><AppIcon name="download" :size="13" />Шаблон CSV за {{ monthLabel(period).toLowerCase() }}</button>
       </p>
       <TransferFile v-model="file" accept=".xlsx,.csv" hint="Excel (.xlsx) или CSV (UTF-8, разделитель «;» или «,»)" testid="values-file" />
@@ -99,7 +100,7 @@ const unitName = (path) => String(path || '').split(' / ').at(-1)
                 <td>{{ r.indicator_name || r.indicator || '—' }}</td>
                 <td class="nowrap">{{ r.period }}</td>
                 <td class="muted">{{ cellStateText(r.before) }}</td>
-                <td>{{ r.action === 'error' ? '—' : cellStateText(r.after) }}</td>
+                <td :class="{ cleared: r.action === 'clear' }">{{ r.action === 'error' ? '—' : r.action === 'clear' ? 'значение удалится' : cellStateText(r.after) }}</td>
                 <td>
                   <span class="badge" :class="`badge-${IMPORT_ACTIONS[r.action]?.tone || 'gray'}`">{{ IMPORT_ACTIONS[r.action]?.label || r.action }}</span>
                   <ul v-if="r.errors.length" class="errs"><li v-for="e in r.errors" :key="e">{{ e }}</li></ul>
@@ -130,6 +131,8 @@ const unitName = (path) => String(path || '').split(' / ').at(-1)
 .columns li { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--surface-2); border: 1px solid var(--border); }
 .columns code { font-family: var(--font-sans); font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
 .columns small { font-size: var(--fs-xs); color: var(--muted); }
+.columns li.optional { border-style: dashed; }
+.cleared { font-style: italic; color: var(--text-2); }
 .hint { font-size: var(--fs-sm); color: var(--muted); line-height: 1.5; }
 .link-btn { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: var(--fs-sm); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
@@ -139,7 +142,7 @@ const unitName = (path) => String(path || '').split(' / ').at(-1)
 .plan-head h3 { font-size: var(--fs-md); }
 .bordered { border: 1px solid var(--border); border-radius: 12px; max-height: 340px; }
 .bordered .table td { vertical-align: top; font-size: var(--fs-sm); }
-.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
 tr.err td { background: color-mix(in srgb, var(--light-red) 5%, transparent); }
 .errs { margin: 4px 0 0; padding-left: 16px; font-size: var(--fs-xs); color: var(--light-red); }
 .empty-row { text-align: center; color: var(--muted); }

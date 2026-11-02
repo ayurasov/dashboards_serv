@@ -28,7 +28,7 @@ const state = computed(() => folderState(folder.value))
 const worker = computed(() => workerState(folder.value?.worker))
 const lastScan = computed(() => folder.value?.last_scan || null)
 const datasets = computed(() => props.meta?.datasets || [])
-const subfolders = computed(() => (folder.value?.folders || []).map((f) => ({ ...f, patterns: datasets.value.find((d) => d.key === f.dataset)?.patterns || [] })))
+const subfolders = computed(() => (folder.value?.folders || []).map((f) => ({ ...f, patterns: f.patterns || [] })))
 const tree = computed(() => folderTree(folder.value, datasets.value))
 const origin = typeof window !== 'undefined' ? window.location.origin : ''
 const curl = computed(() => curlExample({ origin, dataset: 'tp-weekly', filename: 'Итоговый отчёт ТП.xlsx' }))
@@ -156,9 +156,9 @@ async function scanNow() {
 .path { margin-top: 2px; color: var(--text-2); }
 .st-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: 99px; font-size: var(--fs-sm); font-weight: 620; background: var(--surface-3); color: var(--muted); white-space: nowrap; }
 .st-pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.s-green .st-pill { background: color-mix(in srgb, var(--light-green) 13%, transparent); color: var(--light-green); }
-.s-yellow .st-pill { background: color-mix(in srgb, var(--light-yellow) 16%, transparent); color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
-.s-red .st-pill { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--light-red); }
+.s-green .st-pill { background: color-mix(in srgb, var(--light-green) 13%, transparent); color: var(--on-green); }
+.s-yellow .st-pill { background: color-mix(in srgb, var(--light-yellow) 16%, transparent); color: var(--on-yellow); }
+.s-red .st-pill { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--on-red); }
 .st-body { display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 20px; }
 .st-text { font-size: var(--fs-sm); color: var(--text-2); }
 .facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 24px; }
@@ -171,9 +171,9 @@ async function scanNow() {
 .mini { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-size: var(--fs-sm); }
 .mini h3 { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 650; }
 .w-pill { height: 20px; padding: 0 8px; border-radius: 99px; font-size: var(--fs-xs); font-weight: 620; line-height: 20px; background: var(--surface-3); color: var(--muted); }
-.w-green .w-pill { background: color-mix(in srgb, var(--light-green) 13%, transparent); color: var(--light-green); }
-.w-yellow .w-pill { background: color-mix(in srgb, var(--light-yellow) 16%, transparent); color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
-.w-red .w-pill { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--light-red); }
+.w-green .w-pill { background: color-mix(in srgb, var(--light-green) 13%, transparent); color: var(--on-green); }
+.w-yellow .w-pill { background: color-mix(in srgb, var(--light-yellow) 16%, transparent); color: var(--on-yellow); }
+.w-red .w-pill { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--on-red); }
 .flush { padding: 8px 0 0; }
 .subs td { vertical-align: top; font-size: var(--fs-sm); }
 .pat { display: inline-block; margin: 0 4px 3px 0; padding: 0 6px; border-radius: 5px; background: var(--surface-3); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }

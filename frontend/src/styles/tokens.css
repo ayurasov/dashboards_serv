@@ -57,8 +57,19 @@
   --border-strong: #d5d9e0;
   --text: #1c2130;
   --text-2: #4a5263;
-  --muted: #7a8293;
+  /* Приглушённый текст: не ниже 4.5:1 (WCAG AA) на всех поверхностях темы, включая --surface-3 */
+  --muted: #646c7d;
   --faint: #a6adba;
+  /*
+   * Текст статусов на их светлой подложке (значки .badge-*, плашки состояния): цвет светофора палитры,
+   * затемнённый смешением с чёрным, — оттенок тот же, контраст не ниже 4.5:1 на подложке поверх любой
+   * поверхности темы (проверка — src/styles/contrast.test.js)
+   */
+  --on-green: color-mix(in srgb, var(--light-green) 66%, #000);
+  --on-yellow: color-mix(in srgb, var(--light-yellow) 57%, #000);
+  --on-red: color-mix(in srgb, var(--light-red) 77%, #000);
+  --on-blue: color-mix(in srgb, var(--accent) 85%, #000);
+  --on-brand: color-mix(in srgb, var(--brand) 88%, #000);
   --focus: rgba(63, 111, 181, .35);
   --shadow-sm: 0 1px 2px rgba(20, 27, 45, .05);
   --shadow: 0 1px 2px rgba(20, 27, 45, .04), 0 4px 16px rgba(20, 27, 45, .05);
@@ -82,6 +93,12 @@
   --text-2: #b8bfcc;
   --muted: #8a93a4;
   --faint: #5f6878;
+  /* Текст статусов на тёмной подложке: цвет светофора, высветленный смешением с белым (не ниже 4.5:1) */
+  --on-green: color-mix(in srgb, var(--light-green) 78%, #fff);
+  --on-yellow: color-mix(in srgb, var(--light-yellow) 92%, #fff);
+  --on-red: color-mix(in srgb, var(--light-red) 68%, #fff);
+  --on-blue: color-mix(in srgb, var(--accent) 64%, #fff);
+  --on-brand: color-mix(in srgb, var(--brand) 60%, #fff);
   --focus: rgba(110, 150, 220, .45);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 6px 20px rgba(0, 0, 0, .25);

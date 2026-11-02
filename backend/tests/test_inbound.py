@@ -47,6 +47,10 @@ def test_issue_key_is_shown_once_and_stored_hashed(admin, db):
     assert row.sha256 == hashlib.sha256(key["key"].encode()).hexdigest()
     listing = admin.get("/api/integrations/keys").json()
     assert key["key"] not in str(listing) and listing[0]["prefix"] == key["prefix"]
+    from app.core.config import settings
+
+    assert key["rate_limit"] == listing[0]["rate_limit"] == settings.inbound_rate_limit == 120, \
+        "частота вызовов ключа в минуту (INBOUND_RATE_LIMIT) — для интерфейса"
     assert db.scalar(select(AuditEntry.summary).where(AuditEntry.entity_type == "inbound_key")).startswith("Выпущен")
     assert admin.post("/api/integrations/keys", json={"name": "x", "scopes": ["admin"]}).status_code == 422
     assert admin.post("/api/integrations/keys", json={"name": " ", "scopes": ["files"]}).status_code == 422

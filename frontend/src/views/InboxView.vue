@@ -61,10 +61,15 @@ watch(params, (now, before) => {
   clearTimeout(timer)
   timer = setTimeout(reload, before && now.q !== before.q ? 300 : 0)
 }, { immediate: true, deep: true })
+// Счётчик «ожидают» в меню — с сервера (/api/auth/me): обновляется после применения, отклонения и загрузки,
+// а при опросе списка — когда без фильтров изменилось число ожидающих (файл пришёл из папки или подключения)
+let seenPending = null
 watch(data, (d) => {
   if (d && !d.items.length && d.total && f.page > 1) f.page = Math.max(1, Math.ceil(d.total / f.page_size))
-  // Без фильтров (кроме статуса) — счётчик «ожидают» в меню
-  if (d?.counts && !Object.values(filters.value).some(Boolean)) auth.inboxPending = d.counts.pending || 0
+  if (!d?.counts || Object.values(filters.value).some(Boolean)) return
+  const pending = d.counts.pending || 0
+  if (seenPending !== null && pending !== seenPending) auth.refreshInbox()
+  seenPending = pending
 })
 
 // Новые файлы приходят сами (папка, подключения) — список обновляется, пока страница открыта
@@ -110,6 +115,7 @@ function onKey(event, id) {
 }
 function changed() {
   reload()
+  auth.refreshInbox()
 }
 
 const uploadOpen = ref(false)
@@ -124,6 +130,7 @@ function uploaded(item) {
   }
   ;(messages[item.status] || (() => toastOk('Файл получен')))()
   reload()
+  auth.refreshInbox()
   open(item.id)
 }
 
@@ -190,7 +197,11 @@ function showFolderItems() {
                   <td class="file">
                     <div class="f-cell">
                       <span class="f-icon"><AppIcon name="file" :size="15" /></span>
-                      <span class="f-text"><b>{{ i.filename }}</b><small>{{ fileSize(i.size) }} · № {{ i.id }}</small></span>
+                      <span class="f-text">
+                        <b>{{ i.filename }}</b>
+                        <span v-if="i.note" class="f-note" :title="i.note" data-testid="inbox-note">{{ i.note }}</span>
+                        <small>{{ fileSize(i.size) }} · № {{ i.id }}</small>
+                      </span>
                     </div>
                   </td>
                   <td class="src"><span class="s-label"><AppIcon :name="sourceInfo(i).icon" :size="14" />{{ sourceInfo(i).label }}</span><small v-if="sourceInfo(i).detail && sourceInfo(i).detail !== sourceInfo(i).label">{{ sourceInfo(i).detail }}</small></td>
@@ -267,6 +278,9 @@ function showFolderItems() {
 .f-icon { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 8px; background: var(--surface-3); color: var(--text-2); }
 .f-text { display: flex; flex-direction: column; min-width: 0; }
 .f-text b { font-weight: 600; overflow-wrap: anywhere; }
+/* Пояснение источника («Задача «…» · автор»): одна строка, приглушённо, с многоточием. Ширина 0 + min-width 100% —
+   строка не расширяет столбец, а занимает ту ширину, что дали имя файла и остальные столбцы */
+.f-note { display: block; width: 0; min-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-xs); color: var(--muted); }
 .f-text small, .src small, .when small { display: block; font-size: var(--fs-xs); color: var(--muted); }
 .src { min-width: 140px; }
 .s-label { display: inline-flex; align-items: center; gap: 6px; }

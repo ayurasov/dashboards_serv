@@ -166,6 +166,7 @@ async function downloadFile() {
         <span class="file-icon"><AppIcon name="file" :size="18" /></span>
         <div class="dh-text">
           <h2 data-testid="inbox-item-title">{{ item?.filename || (loading ? 'Загрузка…' : 'Элемент входящих') }}</h2>
+          <p v-if="item?.note" class="note-line" data-testid="inbox-item-note">{{ item.note }}</p>
           <p v-if="item" class="muted">№ {{ item.id }} · {{ fileSize(item.size) }}<template v-if="item.dataset_label"> · {{ item.dataset_label }}</template></p>
         </div>
         <span v-if="item" class="badge" :class="`badge-${badge.tone}`" data-testid="inbox-item-status">{{ badge.label }}</span>
@@ -290,6 +291,7 @@ async function downloadFile() {
 .dh-text { flex: 1; min-width: 0; }
 .dh-text h2 { font-size: 16px; overflow-wrap: anywhere; }
 .dh-text p { font-size: var(--fs-xs); }
+.dh-text .note-line { margin-top: 1px; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
 .body-stack { display: flex; flex-direction: column; gap: 16px; }
 .facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 24px; }

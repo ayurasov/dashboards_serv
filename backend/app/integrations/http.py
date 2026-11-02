@@ -7,7 +7,13 @@
   на адрес, для которого его ввели);
 - таймауты 5 с на соединение и 30 с на чтение; ответ не больше 20 МБ; JSON проверяется по виду
   (объект или список) — иначе «возможно, отвечает страница входа или прокси»;
-- повтор только при 429 и 503: до 3 попыток, пауза Retry-After (не больше 10 с);
+- повтор только при 429 и 503: до 3 попыток, пауза Retry-After (не больше 10 с) — только у безопасных
+  запросов (GET, HEAD, OPTIONS). POST, PUT, PATCH и DELETE повторяются, только если вызывающий передал
+  retry=True: повтор входа или изменения у партнёра тратит его ограничение попыток и может выполнить
+  действие дважды;
+- секреты не выходят в тексты ошибок: значения секретов подключения (secrets), пароль Basic, токен из
+  Authorization, логин и пароль в адресе (userinfo) и сегменты пути, равные секрету, заменяются на «…»
+  во всех IntegrationError клиента (scrub — и для журнала запуска в runner.py);
 - прокси — из HTTPS_PROXY / HTTP_PROXY окружения сервера (requests берёт их сам); «не проверять
   сертификат» — только явным параметром verify=False;
 - ошибки типизированы (IntegrationError.code) и с двумя текстами: подробный — администратору при
@@ -18,16 +24,17 @@
 from __future__ import annotations
 
 import json as jsonlib
+import logging
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from http.cookiejar import DefaultCookiePolicy
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 import requests
 
@@ -41,6 +48,14 @@ MAX_BYTES = 20 * 1024 * 1024
 MAX_ATTEMPTS = 3
 MAX_RETRY_AFTER = 10.0
 ADMIN_HINT = " — сообщите администратору (подключение настраивается в разделе «Интеграции»)"
+# Повторяются при 429/503 без явного retry=True: запросы, не меняющие данные у партнёра
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+REDACTED = "…"
+# Секрет короче вычищается только как целый сегмент пути или userinfo адреса (иначе портились бы слова)
+MIN_SECRET_LENGTH = 4
+
+# Строки запросов urllib3 (уровень DEBUG) содержат путь целиком — у вебхука Bitrix24 в нём код доступа
+logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 
 
 class IntegrationError(Exception):
@@ -64,6 +79,76 @@ class IntegrationError(Exception):
         """Ошибка API: внешняя система ответила не так — 502, неверная настройка — 422."""
         status = 422 if self.code in ("bad_url", "host_not_allowed", "config") else 502
         return AppError(self.message(detailed), code=self.code, status_code=status)
+
+
+# ---------------------------------------------------------------- вычистка секретов
+
+_USERINFO = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s@\"'<>«»]+@")
+_PATHLIKE = re.compile(r"/[^\s\"'<>«»()\[\]{},;]+")
+
+
+def secret_texts(values: Iterable[str | None]) -> tuple[str, ...]:
+    """Секреты и их запись в адресах (процентная кодировка) — длинные первыми."""
+    out: set[str] = set()
+    for value in values or ():
+        text = str(value or "")
+        for variant in (text, text.strip(), quote(text, safe=""), quote_plus(text), quote(text, safe="/")):
+            if variant:
+                out.add(variant)
+    return tuple(sorted(out, key=len, reverse=True))
+
+
+def scrub(text: str | None, secrets: Iterable[str | None] = ()) -> str:
+    """Текст без секретов: логин и пароль в адресе (scheme://логин:пароль@узел), сегменты пути, равные секрету,
+    и сами значения секретов (не короче MIN_SECRET_LENGTH) заменяются на «…»."""
+    if not text:
+        return text or ""
+    text = _USERINFO.sub(lambda m: m.group("scheme") + REDACTED + "@", str(text))
+    values = secret_texts(secrets)
+    if not values:
+        return text
+    exact = set(values)
+
+    def segments(match: re.Match) -> str:
+        parts = match.group(0).split("/")
+        for index, part in enumerate(parts):
+            core = re.split(r"[?#]", part, maxsplit=1)[0]
+            if core and (core in exact or unquote(core) in exact):
+                parts[index] = REDACTED + part[len(core):]
+        return "/".join(parts)
+
+    text = _PATHLIKE.sub(segments, text)
+    for value in values:
+        if len(value) >= MIN_SECRET_LENGTH:
+            text = text.replace(value, REDACTED)
+    return text
+
+
+def scrub_data(data: Any, secrets: Iterable[str | None]) -> Any:
+    """scrub для всех строк вложенной структуры (сводка, подробности проверки)."""
+    values = secret_texts(secrets)
+    if not values:
+        return data
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str):
+            return scrub(value, values)
+        if isinstance(value, dict):
+            return {walk(k) if isinstance(k, str) else k: walk(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [walk(v) for v in value]
+        return value
+
+    return walk(data)
+
+
+def scrubbed(exc: IntegrationError, secrets: Iterable[str | None]) -> IntegrationError:
+    """Та же ошибка с вычищенными текстами (подробным и кратким)."""
+    values = secret_texts(secrets)
+    detail, short = scrub(exc.detail, values), scrub(exc.short, values)
+    if detail == exc.detail and short == exc.short:
+        return exc
+    return IntegrationError(detail, code=exc.code, short=short, status=exc.status)
 
 
 # ---------------------------------------------------------------- адрес и разрешённые узлы
@@ -168,7 +253,9 @@ def error_text(resp: HttpResponse) -> str:
 class HttpClient:
     """Клиент одного подключения. path в запросах — относительно base_url («api/myself»), полный
     адрес — только того же узла. auth — кортеж (логин, пароль) для Basic (UTF-8) или None; headers —
-    например, {"Authorization": "Bearer …"}. detailed=False — краткие ошибки для неадминистраторов."""
+    например, {"Authorization": "Bearer …"}. detailed=False — краткие ошибки для неадминистраторов.
+    secrets — значения секретов подключения: они (как и пароль Basic и токен Authorization) вычищаются
+    из текстов всех ошибок клиента."""
 
     base_url: str
     kind: str | None = None
@@ -180,11 +267,19 @@ class HttpClient:
     max_bytes: int = MAX_BYTES
     detailed: bool = True
     cookies: bool = True
+    secrets: tuple[str, ...] = ()
     sleep: Callable[[float], None] = time.sleep
     calls: int = 0
     elapsed: float = 0.0
 
     def __post_init__(self):
+        known = [*(self.secrets or ())]
+        if self.auth is not None:
+            known.append(self.auth[1])
+        for name, value in self.headers.items():
+            if name.lower() == "authorization" and value:
+                known += [value, value.split(" ", 1)[-1]]
+        self._secrets = secret_texts(known)
         self.base_url = check_base_url(self.base_url, kind=self.kind, title=f"Адрес «{self.title}»")
         self._host = urlsplit(self.base_url).netloc.lower()
         self.session = requests.Session()
@@ -205,26 +300,35 @@ class HttpClient:
     def url(self, path: str) -> str:
         if re.match(r"^https?://", path, re.IGNORECASE):
             if urlsplit(path).netloc.lower() != self._host:
-                raise IntegrationError(f"Запрос на другой узел ({urlsplit(path).netloc}) запрещён", code="bad_url")
+                raise self.fail("bad_url", f"Запрос на другой узел ({urlsplit(path).netloc}) запрещён",
+                                "Запрос на другой узел запрещён")
             return path
         return f"{self.base_url}/{path.lstrip('/')}"
 
     def where(self, url: str) -> str:
         return url if self.detailed else urlsplit(url).path
 
+    def scrub(self, text: str | None) -> str:
+        """Текст без секретов этого клиента — для сообщений, собранных из ответа вне клиента."""
+        return scrub(text, self._secrets)
+
     def fail(self, code: str, detailed: str, short: str, status: int | None = None) -> IntegrationError:
-        return IntegrationError(detailed, code=code, short=short, status=status)
+        return IntegrationError(self.scrub(detailed), code=code, short=self.scrub(short), status=status)
 
     # --- запрос
     def request(self, method: str, path: str, *, params: dict | None = None, json: Any = None, data: Any = None,
                 headers: dict | None = None, files: Any = None, expect: tuple[int, ...] = (200,),
-                not_found: str | None = None) -> HttpResponse:
-        """Запрос с повтором при 429/503; статус не из expect — IntegrationError."""
+                not_found: str | None = None, retry: bool | None = None) -> HttpResponse:
+        """Запрос; статус не из expect — IntegrationError. Повтор при 429/503 — у GET, HEAD, OPTIONS; POST, PUT,
+        PATCH и DELETE повторяются только с retry=True (запрос, который у партнёра ничего не меняет, например
+        чтение через POST); retry=False — не повторять и безопасный запрос."""
         url = self.url(path)
+        method = method.upper()
+        attempts = MAX_ATTEMPTS if (method in SAFE_METHODS if retry is None else retry) else 1
         resp: HttpResponse | None = None
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             resp = self._send(method, url, params=params, json=json, data=data, headers=headers, files=files)
-            if resp.status in (429, 503) and attempt < MAX_ATTEMPTS:
+            if resp.status in (429, 503) and attempt < attempts:
                 self.sleep(self._retry_after(resp, attempt))
                 continue
             break
@@ -337,6 +441,7 @@ class HttpClient:
         return self.parse(self.request("GET", path, **kwargs), kind)
 
     def post_json(self, path: str, body: Any = None, *, kind: type | tuple[type, ...] = dict, **kwargs) -> Any:
+        """POST с JSON; при 429/503 не повторяется, если не передан retry=True (см. request)."""
         return self.parse(self.request("POST", path, json=body, **kwargs), kind)
 
     def get_bytes(self, path: str, **kwargs) -> bytes:

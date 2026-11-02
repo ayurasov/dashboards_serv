@@ -207,6 +207,9 @@ def test_folder_api_and_scan_endpoint(folder, admin, login):
     put(folder / "naumen" / "x.xlsx", b"junk")
     status = admin.get("/api/inbox/folder").json()
     assert status["enabled"] and status["waiting_files"] == 1 and status["last_scan"] is None
+    folders = {f["folder"]: f for f in status["folders"]}
+    assert folders["naumen"]["patterns"] == ["*naumen*", "*наумен*", "*заявк*"], "шаблоны имени — у каждой подпапки"
+    assert folders["structure"]["label"] == "Структура компании" and folders["structure"]["patterns"]
     scanned = admin.post("/api/inbox/folder/scan").json()
     assert scanned["taken"] == 1 and scanned["errors"] == 1
     assert admin.get("/api/inbox/folder").json()["last_scan"]["last_result"]["taken"] == 1

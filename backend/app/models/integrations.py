@@ -103,6 +103,8 @@ class InboxItem(Base):
         # Повтор: у набора не больше одного «живого» элемента с тем же содержимым
         Index("uq_inbox_items_dataset_sha256", "dataset", "sha256", unique=True,
               sqlite_where=_LIVE, postgresql_where=_LIVE),
+        # Фильтр по статусу и счётчик «ожидают» по наборам (/api/auth/me) — одним COUNT по индексу
+        Index("ix_inbox_items_status_dataset", "status", "dataset"),
         CheckConstraint(f"source IN ({_in(INBOX_SOURCES)})", name="source"),
         CheckConstraint(f"status IN ({_in(INBOX_STATUSES)})", name="status"),
     )
@@ -117,7 +119,7 @@ class InboxItem(Base):
     size: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     dataset: Mapped[str | None] = mapped_column(String(40), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="received", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="received")
     options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # План и итог движка — крупные, со списком не загружаются; summary и plan_ok — для списка
     plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, deferred=True)
@@ -127,6 +129,8 @@ class InboxItem(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     # Пояснение статуса для человека: почему ожидает, итог применения, чей повтор
     message: Mapped[str] = mapped_column(Text, default="")
+    # Откуда файл для человека — от источника: «Задача «…» · автор», «Письмо «…» от …» (до 500 символов)
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="")
     duplicate_of_id: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer, "sqlite"),
                                                         ForeignKey("inbox_items.id", ondelete="SET NULL"))
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

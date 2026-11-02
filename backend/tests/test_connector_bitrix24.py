@@ -94,6 +94,7 @@ class FakeBitrix:
         self.users = dict(USERS)
         self.scopes = ["crm", "user", "department"]
         self.limit_left = 0
+        self.echo_code = False
         self.calls: list[tuple[str, dict]] = []
         self.server = FakeServer(routes=Routes(self.dispatch))
 
@@ -117,6 +118,9 @@ class FakeBitrix:
         self.calls.append((method, params))
         if user != "1" or code != CODE:
             return 401, {"error": "INVALID_CREDENTIALS", "error_description": "Invalid request credentials"}
+        if self.echo_code and method == "crm.deal.list":
+            return 500, {"error": "INTERNAL_SERVER_ERROR",
+                         "error_description": f"Вебхук /rest/{user}/{code}/ временно заблокирован ({code})"}
         if method == "crm.deal.list" and self.limit_left:
             self.limit_left -= 1
             return 503, {"error": "QUERY_LIMIT_EXCEEDED", "error_description": "Too many requests"}
@@ -258,6 +262,29 @@ def test_check_failures_never_show_webhook_code(admin, fake):
     assert CODE not in admin.get(f"/api/integrations/{item['id']}").text
 
 
+def test_webhook_code_never_leaks_from_runs_logs_or_rows(admin, fake, db, people, caplog):
+    import json
+    import logging
+
+    from app.models import Integration, IntegrationRun
+
+    caplog.set_level(logging.DEBUG)
+    fake.echo_code = True
+    item = create(admin, fake)
+    data = run(admin, item)
+    assert data["status"] == "error" and "временно заблокирован" in data["error"] and "/rest/1/…/" in data["error"]
+    fake.echo_code = False
+    fake.users.pop("2", None)
+    admin.post(f"/api/integrations/{item['id']}/check")
+    texts = [json.dumps(data, ensure_ascii=False), caplog.text, admin.get(f"/api/integrations/{item['id']}").text,
+             admin.get(f"/api/integrations/{item['id']}/runs").text]
+    db.expire_all()
+    row = db.get(Integration, item["id"])
+    texts += [row.last_error or ""] + [f"{r.message} {r.error} {json.dumps(r.summary, ensure_ascii=False)}"
+                                       for r in db.scalars(select(IntegrationRun))]
+    assert not any(CODE in t for t in texts), "код вебхука — ни в журнале сервера, ни в запусках, ни в API"
+
+
 def test_short_webhook_form(admin, fake):
     response = admin.post("/api/integrations/check", json={"kind": "bitrix24", "config": {"portal_url": fake.url},
                                                            "secrets": {"webhook": f"1/{CODE}"}}).json()
@@ -310,6 +337,8 @@ def test_rerun_unchanged_and_vanished_deal_gets_zero(admin, fake, db, people):
     assert values(db, "crm.revenue")[("TECH", C)] == 0.5 and values(db, "crm.revenue")[("TECHDIR", C)] == 1.5
     assert values(db, "crm.deals_won")[("SUP-OS", C)] == 0
     assert third["summary"]["updated"] == 6 and third["status"] == "ok"
+    sample = {(v["unit"], v["indicator"]): v["action"] for v in third["summary"]["details"]["values"]}
+    assert "clear" not in sample.values(), "суммы исчезнувших сделок — ноль (update), а не очистка значения"
     fourth = run(admin, item)
     assert fourth["summary"]["created"] == fourth["summary"]["updated"] == 0
 

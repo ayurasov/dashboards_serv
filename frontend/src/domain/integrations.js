@@ -31,6 +31,16 @@ export const KIND_ICONS = {
 }
 export const kindIcon = (kind) => KIND_ICONS[kind] || 'plug'
 
+/**
+ * Ограничение частоты вызовов ключа (INBOUND_RATE_LIMIT сервера, приходит в rate_limit ключа):
+ * «Частота вызовов ограничена: не больше 120 запросов в минуту на ключ».
+ */
+export function rateLimitText(limit) {
+  const n = Number(limit)
+  if (!Number.isFinite(n) || n <= 0) return 'Частота вызовов ограничена настройкой сервера'
+  return `Частота вызовов ограничена: не больше ${formatNumber(n)} ${plural(n, ['запроса', 'запросов', 'запросов'])} в минуту на ключ`
+}
+
 export const SCOPES = [
   { value: 'files', label: 'Приём файлов', hint: 'POST /api/inbound/v1/files — файлы во входящие' },
   { value: 'status', label: 'Чтение статусов', hint: 'GET /api/inbound/v1/files/{id} — статус файлов, принятых этим ключом' },
@@ -223,11 +233,41 @@ export function normalizeUrl(url) {
   return `${match[1].toLowerCase()}${match[2].toLowerCase()}${match[3].replace(/\/+$/, '')}`
 }
 
-/** Адрес подключения изменён относительно того, к которому привязаны сохранённые секреты. */
-export function urlChanged(kind, values, integration) {
-  if (!kind?.url_field || !integration?.has_secret || !integration.secret_bound_url) return false
-  return normalizeUrl(values?.[kind.url_field]) !== normalizeUrl(integration.secret_bound_url)
+/**
+ * Поля, от которых зависит адрес привязки секретов: secret_url_fields вида подключения (у «По Делу» — оба
+ * адреса, у Exchange — способ подключения и его адрес); у сервера без этого списка — url_field.
+ */
+export function bindingFields(kind) {
+  if (Array.isArray(kind?.secret_url_fields)) return kind.secret_url_fields
+  return kind?.url_field ? [kind.url_field] : []
 }
+
+const bindingValue = (field, value) => {
+  const v = toConfigValue(field, value)
+  if (v === null || v === undefined || v === '') return ''
+  return field.type === 'url' ? normalizeUrl(v) : Array.isArray(v) ? JSON.stringify(v) : String(v)
+}
+
+/**
+ * Изменённые поля привязки секретов: [{ key, label }] — видимые в форме поля из bindingFields, которые
+ * отличаются от сохранённых настроек (адреса сравниваются как на сервере). Если секреты сохранены, после
+ * такого изменения сервер потребует ввести их заново (secret_rebind_required) — форма предупреждает заранее.
+ */
+export function bindingChanges(kind, values, integration) {
+  if (!integration?.has_secret) return []
+  const saved = integration.config || {}
+  const out = []
+  for (const key of bindingFields(kind)) {
+    const field = (kind?.fields || []).find((f) => f.key === key)
+    if (!field || field.secret || !fieldVisible(field, values)) continue
+    const before = key in saved ? saved[key] : field.default
+    if (bindingValue(field, values?.[key]) !== bindingValue(field, toFormValue(field, before))) out.push({ key, label: field.label })
+  }
+  return out
+}
+
+/** Адрес привязки сохранённых секретов изменён — их нужно ввести заново. */
+export const urlChanged = (kind, values, integration) => bindingChanges(kind, values, integration).length > 0
 
 /** Секреты при смене адреса: сохранённые больше не подходят — их нужно ввести заново. */
 export function rebindSecrets(secrets) {

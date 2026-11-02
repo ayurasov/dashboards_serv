@@ -21,7 +21,7 @@ export async function applyItem(id, options) {
   }
 }
 
-/** Правила приходят списком строк «источник × набор» (на случай обёртки { rules } — тоже). */
+/** Правила: ответ { rules: [строки «источник × набор»] } (у сервера до 0.4.0 — просто список). */
 export const ruleList = (data) => (Array.isArray(data) ? data : data?.rules || [])
 
 export const inboxApi = {

@@ -586,3 +586,23 @@ def test_scorecard_for_300_units_is_fast(admin, db, login, monkeypatch):
     # Без кэша ответов — фильтр рассчитанного отчёта под права, сериализация и сжатие тела каждый раз
     assert ceo_ms < 100 and engineer_ms < 100, (ceo_ms, engineer_ms)
     assert filtered < 250, filtered
+
+
+def test_company_scorecard_without_user_is_admin_view(admin, db):
+    """Отчёт для публикаций (Confluence) — без пользователя, как у администратора: вся компания, все уровни;
+    классы данных — по запросу."""
+    full = admin.get("/api/reports/scorecard").json()
+    period = R.parse_period(full["period"])
+    data = R.company_scorecard(db, period)
+    assert [u["id"] for u in data["units"]] == [u["id"] for u in full["units"]]
+    assert data["summary"]["status"] == full["summary"]["status"] and data["roots"] == full["roots"]
+    assert {i["key"] for i in data["indicators"]} == {i["key"] for i in full["indicators"]}
+    assert data["access"]["scope"] == "company" and data["access"]["drill_depth"] is None
+    hidden = R.company_scorecard(db, period, classes=["operational", "personal"])
+    assert "fin.revenue" in {i["key"] for i in data["indicators"]}
+    assert "fin.revenue" not in {i["key"] for i in hidden["indicators"]}
+    assert hidden["access"]["hidden_classes"] == ["Финансовые"]
+    branch = R.company_scorecard(db, period, root=full["units"][1]["id"])
+    assert branch["roots"] == [full["units"][1]["id"]]
+    viewer = R.company_viewer(R.state(db).snap)
+    assert viewer.user_id == 0 and viewer.depth is None and viewer.can_manage and not viewer.can_export

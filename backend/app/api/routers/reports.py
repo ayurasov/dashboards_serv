@@ -161,8 +161,10 @@ def _import_job(db: Session, user: User, rows: list, apply: bool, filename: str,
 @router.post("/values/import", response_model=ValuesImportOut, responses=CONFLICT_RESPONSE, openapi_extra=IMPORT_BODY,
              summary="Загрузить значения (Excel, CSV): проверка (apply=false) или применение",
              description="Столбцы: «Подразделение» (путь через «/» или код), «Показатель» (ключ или название), "
-                         "«Период» (ГГГГ-ММ), «Значение», «Цель», «Комментарий». Пустая ячейка не стирает "
-                         "сохранённое. Multipart: file, apply; или JSON: {content: текст CSV, apply}.")
+                         "«Период» (ГГГГ-ММ), «Значение», «Цель», «Комментарий», «Очистить». Пустая ячейка не "
+                         "стирает сохранённое; «Очистить» = «да» (без значения, цели и комментария) удаляет "
+                         "сохранённое значение за месяц (действие clear, в сводке cleared). Без изменений ничего "
+                         "не записывается. Multipart: file, apply; или JSON: {content: текст CSV, apply}.")
 async def import_values(request: Request, db: Session = Depends(get_db), user: User = Depends(active_user)):
     fields, file, raw = await _payload(request)
     if file is not None:

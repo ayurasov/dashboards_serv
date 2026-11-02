@@ -12,10 +12,16 @@ AND enabled AND next_run_at <= now — на PostgreSQL второй процес
 условие уже не выполняется, на SQLite записи и так идут по очереди. Поэтому несколько планировщиков не
 выполнят один запуск дважды. Ручной запуск во время идущего не начнётся: running_since занимается тем же
 приёмом (begin_running).
+
+Секреты не попадают ни в журнал сервера, ни в журнал запусков, ни в ответы API: тексты проверки и запуска
+(сообщение, ошибка, подробности, last_error) и журнал неожиданных исключений (сообщение и трассировка —
+без log.exception) проходят через http.scrub с секретами коннектора (Connector.secret_values()).
 """
 from __future__ import annotations
 
 import logging
+import traceback
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -31,7 +37,7 @@ from ..core.secrets import SecretError, unseal
 from ..models import Integration, IntegrationRun, User
 from . import base
 from .base import CheckResult, Connector, RunContext, RunResult
-from .http import IntegrationError, record_health
+from .http import IntegrationError, record_health, scrub, scrub_data, secret_texts
 
 log = logging.getLogger("app.integrations")
 
@@ -46,7 +52,32 @@ def owner(integration_id: int | None) -> str:
 
 
 def url_of(cls: type[Connector], config: dict) -> str:
-    return (config or {}).get(cls.url_field) or "" if cls.url_field else ""
+    """Адрес привязки секретов подключения (Connector.secret_url)."""
+    return cls.secret_url(config or {})
+
+
+def _secrets_of(connector: Connector | None, extra: dict | None = None) -> tuple[str, ...]:
+    values: list[str] = list(connector.secret_values()) if connector is not None else []
+    values += [str(v) for v in (extra or {}).values() if v]
+    return secret_texts(values)
+
+
+def _log_failure(what: str, row: Integration, exc: BaseException, secrets: Iterable[str]) -> None:
+    """Неожиданное исключение коннектора — в журнал сервера без секретов: сообщение и трассировка вычищены."""
+    message = scrub(f"{type(exc).__name__}: {exc}", secrets)
+    trace = scrub("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), secrets)
+    log.error("integration %s (%s): %s failed: %s\n%s", row.id, row.kind, what, message, trace)
+
+
+def clean_check(result: CheckResult, secrets: Iterable[str]) -> CheckResult:
+    return CheckResult(result.ok, scrub(result.message, secrets), scrub_data(result.details, secrets))
+
+
+def clean_run(result: RunResult, secrets: Iterable[str]) -> RunResult:
+    result.message = scrub(result.message, secrets)
+    result.error = scrub(result.error, secrets)
+    result.details = scrub_data(result.details, secrets)
+    return result
 
 
 def stored_secrets(row: Integration, cls: type[Connector] | None = None) -> dict[str, str]:
@@ -192,19 +223,20 @@ def begin_running(db: Session, integration_id: int, now: datetime) -> bool:
 
 def check(row: Integration, *, detailed: bool = True, config: dict | None = None,
           secrets: dict | None = None) -> CheckResult:
+    connector = None
     try:
         connector = connector_for(row, detailed=detailed, config=config, secrets=secrets)
         result = connector.check()
     except IntegrationError as exc:
-        return CheckResult(False, exc.message(detailed), {"code": exc.code})
+        result = CheckResult(False, exc.message(detailed), {"code": exc.code})
     except AppError as exc:
-        return CheckResult(False, exc.detail, {"code": exc.code})
-    except Exception:
-        log.exception("integration %s (%s): check failed", row.id, row.kind)
+        result = CheckResult(False, exc.detail, {"code": exc.code})
+    except Exception as exc:
+        _log_failure("check", row, exc, _secrets_of(connector, secrets))
         return CheckResult(False, INTERNAL_ERROR, {"code": "internal_error"})
     if not isinstance(result, CheckResult):  # pragma: no cover - ошибка автора коннектора
         return CheckResult(False, INTERNAL_ERROR, {"code": "internal_error"})
-    return result
+    return clean_check(result, _secrets_of(connector, secrets))
 
 
 # ---------------------------------------------------------------- запуск
@@ -252,8 +284,10 @@ def run_action(integration_id: int, action: str, *, trigger: str = "manual", use
 
 
 def _execute(row: Integration, action: str, trigger: str, user: User | None, run_id: int) -> tuple[RunResult, dict]:
+    """Действие коннектора в своей сессии. Итог — с вычищенными секретами (сообщение, ошибка, подробности)."""
     work = core_db.SessionLocal()
     state = dict(row.state or {})
+    connector = None
     try:
         integration = work.get(Integration, row.id)
         connector = connector_for(integration, detailed=True)
@@ -265,16 +299,16 @@ def _execute(row: Integration, action: str, trigger: str, user: User | None, run
         work.commit()
         if ctx.inbox.added:
             result.items = list(dict.fromkeys([*result.items, *ctx.inbox.added]))
-        return result, ctx.state
+        return clean_run(result, _secrets_of(connector)), ctx.state
     except IntegrationError as exc:
         work.rollback()
-        return RunResult.failed(exc.message(True), counters={}), state
+        return clean_run(RunResult.failed(exc.message(True), counters={}), _secrets_of(connector)), state
     except AppError as exc:
         work.rollback()
-        return RunResult.failed(exc.detail), state
-    except Exception:
+        return clean_run(RunResult.failed(exc.detail), _secrets_of(connector)), state
+    except Exception as exc:
         work.rollback()
-        log.exception("integration %s (%s): action %s failed", row.id, row.kind, action)
+        _log_failure(f"action {action}", row, exc, _secrets_of(connector))
         return RunResult.failed(INTERNAL_ERROR), state
     finally:
         work.close()

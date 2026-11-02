@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SchemaForm from './SchemaForm.vue'
+import IntegrationEditor from './IntegrationEditor.vue'
+import OneTimeKey from './OneTimeKey.vue'
 import RichText from '@/components/ui/RichText.vue'
 
 const KIND = {
@@ -73,5 +75,51 @@ describe('RichText — длинные описания', () => {
     const w = mount(RichText, { props: { text: 'Строка один\nстрока два' } })
     expect(w.find('button.more').exists()).toBe(false)
     expect(w.find('.txt').text()).toBe('Строка один\nстрока два')
+  })
+})
+
+describe('IntegrationEditor — секреты привязаны к адресам (secret_url_fields)', () => {
+  const PODELU = {
+    kind: 'podelu', title: 'По Делу', url_field: 'base_url', secret_url_fields: ['base_url', 'server_url'], actions: [],
+    fields: [
+      { key: 'base_url', label: 'Адрес «По Делу»', type: 'url', required: true, secret: false, default: null, options: [] },
+      { key: 'server_url', label: 'Адрес для запросов сервера', type: 'url', required: false, secret: false, default: null, options: [] },
+      { key: 'login', label: 'Служебная учётная запись', type: 'string', required: true, secret: false, default: null, options: [] },
+      { key: 'password', label: 'Пароль', type: 'password', required: true, secret: true, default: null, options: [] },
+    ],
+  }
+  const INTEGRATION = {
+    id: 3, name: 'По Делу', kind: 'podelu', has_secret: true, secret_fields: ['password'], secret_bound_url: 'https://podelu.ru',
+    secret_problem: null, config: { base_url: 'https://podelu.ru', server_url: null, login: 'svc' }, schedule: {},
+  }
+  const mountEditor = () => mount(IntegrationEditor, {
+    props: { kind: PODELU, integration: INTEGRATION },
+    global: { stubs: { SideDrawer: { template: '<div><slot name="header" /><slot /><slot name="footer" /></div>' }, ScheduleEditor: true } },
+  })
+
+  it('изменён адрес для запросов сервера — предупреждение до сохранения, пароль вводится заново', async () => {
+    const w = mountEditor()
+    expect(w.find('[data-testid=editor-rebind]').exists()).toBe(false)
+    expect(w.find('[data-testid=secret-set-password]').exists()).toBe(true)
+    await w.find('[data-field=login] input').setValue('другой')
+    expect(w.find('[data-testid=editor-rebind]').exists()).toBe(false)
+    await w.find('[data-field=server_url] input').setValue('http://10.0.0.5:5000')
+    const banner = w.find('[data-testid=editor-rebind]')
+    expect(banner.text()).toContain('Изменено: «Адрес для запросов сервера»')
+    expect(banner.text()).toContain('«Пароль»')
+    expect(w.find('[data-field=password]').text()).toContain('Адрес изменён')
+    await w.find('[data-field=server_url] input').setValue('')
+    expect(w.find('[data-testid=editor-rebind]').exists()).toBe(false)
+  })
+})
+
+describe('OneTimeKey — частота вызовов с сервера', () => {
+  it('rate_limit ключа вместо числа в коде', () => {
+    const w = mount(OneTimeKey, {
+      props: { item: { name: '1С', key: 'dash_x', scope_labels: ['Приём файлов'], rate_limit: 300 } },
+      global: { stubs: { AppModal: { template: '<div><slot /><slot name="footer" /></div>' } } },
+    })
+    expect(w.text()).toContain('не больше 300 запросов в минуту на ключ')
+    expect(w.text()).not.toContain('120')
   })
 })

@@ -48,6 +48,8 @@ RETRYABLE = ("received", "recognized", "pending", "error", "rejected")
 FINISHED = ("applied", "rejected", "duplicate", "error")
 INTERNAL_ERROR = "Не удалось обработать файл: внутренняя ошибка сервера — сообщите администратору"
 _FILENAME_JUNK = re.compile(r"[\x00-\x1f\x7f/\\]+")
+_NOTE_JUNK = re.compile(r"[\x00-\x1f\x7f]+")
+NOTE_MAX = 500
 
 
 class PlanHasErrors(AppError):
@@ -177,12 +179,19 @@ def save_rules(db: Session, actor: User, items: list[dict], request: Request | N
     db.flush()
 
 
-def _wait_reason(db: Session, item: InboxItem, apply: bool | None) -> tuple[bool, str]:
-    """(применять ли сразу, почему ждёт)."""
+UPLOAD_WAIT = "Загружено для проверки — посмотрите план и примените"
+RETRY_WAIT = "План построен заново — посмотрите его и примените"
+API_PLAN_ONLY = "Ожидает подтверждения: отправитель попросил только план"
+
+
+def _wait_reason(db: Session, item: InboxItem, apply: bool | None, user: User | None = None,
+                 retried: bool = False) -> tuple[bool, str]:
+    """(применять ли сразу, почему ждёт). Человек в интерфейсе (загрузка, «Повторить») применяет сам — по
+    флажку «применить сразу»; источники без человека — по apply и правилу «применять сразу»."""
+    if item.source == "upload" or user is not None:
+        return bool(apply), UPLOAD_WAIT if item.source == "upload" and not retried else RETRY_WAIT
     if apply is False:
-        return False, "Ожидает подтверждения: отправитель попросил только план"
-    if item.source == "upload":
-        return bool(apply), "Ожидает подтверждения на экране «Входящие»"
+        return False, API_PLAN_ONLY
     rule = db.get(InboxRule, (item.source, item.dataset))
     if rule is not None and rule.auto_apply:
         return True, ""
@@ -192,6 +201,12 @@ def _wait_reason(db: Session, item: InboxItem, apply: bool | None) -> tuple[bool
 
 
 # ---------------------------------------------------------------- получение
+
+def clean_note(note: str | None) -> str:
+    """Пояснение источника: одна строка без управляющих символов, до 500 символов."""
+    text = " ".join(_NOTE_JUNK.sub(" ", note or "").split())
+    return text if len(text) <= NOTE_MAX else text[:NOTE_MAX - 1] + "…"
+
 
 def clean_filename(name: str | None) -> str:
     base = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
@@ -216,13 +231,13 @@ def add(db: Session, content: bytes, filename: str, *, source: str, source_ref: 
         dataset: str | None = None, user: User | None = None, label: str | None = None,
         integration_id: int | None = None, inbound_key_id: int | None = None, content_type: str = "",
         options: dict | None = None, apply: bool | None = None, request: Request | None = None,
-        restrict_to_user: bool = False) -> InboxItem:
+        restrict_to_user: bool = False, note: str = "") -> InboxItem:
     """Новый элемент входящих → распознавание → план → применение по правилу (или ожидание).
 
     user — кто загрузил (загрузка в интерфейсе); label — подпись источника в журнале; apply — True
     «применить, если план без ошибок» (загрузка и API — только при включённом правиле, кроме загрузки),
     False — только план. restrict_to_user — набор файла должен быть доступен загружающему (иначе 403,
-    ничего не сохраняется)."""
+    ничего не сохраняется). note — откуда файл для человека («Задача «…» · автор», до 500 символов)."""
     if source not in INBOX_SOURCES:  # pragma: no cover - ошибка программиста
         raise ValueError(source)
     now = utcnow()
@@ -233,7 +248,7 @@ def add(db: Session, content: bytes, filename: str, *, source: str, source_ref: 
                      size=len(content), sha256=hashlib.sha256(content).hexdigest(), options={},
                      received_at=now, received_by_id=user.id if user else None,
                      received_by=(user.username if user else (label or INBOX_SOURCE_LABELS[source]))[:100],
-                     error="", message="", applied_by="")
+                     error="", message="", applied_by="", note=clean_note(note))
     limit = settings.inbox_max_mb * 1024 * 1024
     if len(content) > limit or not content:
         item.status, item.processed_at = "error", now
@@ -270,7 +285,8 @@ def add(db: Session, content: bytes, filename: str, *, source: str, source_ref: 
         item = InboxItem(**{c: getattr(item, c) for c in ("source", "source_ref", "integration_id", "inbound_key_id",
                                                           "filename", "content_type", "size", "sha256", "dataset",
                                                           "options", "received_at", "received_by_id",
-                                                          "received_by")}, error="", message="", applied_by="")
+                                                          "received_by", "note")}, error="", message="",
+                         applied_by="")
         if twin is None:  # pragma: no cover - гонка без победителя невозможна
             raise
         return _as_duplicate(db, item, twin, user, request, label)
@@ -357,7 +373,7 @@ def _errors_message(plan: dict) -> str:
 
 
 def process(db: Session, item: InboxItem, *, user: User | None = None, apply: bool | None = None,
-            request: Request | None = None, label: str | None = None) -> InboxItem:
+            request: Request | None = None, label: str | None = None, retried: bool = False) -> InboxItem:
     """План элемента и, если положено, применение. Ошибки файла — статус «ошибка» с текстом."""
     handler = datasets.require(item.dataset)
     actor = engine_actor(user, label or source_label(item, db))
@@ -384,7 +400,7 @@ def process(db: Session, item: InboxItem, *, user: User | None = None, apply: bo
         item.message = _errors_message(plan)
         db.flush()
         return item
-    auto, reason = _wait_reason(db, item, apply)
+    auto, reason = _wait_reason(db, item, apply, user, retried)
     if auto and (user is None or handler.can_apply(user)):
         # Разбор заново: движок применения не должен зависеть от того, что план сделал с данными
         _apply(db, item, handler, actor, user, request, label)
@@ -491,7 +507,7 @@ def retry(db: Session, item_id: int, user: User, *, dataset: str | None = None, 
         return item
     item.dataset, item.options, item.duplicate_of_id, item.result = handler.key, new_options, None, None
     _record(db, user, item, "retry", f"Повторная обработка файла «{item.filename}» ({handler.label})", request)
-    process(db, item, user=user, apply=bool(apply), request=request)
+    process(db, item, user=user, apply=bool(apply), request=request, retried=True)
     return item
 
 
@@ -558,7 +574,8 @@ def item_out(item: InboxItem, user: User | None, names: dict | None = None, *, f
         if item.integration_id else None,
         "inbound_key": {"id": item.inbound_key_id, "name": names["keys"].get(item.inbound_key_id, "")}
         if item.inbound_key_id else None,
-        "filename": item.filename, "content_type": item.content_type, "size": item.size, "sha256": item.sha256,
+        "filename": item.filename, "note": item.note or "", "content_type": item.content_type, "size": item.size,
+        "sha256": item.sha256,
         "dataset": item.dataset, "dataset_label": handler.label if handler else None,
         "status": item.status, "status_label": INBOX_STATUS_LABELS[item.status],
         "summary": item.summary, "plan_can_apply": plan_ok, "message": item.message, "error": item.error,
@@ -581,6 +598,27 @@ def item_out(item: InboxItem, user: User | None, names: dict | None = None, *, f
 
 def detail(db: Session, item: InboxItem, user: User) -> dict:
     return item_out(item, user, _names(db, [item]), full=True)
+
+
+def pending_count(db: Session, user: User) -> int:
+    """Сколько ожидающих элементов пользователь может применить или отклонить — для счётчика в меню
+    (/api/auth/me): с data.manage — все, иначе — наборов, которые он применяет. Один COUNT по индексу
+    (статус, набор); без доступа к входящим — без запроса."""
+    if can_manage(user):
+        stmt = select(func.count()).select_from(InboxItem).where(InboxItem.status == "pending")
+    else:
+        keys = [d.key for d in datasets.all_datasets() if d.can_apply(user)]
+        if not keys:
+            return 0
+        stmt = select(func.count()).select_from(InboxItem).where(InboxItem.status == "pending",
+                                                                 InboxItem.dataset.in_(keys))
+    return db.scalar(stmt) or 0
+
+
+def badge(db: Session, user: User) -> dict:
+    """«Входящие данные» в меню: доступны ли и сколько ждут решения пользователя."""
+    available = has_access(user)
+    return {"available": available, "pending": pending_count(db, user) if available else 0}
 
 
 def datasets_out(db: Session, user: User) -> list[dict]:

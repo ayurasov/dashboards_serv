@@ -28,9 +28,14 @@ class InboxRuleIn(Input):
     source: str = Field(max_length=20)
     dataset: str = Field(max_length=40)
     auto_apply: bool
+    # Подписи из ответа GET /api/inbox/rules — правило можно вернуть как получено; не используются
+    source_label: str | None = Field(default=None, max_length=200)
+    dataset_label: str | None = Field(default=None, max_length=200)
 
 
 class InboxRulesIn(Input):
+    """Тот же вид, что у ответа GET: {rules: [{source, dataset, auto_apply}]}."""
+
     rules: list[InboxRuleIn] = Field(max_length=200)
 
 

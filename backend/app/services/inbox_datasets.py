@@ -19,7 +19,10 @@
 partnerships.py, hr_import.py, report_admin.py, org_transfer.py, employee_transfer.py.
 
 Форматы JSON других систем (например, podelu.org-structure) подключаются register_json_format:
-распознавание выбирает набор по полю format, а parse сначала переводит документ в наш формат.
+распознавание выбирает набор по полю format, а parse сначала переводит документ в наш формат. Форматы
+регистрируют модули коннекторов при импорте; json_formats() загружает коннекторы до первого распознавания
+и перевода — файл «По Делу», положенный в папку или загруженный вручную, распознаётся в любом процессе
+и без обращения к подключениям.
 """
 from __future__ import annotations
 
@@ -226,6 +229,14 @@ def register_json_format(format_name: str, dataset: str, convert: Callable[[Any]
     JSON_FORMATS[format_name] = (dataset, convert)
 
 
+def json_formats() -> dict[str, tuple[str, Callable[[Any], Any]]]:
+    """Зарегистрированные форматы JSON — после загрузки модулей коннекторов, которые их регистрируют."""
+    from ..integrations import base
+
+    base.load_connectors()
+    return JSON_FORMATS
+
+
 def get(key: str | None) -> Dataset | None:
     return _REGISTRY.get(key or "")
 
@@ -244,8 +255,9 @@ def all_datasets() -> list[Dataset]:
 def detect(filename: str, content: bytes) -> tuple[Dataset | None, dict[str, int]]:
     """Набор по имени и содержимому файла: (лучший или None, оценки всех наборов)."""
     p = peek(filename, content)
-    if p.json_format in JSON_FORMATS:
-        key = JSON_FORMATS[p.json_format][0]
+    formats = json_formats() if p.json_format else JSON_FORMATS
+    if p.json_format in formats:
+        key = formats[p.json_format][0]
         return get(key), {key: 100}
     scores = {d.key: d.score(p) for d in _REGISTRY.values()}
     best = max(scores.values(), default=0)
@@ -266,8 +278,9 @@ def _json(content: bytes) -> Any:
 
 def _converted(content: bytes, dataset: str) -> Any:
     data = _json(content)
-    if isinstance(data, dict) and data.get("format") in JSON_FORMATS:
-        target, convert = JSON_FORMATS[data["format"]]
+    formats = json_formats()
+    if isinstance(data, dict) and data.get("format") in formats:
+        target, convert = formats[data["format"]]
         if target == dataset:
             return convert(data)
     return data
@@ -473,7 +486,7 @@ class Indicators(Dataset):
     key = "indicators"
     label = "Значения показателей"
     description = "Столбцы: Подразделение (путь или код), Показатель (ключ или название), Период (ГГГГ-ММ), " \
-                  "Значение, Цель, Комментарий"
+                  "Значение, Цель, Комментарий; «Очистить» = «да» удаляет сохранённое значение за месяц"
     capability = "reports.manage"
     apply_level = None
     patterns = ("*indicator*", "*показател*")

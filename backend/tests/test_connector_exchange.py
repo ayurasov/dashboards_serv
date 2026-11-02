@@ -320,7 +320,11 @@ def test_config_validation_per_mode(admin, monkeypatch):
     meta = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}["exchange"]
     assert meta["title"] == "Почтовый ящик (Exchange)" and meta["actions"][0]["label"] == "Забрать вложения"
     fields = {f["key"]: f for f in meta["fields"]}
-    assert fields["client_secret"]["show_if"] == {"mode": ["graph"]} and fields["endpoint"]["show_if"] == {"mode": []}
+    assert fields["client_secret"]["show_if"] == {"mode": ["graph"]}
+    assert "endpoint" not in fields, "привязка секрета — механизм каркаса (secret_url), а не скрытое поле"
+    assert meta["url_field"] is None and meta["allowed_hosts_env"] == "EXCHANGE_ALLOWED_HOSTS"
+    assert meta["secret_url_fields"] == ["mode", "ews_url", "tenant", "login_url", "graph_url", "imap_host",
+                                         "imap_port", "imap_ssl"]
 
     def create(config, secrets=None):
         return admin.post("/api/integrations", json={"kind": "exchange", "config": {"allowed_senders": ALLOWED,
@@ -342,11 +346,19 @@ def test_config_validation_per_mode(admin, monkeypatch):
     denied = create({"mode": "imap", "imap_host": "imap.evil.ru", "username": "u"}, {"password": "p"})
     assert denied.status_code == 422 and "EXCHANGE_ALLOWED_HOSTS" in denied.json()["detail"]
     ok = create({"mode": "imap", "imap_host": "IMAP.company.ru", "username": "u"}, {"password": "p"}).json()
-    assert ok["config"]["endpoint"] == "imaps://imap.company.ru:993" and ok["secret_bound_url"] == ok["config"][
-        "endpoint"]
+    assert "endpoint" not in ok["config"] and ok["secret_bound_url"] == "imaps://imap.company.ru:993"
     moved = admin.patch(f"/api/integrations/{ok['id']}", json={"config": {"imap_host": "mail.company.ru"}})
     assert moved.status_code == 422 and moved.json()["code"] == "secret_rebind_required", \
         "пароль не уходит на другой почтовый сервер без повторного ввода"
+    port = admin.patch(f"/api/integrations/{ok['id']}", json={"config": {"imap_port": 143, "imap_ssl": False}})
+    assert port.status_code == 422 and port.json()["code"] == "secret_rebind_required"
+    # Поле, от которого адрес не зависит (папка), секрет не трогает
+    folder = admin.patch(f"/api/integrations/{ok['id']}", json={"config": {"folder": "Входящие/Выгрузки"}})
+    assert folder.status_code == 200 and folder.json()["secret_problem"] is None
+    # Смена способа подключения — другой адрес: секрет вводится заново
+    graph = admin.patch(f"/api/integrations/{ok['id']}", json={"config": {
+        "mode": "graph", "tenant": "t", "client_id": "c", "mailbox": "data@company.ru"}})
+    assert graph.status_code == 422 and graph.json()["code"] == "secret_rebind_required"
 
 
 # ================================================================ IMAP
@@ -403,8 +415,12 @@ def test_imap_run_takes_allowed_attachments_marks_and_moves(admin, imap, db):
     assert "\\Seen" not in inbox[0]["flags"], "письмо чужого отправителя не помечается"
     assert len(processed) == 2 and all("\\Seen" in m["flags"] for m in processed)
     assert any(c.startswith("UID FETCH") and "BODY.PEEK[]" in c for c in imap.commands), "чтение — без \\Seen"
+    assert tp.note == "Письмо «Недельный отчёт ТП» от 1c@company.ru", "откуда файл — пояснением элемента"
     files = summary["details"]["files"]
-    assert files[0]["subject"] == "Недельный отчёт ТП" and files[0]["sender"] == "1c@company.ru"
+    assert files[0] == {"item": tp.id, "file": "tp.xlsx", "status": "применён"}, \
+        "тема и отправитель — в пояснении элемента, а не в подробностях запуска"
+    listed = admin.get("/api/inbox", params={"integration_id": item["id"]}).json()["items"]
+    assert {i["filename"]: i["note"] for i in listed}["tp.xlsx"] == tp.note
     again = _run(admin, item)
     assert again["summary"]["added"] == 0 and again["summary"]["processed"] == 0
     assert again["summary"]["skipped_sender"] == 1
@@ -592,7 +608,7 @@ def _graph_body(graph, **config) -> dict:
 
 def test_graph_check_and_wrong_secret(admin, graph):
     item = _create(admin, _graph_body(graph))
-    assert item["config"]["endpoint"] == f"{graph.server.url}/tenant-1 → {graph.server.url}"
+    assert item["secret_bound_url"] == f"{graph.server.url}/tenant-1 → {graph.server.url}"
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert check["ok"], check
     assert check["message"] == ("Ящик доступен (Microsoft 365 (Graph)): в папке «Входящие/Выгрузки» писем 3, "

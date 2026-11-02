@@ -1,6 +1,7 @@
 """Общее для коннекторов показателей (Jira, Bitrix24, 1С): окно месяцев, шаблоны с подстановками,
-описание показателя (ключ из каталога или создание подключением), сопоставление подразделений и запись
-значений через ctx.plans.indicator_values — тот же движок, что у загрузки значений из файла.
+описание показателя (ключ из каталога или создание подключением — ctx.plans.ensure_indicator), сопоставление
+подразделений и запись значений через ctx.plans.indicator_values — тот же движок, что у загрузки значений
+из файла.
 
 Запись: сначала план без записи; применяется, только если есть новые или изменённые значения (повторный
 запуск с теми же данными ничего не пишет и не засоряет журнал изменений). Ошибка в плане — ничего
@@ -250,16 +251,22 @@ class Targets:
 
 def ensure_indicators(ctx: RunContext, specs: Iterable[IndicatorSpec], owner_service: str, origin: str, *,
                       create: bool = True) -> Targets:
-    """Показатели из каталога; отсутствующие с названием создаются (create=False — только отмечаются)."""
-    from pydantic import ValidationError
-
-    from ...schemas.reports import IndicatorCreateIn
-    from ...services import report_admin
-
+    """Показатели из каталога; отсутствующие с названием создаются каркасом — ctx.plans.ensure_indicator
+    (create=False — только отмечаются, создаются позже create_pending)."""
     targets = Targets()
     by_key = {i.key: i for i in reports.state(ctx.db).catalog}
     for spec in {s.key: s for s in specs}.values():
         ind = by_key.get(spec.key)
+        if ind is None and spec.name and create:
+            try:
+                ind = ctx.plans.ensure_indicator(spec.create_body(owner_service, origin))
+            except AppError as exc:
+                detail = exc.detail.removeprefix(f"Показатель «{spec.key}» не создан: ")
+                targets.problems[spec.key] = f"Показатель «{spec.key}» не создан: {detail}"
+                continue
+            targets.created.append(spec.key)
+            targets.found[spec.key] = ind
+            continue
         if ind is not None:
             if ind.computed:
                 targets.problems[spec.key] = (f"«{ind.name}» вычисляется из данных службы — значения подключения "
@@ -273,26 +280,7 @@ def ensure_indicators(ctx: RunContext, specs: Iterable[IndicatorSpec], owner_ser
             targets.problems[spec.key] = (f"Показатель «{spec.key}» не найден в каталоге — создайте его в разделе "
                                           "«Показатели» или задайте name, и подключение создаст его само")
             continue
-        if not create:
-            targets.pending.append(spec.key)
-            continue
-        try:
-            body = IndicatorCreateIn(**spec.create_body(owner_service, origin))
-            report_admin.create_indicator(ctx.db, ctx.actor, body)
-            ctx.db.commit()
-        except ValidationError as exc:
-            ctx.db.rollback()
-            place = ".".join(map(str, exc.errors()[0]["loc"]))
-            targets.problems[spec.key] = f"Показатель «{spec.key}» не создан: недопустимое значение поля «{place}»"
-            continue
-        except AppError as exc:
-            ctx.db.rollback()
-            targets.problems[spec.key] = f"Показатель «{spec.key}» не создан: {exc.detail}"
-            continue
-        targets.created.append(spec.key)
-    if targets.created:
-        by_key = {i.key: i for i in reports.state(ctx.db).catalog}
-        targets.found.update({k: by_key[k] for k in targets.created if k in by_key})
+        targets.pending.append(spec.key)
     return targets
 
 
@@ -387,6 +375,7 @@ class WriteResult:
     create: int = 0
     update: int = 0
     unchanged: int = 0
+    cleared: int = 0
     applied: bool = False
     errors: list[str] = field(default_factory=list)
     sample: list[dict] = field(default_factory=list)
@@ -467,6 +456,7 @@ def write(ctx: RunContext, cells: list[Cell], units: Units, *, apply: bool, labe
     summary = plan["summary"]
     result.rows, result.create = summary["rows"], summary["create"]
     result.update, result.unchanged = summary["update"], summary["unchanged"]
+    result.cleared = summary.get("cleared", 0)
     for row in plan["rows"]:
         if row["errors"]:
             result.errors.append(f"{row['department_path'] or row['department']} · {row['indicator']} · "
@@ -476,7 +466,7 @@ def write(ctx: RunContext, cells: list[Cell], units: Units, *, apply: bool, labe
     if result.errors:
         raise IntegrationError("Значения не записаны — в плане ошибки: " + " | ".join(result.errors[:5]),
                                code="plan_errors", short="Значения не записаны: в плане загрузки ошибки")
-    if apply and (result.create or result.update):
+    if apply and (result.create or result.update or result.cleared):
         applied = ctx.plans.indicator_values(rows, apply=True, filename=label)
         if not applied.get("applied"):  # pragma: no cover - план только что был без ошибок
             raise IntegrationError("Значения не записаны: план изменился во время записи — повторите запуск",

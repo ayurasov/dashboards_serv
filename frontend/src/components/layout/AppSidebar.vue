@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { ADMIN_NAV, HELP_NAV, navItemAllowed, SERVICE_NAV } from '@/router/navigation'
@@ -25,9 +25,9 @@ const groups = computed(() => app.dashboards
     items: SERVICE_NAV[s.key].filter((i) => navItemAllowed(auth, s.key, i)),
   })))
 
-// «Входящие данные» — с полномочием data.manage или правом применять набор (это знает сервер)
-watch(() => auth.user?.id, (id) => { if (id) auth.loadInboxAccess() }, { immediate: true })
-const showInbox = computed(() => auth.inbox === true || auth.hasCapability('data.manage'))
+// «Входящие данные» — с полномочием data.manage или правом применять набор: сервер сообщает это и число
+// ожидающих в профиле (/api/auth/me → inbox), отдельных запросов меню не делает
+const showInbox = computed(() => auth.inbox)
 
 const helpItems = computed(() => HELP_NAV.filter((i) => !i.admin || auth.isAdmin))
 const adminItems = computed(() => ADMIN_NAV.filter((i) => (i.admin ? auth.isAdmin : auth.hasCapability(i.capability))))

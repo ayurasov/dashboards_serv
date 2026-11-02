@@ -27,14 +27,15 @@ const text = computed(() => (props.missing ? MISSING_LABEL : props.label || LIGH
   --tone: var(--light-gray);
   display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; height: 22px; padding: 0 9px 0 8px;
   border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 640; white-space: nowrap; letter-spacing: .01em;
-  background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 72%, var(--text));
+  /* Текст — токен --on-* темы: не ниже 4.5:1 на подложке (src/styles/tokens.css) */
+  background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--on, var(--muted));
 }
 .status-chip i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--tone); }
-.t-green { --tone: var(--light-green); }
-.t-yellow { --tone: var(--light-yellow); }
-.t-red { --tone: var(--light-red); }
+.t-green { --tone: var(--light-green); --on: var(--on-green); }
+.t-yellow { --tone: var(--light-yellow); --on: var(--on-yellow); }
+.t-red { --tone: var(--light-red); --on: var(--on-red); }
 .t-gray { background: var(--surface-3); color: var(--muted); }
-.t-missing { --tone: var(--light-red); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-red) 55%, transparent); color: var(--light-red); }
+.t-missing { --tone: var(--light-red); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--light-red) 55%, transparent); color: var(--on-red); }
 .t-missing i { background: transparent; box-shadow: inset 0 0 0 1.6px var(--light-red); }
 .sm { height: 19px; padding: 0 7px 0 6px; gap: 5px; font-size: 10.5px; }
 .sm i { width: 6px; height: 6px; flex-basis: 6px; }

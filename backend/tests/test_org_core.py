@@ -138,3 +138,61 @@ def test_extra_units_extend_scope(db):
 def test_system_profiles_are_seeded(db):
     keys = [p.key for p in db.scalars(select(AccessProfile).order_by(AccessProfile.sort_order))]
     assert keys == ["executive", "director", "head", "specialist", "employee"]
+
+
+# ---------------------------------------------------------------- отключение сотрудников синхронизацией
+
+def _person(db, username, email, source, *, external_id=None, active=True):
+    user = User(username=username, full_name=username.title(), email=email, role="user", is_active=active,
+                org_source=source, external_id=external_id, auth_source="local", must_change_password=False)
+    db.add(user)
+    db.commit()
+    return user
+
+
+def test_import_deactivates_only_people_of_the_same_source(db):
+    from app.services import org_import
+    from app.services.org_import import Row
+
+    unit = ["АЛМИ Партнер", "Техническая дирекция"]
+    kept = _person(db, "kept", "kept@company.ru", "podelu", external_id="p-1")
+    gone = _person(db, "gone", "gone@company.ru", "podelu", external_id="p-2")
+    service = _person(db, "svc", "svc@company.ru", "podelu", external_id="u-svc")
+    from_ad = _person(db, "from.ad", "ad@company.ru", "ad", external_id="guid")
+    rows = [Row(line=1, email="kept@company.ru", name="Kept", department=unit, external_id="p-1")]
+    plan = org_import.plan_import(db, rows, source="podelu", deactivate_missing=True, keep={"SVC@company.ru"})
+    assert [d["user_id"] for d in plan.deactivate] == [gone.id], \
+        "отключается только отсутствующий из «По Делу»: не служебная учётная запись, не сотрудник AD, не заведённые " \
+        "вручную"
+    assert org_import.plan_import(db, rows, source="podelu").deactivate == [], "без deactivate_missing — никого"
+    assert org_import.plan_import(db, rows, source="csv", deactivate_missing=True).deactivate == [], \
+        "загрузка списком не отключает"
+    ad_plan = org_import.plan_import(db, [], source="ad", deactivate_missing=True)
+    assert from_ad.id in [d["user_id"] for d in ad_plan.deactivate] and gone.id not in \
+        [d["user_id"] for d in ad_plan.deactivate], "AD отключает только своих"
+    result, applied = org_import.apply_import(db, None, rows, source="podelu", deactivate_missing=True,
+                                              keep={"svc"})
+    db.commit()
+    assert applied and result["summary"]["deactivate_users"] == 1
+    db.expire_all()
+    assert not db.get(User, gone.id).is_active
+    assert db.get(User, kept.id).is_active and db.get(User, service.id).is_active and db.get(User, from_ad.id).is_active
+
+
+def test_disabled_row_deactivates_same_source_only(db):
+    from app.services import org_import
+    from app.services.org_import import Row
+
+    unit = ["АЛМИ Партнер", "Техническая дирекция"]
+    mine = _person(db, "mine", "mine@company.ru", "podelu", external_id="p-1")
+    other = _person(db, "other", "other@company.ru", "ad", external_id="guid-2")
+    service = _person(db, "svc", "svc@company.ru", "podelu", external_id="u-svc")
+    rows = [Row(line=1, email="mine@company.ru", name="Mine", department=unit, external_id="p-1", disabled=True),
+            Row(line=2, email="other@company.ru", name="Other", department=unit, disabled=True),
+            Row(line=3, email="svc@company.ru", name="Svc", department=unit, external_id="u-svc", disabled=True)]
+    plan = org_import.plan_import(db, rows, source="podelu", keep={"svc@company.ru"})
+    by_line = {u["line"]: u for u in plan.users}
+    assert plan.targets[mine.id]["disabled"] and not plan.targets[other.id]["disabled"]
+    assert "создана не синхронизацией с «По Делу»" in by_line[2]["warnings"][0]
+    assert not plan.targets[service.id]["disabled"] and "служебная" in by_line[3]["warnings"][0]
+    assert not plan.targets[other.id]["adopt"], "отключённый в «По Делу» сотрудник AD не переходит к «По Делу»"

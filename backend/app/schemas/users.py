@@ -99,11 +99,19 @@ class UserOut(Schema):
     has_avatar: bool = False
 
 
+class InboxBadgeOut(Schema):
+    available: bool = False
+    pending: int = 0
+
+
 class MeOut(UserOut):
     avatar: str | None = None
     csrf_token: str = ""
     # Действующий доступ (ADR-0009): интерфейс скрывает недоступные разделы и кнопки
     effective_access: dict[str, Any] = {}
+    # «Входящие данные» (ADR-0011): доступны ли (data.manage или право применять набор) и сколько ожидающих
+    # элементов пользователь может применить — счётчик в меню без отдельных запросов
+    inbox: InboxBadgeOut = Field(default_factory=InboxBadgeOut)
 
 
 class UsersSummary(Schema):

@@ -9,16 +9,16 @@ export { LEVEL_LABELS }
  * Права — действующий доступ из /api/auth/me (effective_access, ADR-0009): уровни служб, область
  * структуры, классы данных, глубина, исходные записи, выгрузка. Интерфейс по ним скрывает разделы
  * и кнопки; сервер всё равно проверяет каждый запрос сам.
+ *
+ * «Входящие данные» — тоже из /api/auth/me: inbox.available (data.manage или право применять набор)
+ * и inbox.pending — сколько ожидающих элементов пользователь может применить (счётчик в меню).
  */
-let inboxCheck = null
+let inboxRefresh = null
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
     loaded: false,
-    // Доступ к «Входящим данным»: null — ещё не известен (см. loadInboxAccess)
-    inbox: null,
-    inboxPending: 0,
   }),
   getters: {
     isLoggedIn: (s) => !!s.user,
@@ -51,50 +51,40 @@ export const useAuthStore = defineStore('auth', {
     dataClasses() {
       return this.access?.data_classes || ['operational']
     },
+    /** «Входящие данные» доступны (с сервера: data.manage или право применять хотя бы один набор). */
+    inbox() {
+      return !!this.user?.inbox?.available || this.hasCapability('data.manage')
+    },
+    /** Ожидающие элементы, которые пользователь может применить или отклонить. */
+    inboxPending: (s) => Number(s.user?.inbox?.pending) || 0,
   },
   actions: {
     setUser(user) {
-      if (user?.id !== this.user?.id) {
-        this.inbox = null
-        this.inboxPending = 0
-        inboxCheck = null
-      }
+      if (user?.id !== this.user?.id) inboxRefresh = null
       this.user = user
       this.loaded = true
       setCsrfToken(user?.csrf_token || '')
     },
-    /**
-     * «Входящие данные» доступны с полномочием data.manage и тем, кто применяет хотя бы один набор
-     * (редакторы служб, ведущие структуру и отчёты) — это знает сервер: /api/inbox/datasets отвечает
-     * наборами с can_apply или 403. Ответ запоминается до смены пользователя; заодно — сколько ждут.
-     */
-    async loadInboxAccess({ force = false } = {}) {
+    /** Доступ к «Входящим данным» — уже в профиле (/api/auth/me): отдельных запросов нет. */
+    async loadInboxAccess() {
       if (!this.user || this.mustChangePassword) return false
-      if (!force && this.inbox !== null) return this.inbox
-      if (!force && inboxCheck) return inboxCheck
-      inboxCheck = (async () => {
-        let allowed = this.hasCapability('data.manage')
-        if (!allowed) {
-          try {
-            const meta = await api.get('/inbox/datasets', null, { silent: true })
-            allowed = !!(meta?.can_manage || meta?.datasets?.some((d) => d.can_apply))
-          } catch {
-            allowed = false
-          }
-        }
-        if (allowed) {
-          try {
-            this.inboxPending = (await api.get('/inbox', { status: 'pending', page_size: 1 }, { silent: true }))?.counts?.pending || 0
-          } catch {}
-        }
-        this.inbox = allowed
-        return allowed
-      })()
-      try {
-        return await inboxCheck
-      } finally {
-        inboxCheck = null
+      return this.inbox
+    },
+    /**
+     * Обновить счётчик «ожидают» (и доступ) после применения, отклонения или загрузки — тем же лёгким
+     * /api/auth/me. Одновременные вызовы сливаются в один запрос.
+     */
+    async refreshInbox() {
+      if (!this.user) return this.inboxPending
+      if (!inboxRefresh) {
+        const id = this.user.id
+        inboxRefresh = api.get('/auth/me', null, { silent: true })
+          .then((me) => { if (me?.id === id && this.user?.id === id) this.user = { ...this.user, inbox: me.inbox } })
+          .catch(() => {})
+          .finally(() => { inboxRefresh = null })
       }
+      await inboxRefresh
+      return this.inboxPending
     },
     async load() {
       try {
