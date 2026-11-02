@@ -16,7 +16,12 @@
    адреса), singleton, order (место в выборе вида и среди карточек: «По Делу» 10, «Пульс» 20, Jira 30,
    Confluence 40, Bitrix24 50, Exchange 60, 1С 70, папка 80), counter_labels ({"tasks": "задач в списке"} —
    подписи счётчиков RunResult.counters для журнала запусков; общие — значения, файлы во «Входящие», статусы —
-   подписаны каркасом base.COMMON_COUNTER_LABELS; счётчик без подписи интерфейс не показывает), admin_only и
+   подписаны каркасом base.COMMON_COUNTER_LABELS; счётчик без подписи интерфейс не показывает), detail_labels
+   ({"entity_sets": "Опубликовано наборов OData"} — подписи ключей подробностей проверки CheckResult.details, и ключей
+   вложенных записей тоже; общие — режим, версия, учётная запись, ключ, права, подразделения, списки — подписаны
+   base.COMMON_DETAIL_LABELS; заголовок записи — title, name, label, displayName, id, login — без подписи: «Название
+   (id)»), technical_details (служебные ключи — внутренние номера, сырые ответы: их интерфейс прячет в свёрнутые
+   «Технические подробности», как и неподписанные; code — общий служебный), admin_only и
    admin_only_reason (вид, который отдаёт наружу данные, недоступные пользователю с integrations.manage, —
    Confluence публикует полный отчёт: создаёт, настраивает, проверяет, запускает и удаляет только
    администратор, остальным карточка видна только для чтения с «Только администратор: <причина>»).
@@ -25,8 +30,15 @@
    classmethod secret_url (у «По Делу» — «адрес → адрес для запросов сервера», у Exchange — адрес выбранного
    способа подключения) и перечислите поля, от которых он зависит, в secret_url_fields: /kinds отдаёт их,
    и форма предупреждает до сохранения, что после их изменения секреты нужно ввести заново. Методы:
-   - check() → CheckResult(ok, message, details): адрес, доступ, версия. Сеть — только через self.http();
-     ошибки — IntegrationError (каркас превращает их в {ok: false, message}: подробно — администратору);
+   - check() → CheckResult(ok, message, details, warnings): адрес, доступ, версия. Сеть — только через self.http();
+     ошибки — IntegrationError (каркас превращает их в {ok: false, message}: подробно — администратору).
+     Работает, но не всё (у ключа нет области для одного из действий, показатель будет создан при первом запуске,
+     строка сопоставления не сработает) — ok=True, короткое message («Подключено к … как …») и warnings — по фразе
+     на замечание, без «Внимание:» и «Проверьте:» в message: интерфейс показывает «Подключено с замечаниями» со
+     списком, подключение считается проверенным. Действие не сможет выполниться (нет папки, куда переносить
+     письма) — это не замечание, а ok=False. В details — сведения (версия, учётная запись, списки), не замечания;
+     каждый ключ подписан в detail_labels или отмечен в technical_details (тесты проверяют это для каждой проверки —
+     tests/conftest.assert_details_labelled);
    - run(action, ctx) → RunResult.ok(message, counters={…}, items=[…]) / RunResult.partial(…) /
      RunResult.failed(error). Исключение IntegrationError или AppError — запуск «ошибка» с текстом.
    - validate_config(config) (classmethod) — переопределите для связей полей (вызовите super()).
@@ -40,9 +52,12 @@
    вебхука в пути адреса у Bitrix24) — HttpClient и runner заменят эти части на «…».
 
 2. Настройки — кортеж Field(key, label, type, hint, required, secret, options, default, placeholder,
-   min, max, show_if). Типы: string · text · url · password · int · bool · select · multiselect · list ·
-   time · json (разобранный JSON: списки правил и запросов, до 64 КБ). secret=True — поле шифруется,
-   в API не возвращается (только secret_fields: какие заданы).
+   min, max, show_if, placeholder_if). Типы: string · text · url · password · int · bool · select · multiselect ·
+   list · time · json (разобранный JSON: списки правил и запросов, до 64 КБ). secret=True — поле шифруется,
+   в API не возвращается (только secret_fields: какие заданы). placeholder_if — {поле: {значение: заполнитель}}:
+   заполнитель зависит от другого поля, как show_if — видимость (у «По Делу» в режиме ключа «Список задач с
+   данными» — «пусто — все списки ключа», а у служебной учётной записи — пример названия списка). Значение
+   подробности проверки с ключом поля-выбора (mode) интерфейс показывает подписью варианта.
    Поле verify_tls (bool, default True) по соглашению управляет проверкой сертификата в self.http().
    Пример: Field("instance", "Тип", "select", options=(Option("cloud", "Cloud"), Option("server", "Server")),
    required=True), Field("login", "Email", show_if={"instance": ("cloud",)}),

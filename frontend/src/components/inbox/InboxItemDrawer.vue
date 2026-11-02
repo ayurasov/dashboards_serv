@@ -237,14 +237,14 @@ async function downloadFile() {
     </div>
 
     <template v-if="item" #footer>
-      <!-- Подвал: «Скачать», подсказка (сжимается и переносится), кнопки действий — одной группой, без переноса
-           текста; не помещается — группа целиком уходит на следующую строку, на телефоне — во всю ширину -->
+      <!-- Подвал: подсказка к действиям — своей строкой над кнопками (рядом с ними ей не хватало места, и кнопки
+           уходили на вторую строку даже на широком экране); ниже — «Скачать» и кнопки действий одной группой, без
+           переноса текста. При ширине до 720 px подсказки нет, на телефоне кнопки — во всю ширину -->
       <div class="foot-bar" data-testid="inbox-footer">
+        <p v-if="applyHint" class="foot-hint" data-testid="inbox-footer-hint">{{ applyHint }}</p>
         <button v-if="item.actions.download" type="button" class="btn btn-ghost foot-download" :disabled="!!busy" data-testid="inbox-download" @click="downloadFile">
           <AppIcon name="download" :size="15" /><span class="hide-md">Скачать исходный файл</span><span class="show-md">Файл</span>
         </button>
-        <span v-if="applyHint" class="foot-hint">{{ applyHint }}</span>
-        <span v-else class="spacer" />
         <div class="foot-actions">
           <button v-if="item.actions.reject" type="button" class="btn btn-danger" :disabled="!!busy" data-testid="inbox-reject" @click="rejectOpen = true">Отклонить</button>
           <button v-if="item.actions.retry && item.status !== 'received'" type="button" class="btn" :disabled="!!busy" data-testid="inbox-retry" @click="openRetry">
@@ -320,7 +320,7 @@ async function downloadFile() {
 .no-plan, .note { font-size: var(--fs-sm); }
 .foot-bar { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .foot-download { flex: 0 0 auto; }
-.foot-hint { flex: 1 1 180px; min-width: 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); text-align: right; }
+.foot-hint { flex: 1 1 100%; min-width: 0; margin: 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
 .foot-actions { flex: 0 0 auto; margin-left: auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
 .foot-actions .btn { flex: 0 0 auto; white-space: nowrap; }
 .danger { background: var(--light-red); border-color: var(--light-red); }

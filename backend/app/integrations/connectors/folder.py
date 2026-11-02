@@ -22,6 +22,13 @@ class FolderConnector(Connector):
     counter_labels = {"taken": "взято файлов", "applied": "применено", "pending": "ждут подтверждения",
                       "duplicates": "повторов", "errors": "ошибок", "waiting": "дописываются",
                       "skipped": "пропущено"}
+    # Подробности проверки — состояние папки (inbox_folder.status): подпапки наборов и параметры распознавания —
+    # справочные, они на вкладке «Папка» экрана «Входящие»
+    detail_labels = {"enabled": "Папка задана (INBOX_DIR)", "path": "Путь", "exists": "Папка существует",
+                     "writable": "Запись разрешена", "waiting_files": "Файлов ждут разбора",
+                     "settle_seconds": "Ожидание дописывания файла, с", "max_mb": "Предел размера файла, МБ",
+                     "retention_days": "Хранение исходных файлов, дней"}
+    technical_details = ("folders", "detect")
     actions = (Action("scan", "Разобрать папку",
                       "Забрать файлы, которые не меняются дольше INBOX_SETTLE_SECONDS, во входящие"),)
 

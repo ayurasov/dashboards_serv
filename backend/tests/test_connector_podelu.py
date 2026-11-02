@@ -487,7 +487,7 @@ def test_check_logs_in_reads_version_rights_lists_and_logs_out(admin, fake):
     details = check["details"]
     assert details["lists"] == [{"id": "L1", "title": "Данные для дашбордов"}, {"id": "L2", "title": "Прочее"}]
     assert details["data_list"] == {"id": "L1", "title": "Данные для дашбордов", "comments": True}
-    assert details["capabilities"] == ["org.manage", "users.manage"] and details["missing"] == []
+    assert details["capabilities"] == ["org.manage", "users.manage"] and check["warnings"] == []
     assert fake.logins == 1 and fake.logouts == 1
     login = next(r for r in fake.server.requests if r.path == "/api/auth/login")
     assert login.headers["x-csrf-token"] and login.headers["referer"] == fake.server.url + "/"
@@ -503,7 +503,7 @@ def test_check_reports_exactly_what_is_missing(admin, fake):
     assert not check["ok"]
     assert "не хватает: полномочие «Ведёт учётные записи» (users.manage); доступ к списку «Закрытый список»" \
         in check["message"]
-    assert check["details"]["missing"][0] == "полномочие «Ведёт учётные записи» (users.manage)"
+    assert "missing" not in check["details"], "чего не хватает — в тексте ошибки"
     assert fake.logouts == 1
     fake.account["capabilities"] = []
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
@@ -515,7 +515,12 @@ def test_check_admin_account_and_disabled_comments_are_warnings(admin, fake):
     fake.lists[0]["settings"] = {"allowComments": False}
     item = _create(admin, fake)
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert check["ok"] and "выключены комментарии" in check["message"] and "администратор «По Делу»" in check["message"]
+    assert check["ok"] and check["message"] == ("Подключено к «По Делу» 1.9.2 как Синхронизация дашбордов, "
+                                                "подразделений: 4, список «Данные для дашбордов»")
+    assert check["warnings"] == [
+        "в списке «Данные для дашбордов» выключены комментарии — задачи не будут отмечаться",
+        "учётная запись — администратор «По Делу»: достаточно полномочий org.manage и users.manage"]
+    assert "warnings" not in check["details"] and check["details"]["admin"] is True
 
 
 def test_check_wrong_password_still_logs_out(admin, fake):
@@ -942,7 +947,7 @@ def test_key_check_reports_version_key_scopes_and_lists(admin, fake):
     assert details["key"] == {"name": "Дашборды", "app": "dashboards"} and details["scopes"] == ALL_SCOPES
     assert details["lists"] == [{"id": "L1", "title": "Данные для дашбордов"}, {"id": "L2", "title": None},
                                 {"id": "L-gone", "title": None}], "названия — по задачам; список без задач — id"
-    assert details["missing"] == []
+    assert check["warnings"] == [] and "missing" not in details
     probes = [r.query for r in fake.server.requests if r.path == f"{V1}/tasks"]
     assert probes[0] == {"limit": ["200"]} and {"listId": ["L2"], "limit": ["1"]} in probes
     requests = _key_requests(fake)
@@ -962,14 +967,17 @@ def test_key_check_lists_what_is_missing(admin, fake):
     item = _create_key(admin, fake)
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert check["ok"], "ключ только для файлов задач — «Забрать данные из задач» работает"
-    assert ("Не хватает: область «Структура компании» (org.read) — для «Синхронизировать структуру»; область "
-            "«Сотрудники» (users.read) — для сотрудников в «Синхронизировать структуру»; область «Комментарии к "
-            "задачам» (tasks.comment) — для «Отмечать задачу комментарием» — добавьте ключу: «По Делу» → «Настройки "
-            "→ Интеграции → Ключи интеграций»") in check["message"]
+    assert check["message"] == "Подключено к «По Делу» 1.4.5 по ключу «Дашборды», списки ключа: L1", \
+        "чего не хватает — замечаниями, не в сообщении (список без задач — по id)"
+    assert check["warnings"] == [
+        "не хватает области «Структура компании» (org.read) — для «Синхронизировать структуру»",
+        "не хватает области «Сотрудники» (users.read) — для сотрудников в «Синхронизировать структуру»",
+        "не хватает области «Комментарии к задачам» (tasks.comment) — для «Отмечать задачу комментарием»",
+        "добавьте области ключу: «По Делу» → «Настройки → Интеграции → Ключи интеграций»"]
     assert not any(r.path == f"{V1}/org/export" for r in fake.server.requests)
     admin.patch(f"/api/integrations/{item['id']}", json={"config": {"mark_processed": False}})
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert "tasks.comment" not in check["message"], "отметка выключена — область комментариев не нужна"
+    assert not any("tasks.comment" in w for w in check["warnings"]), "отметка выключена — область комментариев не нужна"
     # Ни одно действие не работает — проверка не пройдена
     fake.keys[KEY].update(scopes=["users.read"], listIds=[])
     check = admin.post(f"/api/integrations/{item['id']}/check").json()

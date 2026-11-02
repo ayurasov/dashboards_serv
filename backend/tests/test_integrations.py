@@ -319,6 +319,46 @@ def test_kinds_order_and_counter_labels(admin):
     assert "прокси" in imap["hint"] and "напрямую" in imap["hint"], "IMAP не ходит через прокси HTTP"
 
 
+def test_kinds_detail_labels_and_placeholder_if(admin):
+    """Подписи подробностей проверки — общие каркаса и свои коннектора, служебные ключи — отдельным списком; заполнитель
+    поля — по значению другого поля (placeholder_if)."""
+    by_kind = {k["kind"]: k for k in admin.get("/api/integrations/kinds").json()}
+    for kind in by_kind.values():
+        assert kind["detail_labels"]["version"] == "Версия" or kind["kind"] == "jira", "общие подписи каркаса"
+        assert "code" in kind["technical_details"], "код ошибки — служебный"
+        assert all(f["placeholder_if"] is None or isinstance(f["placeholder_if"], dict) for f in kind["fields"])
+    assert by_kind["jira"]["detail_labels"]["version"] == "Версия Jira", "свои подписи сильнее общих"
+    assert by_kind["podelu"]["detail_labels"]["scopes"] == "Области ключа"
+    assert by_kind["bitrix24"]["detail_labels"]["scopes"] == "Права вебхука"
+    assert "user_id" in by_kind["bitrix24"]["technical_details"] and "app" in by_kind["podelu"]["technical_details"]
+    data_list = next(f for f in by_kind["podelu"]["fields"] if f["key"] == "data_list")
+    assert data_list["placeholder"] == "Данные для дашбордов"
+    assert data_list["placeholder_if"] == {"mode": {"key": "пусто — все списки ключа"}}
+
+
+def test_check_warnings_are_listed_and_scrubbed(admin, demo, fake, monkeypatch, db):
+    """Проверка с замечаниями: ok, короткое сообщение, замечания списком (без секретов), подключение — проверено."""
+    def check(self):
+        with self.client() as c:
+            me = c.get_json("api/me")
+        return CheckResult(True, f"Подключено как {me['login']}", {"version": me["version"]},
+                           warnings=["нет права на показатели", f"токен {TOKEN} скоро истекает", ""])
+
+    monkeypatch.setattr(DemoConnector, "check", check)
+    item = _create(admin, fake)
+    result = admin.post(f"/api/integrations/{item['id']}/check").json()
+    assert result["ok"] and result["message"] == "Подключено как svc"
+    assert result["warnings"] == ["нет права на показатели", "токен … скоро истекает"], "пустые — пропускаются"
+    assert TOKEN not in str(result)
+    assert admin.get(f"/api/integrations/{item['id']}").json()["verified_at"], "с замечаниями — проверено"
+    entry = db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "integration", AuditEntry.action == "check")
+                       .order_by(AuditEntry.id.desc())).first()
+    assert entry.summary == "Проверка подключения «Демо»: успешно, с замечаниями"
+    plain = admin.post("/api/integrations/check", json={"kind": "demo", "config": {"base_url": fake.url, "login": "s"},
+                                                        "secrets": {"token": "wrong"}}).json()
+    assert not plain["ok"] and plain["warnings"] == []
+
+
 def test_cards_follow_kind_order(admin, db):
     for kind, name in (("folder", "А-папка"), ("jira", "Я-джира"), ("jira", "Б-джира"), ("podelu", "Ю-по-делу")):
         db.add(Integration(kind=kind, name=name, enabled=False, config={}, schedule=[], state={}, last_error=""))

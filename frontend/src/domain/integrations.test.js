@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  MAX_SCHEDULES, SCOPES, adminOnlyFor, allowedHostsHint, bindingChanges, bindingFields, canAddSchedule, checkDetails, checkHint, currentError, curlExample,
-  entryLabel, fieldVisible, healthInfo, initialSecrets, initialValues, intervalText, isLongText, isMonospace, isWideField, jsonRows, jsonText, kindIcon,
+  MAX_SCHEDULES, SCOPES, adminOnlyFor, allowedHostsHint, bindingChanges, bindingFields, canAddSchedule, checkDetails, checkHint, checkState, checkWarnings,
+  currentError, curlExample, entryLabel, fieldPlaceholder, fieldVisible, inlineLabel, recordText, healthInfo, initialSecrets, initialValues, intervalText, isLongText, isMonospace, isWideField, jsonRows, jsonText, kindIcon,
   newScheduleEntry, normalizeUrl, parseJsonField, pingExample, quoted, richBlocks, richPreview, rebindSecrets, runCounters, runCountersText, runDuration,
   runStatus, rateLimitText, scheduleDraft, scheduleEntries, scheduleErrors, scheduleLabel, schedulePayload, scheduledActions, settingsPayload, shortError,
   sortIntegrations, toConfigValue, toFormValue, toggleWeekday, urlChanged, validateSettings, visibleFields,
@@ -308,12 +308,85 @@ describe('состояние и журнал запусков', () => {
     expect(checkHint({ ok: false, details: { code: 'host_not_allowed' } }, KIND)).toMatch(/JIRA_ALLOWED_HOSTS/)
     expect(checkHint({ ok: false, details: { code: 'secret_rebind_required' } }, KIND)).toMatch(/заново/)
     expect(checkHint({ ok: false, details: {} }, KIND)).toBe('')
-    expect(checkDetails({ code: 'x', version: '9.4', empty: '', nested: { a: 1 } })).toEqual([{ key: 'version', value: '9.4' }, { key: 'nested', value: '{"a":1}' }])
-    expect(checkDetails({ ok: true, folders: [{ a: 1 }, { a: 2 }], tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] })).toEqual([
-      { key: 'ok', value: 'да' }, { key: 'folders', value: '2 записи' }, { key: 'tags', value: 'a, b, c, d, e, f и ещё 2' },
-    ])
+    // Без описания вида — общие подписи каркаса; неподписанное — в технических подробностях, код ошибки не показывается
+    expect(checkDetails({ code: 'x', version: '9.4', empty: '', missing: [], nested: { a: 1 } })).toEqual({
+      main: [{ key: 'version', label: 'Версия', text: '9.4', items: null }],
+      technical: [{ key: 'nested', value: '{"a":1}' }],
+    })
     expect(kindIcon('jira')).toBe('ticket')
     expect(kindIcon('новое')).toBe('plug')
+  })
+})
+
+describe('итог проверки: замечания и подробности подписями', () => {
+  // Описание вида «По Делу» и «Пульса» — как в ответе /kinds (detail_labels, technical_details, поле mode)
+  const PODELU = {
+    kind: 'podelu',
+    fields: [{ key: 'mode', type: 'select', options: [{ value: 'key', label: 'Ключ интеграции (По Делу 1.4.5 и новее)' }, { value: 'session', label: 'Служебная учётная запись' }] }],
+    detail_labels: { mode: 'Режим подключения', version: 'Версия', key: 'Ключ', scopes: 'Области ключа', departments: 'Подразделений', lists: 'Доступные списки задач', data_list: 'Список задач с данными', comments: 'Комментарии', user: 'Служебная учётная запись', role: 'Роль' },
+    technical_details: ['code', 'app'],
+  }
+
+  it('ok — «Подключено»; ok с замечаниями — «Подключено с замечаниями»; иначе — ошибка', () => {
+    expect(checkState({ ok: true, warnings: [] })).toMatchObject({ tone: 'ok' })
+    expect(checkState({ ok: true })).toMatchObject({ tone: 'ok' }, 'сервер без warnings')
+    expect(checkState({ ok: true, warnings: ['у ключа нет права'] })).toMatchObject({ tone: 'warn', title: 'Подключено с замечаниями' })
+    expect(checkState({ ok: false, warnings: ['x'] })).toMatchObject({ tone: 'bad' })
+    expect(checkWarnings({ warnings: ['не хватает области «Сотрудники»', '', '  ', '«crm.revenue» нет в каталоге'] }))
+      .toEqual(['Не хватает области «Сотрудники»', '«crm.revenue» нет в каталоге'])
+    expect(checkWarnings(null)).toEqual([])
+  })
+
+  it('подробности «По Делу» по ключу: подписи, режим — подписью варианта, записи — «Название (id)», служебное — отдельно', () => {
+    const details = {
+      mode: 'key', version: '1.4.5', key: { name: 'Дашборды', app: 'dashboards' }, scopes: ['org.read', 'tasks.attachments.read'],
+      departments: null, lists: [{ id: 'L1', title: 'Данные для дашбордов' }, { id: 'L2', title: null }],
+      data_list: { id: 'L1', title: 'Данные для дашбордов', comments: true }, code: 'auth', raw: { a: 1 },
+    }
+    const { main, technical } = checkDetails(details, PODELU)
+    expect(main.map((d) => [d.label, d.text || d.items])).toEqual([
+      ['Режим подключения', 'Ключ интеграции (По Делу 1.4.5 и новее)'],
+      ['Версия', '1.4.5'],
+      ['Ключ', 'Дашборды'],
+      ['Области ключа', 'org.read, tasks.attachments.read'],
+      ['Доступные списки задач', ['Данные для дашбордов (L1)', 'L2']],
+      ['Список задач с данными', 'Данные для дашбордов (L1) · комментарии: да'],
+    ])
+    expect(main.every((d) => !/^[a-z_]+$/.test(d.label))).toBe(true)
+    expect(technical).toEqual([{ key: 'raw', value: '{"a":1}' }])
+  })
+
+  it('записи: учётная запись — «Имя (логин)», подписи внутри строки — со строчной буквы, сокращения — как есть', () => {
+    const labels = { role: 'Роль в «Пульсе»', projects: 'Проектов', department: 'Подразделение', user_id: 'ID пользователя' }
+    expect(recordText({ login: 'dash-viewer', name: 'Наблюдатель', role: 'viewer' }, labels)).toBe('Наблюдатель (dash-viewer) · роль в «Пульсе»: viewer')
+    expect(recordText({ id: 3, name: 'Внедрение', projects: 3, department: 'АЛМИ Партнер / Проектная служба' }, labels))
+      .toBe('Внедрение (3) · проектов: 3 · подразделение: АЛМИ Партнер / Проектная служба')
+    expect(recordText({ id: 9, name: 'Маркетинг', department: null, secret: 'x' }, labels)).toBe('Маркетинг (9)', 'пустое и неподписанное не показываются')
+    expect(recordText({ id: 1, user_id: 7 }, labels, new Set(['user_id']))).toBe('1', 'служебные ключи записи не показываются')
+    expect(inlineLabel('Версия REST API')).toBe('версия REST API')
+    expect(inlineLabel('ID пользователя')).toBe('ID пользователя')
+    expect(inlineLabel('')).toBe('')
+  })
+
+  it('длинный список записей — по строке на запись, после 30 — «и ещё N»; числа — по-русски', () => {
+    const many = Array.from({ length: 33 }, (_, n) => ({ id: n, name: `Направление ${n}` }))
+    const [entry] = checkDetails({ lists: many, departments: 1200 }).main
+    expect(entry.items).toHaveLength(31)
+    expect(entry.items.at(-1)).toBe('и ещё 3')
+    expect(checkDetails({ departments: 1200 }).main[0].text).toBe('1\u00a0200')
+    expect(checkDetails(null)).toEqual({ main: [], technical: [] })
+  })
+})
+
+describe('заполнитель по значению другого поля (placeholder_if)', () => {
+  const field = { key: 'data_list', placeholder: 'Данные для дашбордов', placeholder_if: { mode: { key: 'пусто — все списки ключа' } } }
+
+  it('в режиме ключа — «пусто — все списки ключа», иначе — обычный заполнитель', () => {
+    expect(fieldPlaceholder(field, { mode: 'key' })).toBe('пусто — все списки ключа')
+    expect(fieldPlaceholder(field, { mode: 'session' })).toBe('Данные для дашбордов')
+    expect(fieldPlaceholder(field, {})).toBe('Данные для дашбордов')
+    expect(fieldPlaceholder({ key: 'x', placeholder_if: { flag: { true: 'да' } } }, { flag: true })).toBe('да', 'значение сравнивается строкой')
+    expect(fieldPlaceholder({ key: 'x' }, { mode: 'key' })).toBe('')
   })
 })
 

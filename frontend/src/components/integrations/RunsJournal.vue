@@ -9,8 +9,9 @@ import { runCounters, runDuration, runStatus } from '@/domain/integrations'
 import { formatDateTime, formatNumber, formatRelative } from '@/utils/format'
 
 /**
- * Журнал запусков подключения: повод, кто запустил, время, итог (в том числе «Запуск прерван»), счётчики сводки
- * подписями вида подключения (counter_labels; счётчик без подписи не показывается), текст ошибки.
+ * Журнал запусков подключения: повод, кто запустил, время, итог (в том числе «Запуск прерван»), сводка — сообщение
+ * запуска и текст ошибки; счётчики подписями вида подключения (counter_labels; счётчик без подписи не показывается)
+ * — под «Подробности» строки: те же числа уже есть в сообщении. Запуск без сообщения показывает счётчики сразу.
  */
 const props = defineProps({
   integration: { type: Object, required: true },
@@ -23,6 +24,7 @@ const runs = computed(() => data.value || [])
 const actionLabel = (key) => (props.kind?.actions || []).find((a) => a.key === key)?.label || key
 const labels = computed(() => props.kind?.counter_labels || props.integration.connector?.counter_labels || null)
 const counters = (run) => runCounters(run.summary, { labels: labels.value })
+const hasMessage = (run) => !!run.message && run.message !== run.error
 </script>
 
 <template>
@@ -53,11 +55,17 @@ const counters = (run) => runCounters(run.summary, { labels: labels.value })
             <td><span class="badge" :class="`badge-${runStatus(r).tone}`">{{ runStatus(r).label }}</span></td>
             <td class="num"><span class="lbl">Длительность: </span>{{ runDuration(r) }}</td>
             <td class="sum">
-              <p v-if="r.message && r.message !== r.error">{{ r.message }}</p>
-              <p v-if="counters(r).length" class="counters" data-testid="run-counters">
+              <p v-if="hasMessage(r)" class="msg" data-testid="run-message">{{ r.message }}</p>
+              <p v-if="r.error" class="err">{{ r.error }}</p>
+              <details v-if="counters(r).length && (hasMessage(r) || r.error)" class="more" data-testid="run-more">
+                <summary>Подробности · {{ counters(r).length }}</summary>
+                <p class="counters" data-testid="run-counters">
+                  <span v-for="c in counters(r)" :key="c.key">{{ c.label }}: <b class="num">{{ formatNumber(c.value) }}</b></span>
+                </p>
+              </details>
+              <p v-else-if="counters(r).length" class="counters" data-testid="run-counters">
                 <span v-for="c in counters(r)" :key="c.key">{{ c.label }}: <b class="num">{{ formatNumber(c.value) }}</b></span>
               </p>
-              <p v-if="r.error" class="err">{{ r.error }}</p>
             </td>
           </tr>
         </tbody>
@@ -73,9 +81,14 @@ const counters = (run) => runCounters(run.summary, { labels: labels.value })
 .top { margin-bottom: 12px; }
 .bordered { border: 1px solid var(--border); border-radius: 12px; }
 .runs td { vertical-align: top; font-size: var(--fs-sm); }
-.sum { min-width: 240px; }
+.sum { min-width: 200px; }
 .sum p + p { margin-top: 3px; }
+.msg { overflow-wrap: anywhere; }
 .counters { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: var(--fs-xs); color: var(--text-2); }
+.more { margin-top: 3px; }
+.more summary { width: fit-content; font-size: var(--fs-xs); color: var(--muted); cursor: pointer; }
+.more summary:hover { color: var(--text-2); }
+.more .counters { margin-top: 5px; }
 .err { color: var(--light-red); font-size: var(--fs-xs); overflow-wrap: anywhere; white-space: pre-line; }
 .lbl { display: none; color: var(--muted); }
 @media (max-width: 760px) {

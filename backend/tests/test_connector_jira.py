@@ -289,7 +289,8 @@ def test_check_server_with_personal_token(admin, server_jira):
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert check["ok"], check
     assert check["message"].startswith("Подключено как Тестовый Пользователь · Jira 9.12.2 (Server) · REST API 2")
-    assert "«jira.resolved» нет в каталоге" in check["message"] and check["details"]["rules"] == 3
+    assert check["message"] == "Подключено как Тестовый Пользователь · Jira 9.12.2 (Server) · REST API 2"
+    assert any("«jira.resolved» нет в каталоге" in w for w in check["warnings"]) and check["details"]["rules"] == 3
     assert server_jira.requests[0].headers["authorization"] == f"Bearer {TOKEN}"
     assert {r.path for r in server_jira.requests} == {"/rest/api/2/myself", "/rest/api/2/serverInfo"}
 
@@ -332,7 +333,7 @@ def test_check_wrong_instance_type(admin, cloud_jira, server_jira):
     server_jira.mode, server_jira.deployment = "server", "Cloud"
     check = admin.post("/api/integrations/check", json={"kind": "jira", "config": {
         "base_url": server_jira.url, "instance": "server", "rules": RULES}, "secrets": {"token": TOKEN}}).json()
-    assert check["ok"] and "выберите тип подключения «Cloud»" in check["message"]
+    assert check["ok"] and "это Jira Cloud — выберите тип подключения «Cloud»" in check["warnings"]
 
 
 def test_allowed_hosts(admin, server_jira, monkeypatch):

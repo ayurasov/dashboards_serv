@@ -93,6 +93,7 @@ class ExchangeConnector(Connector):
     order = 60
     counter_labels = {"messages": "писем", "processed": "писем от разрешённых отправителей",
                       "skipped_sender": "писем других отправителей"}
+    detail_labels = {"folder": "Папка", "total": "Писем в папке", "unread": "Непрочитанных"}
     title = TITLE
     description = ("Вложения писем выделенной папки почтового ящика → «Входящие» (отправитель из разрешённого "
                    "списка); письмо помечается прочитанным и переносится. Exchange Server (EWS), Microsoft 365 "
@@ -219,10 +220,12 @@ class ExchangeConnector(Connector):
         with self.box() as box:
             total, unread = box.stats()
             move_to = self.config.get("move_to")
-            if move_to and not box.folder_exists(move_to):
-                return CheckResult(False, f"Ящик доступен, но папки «{move_to}» для обработанных писем нет — создайте "
-                                          "её или исправьте настройку", {"total": total, "unread": unread})
+            # Нет папки для обработанных — не замечание, а ошибка: перенос первого же письма остановил бы запуск
+            no_target = bool(move_to) and not box.folder_exists(move_to)
         details = {"mode": mode, "folder": self.folder, "total": total, "unread": unread}
+        if no_target:
+            return CheckResult(False, f"Ящик доступен, но папки «{move_to}» для обработанных писем нет — создайте "
+                                      "её или исправьте настройку", details)
         return CheckResult(True, f"Ящик доступен ({MODES[mode]}): в папке «{self.folder}» писем {total}, "
                                  f"непрочитанных {unread}", details)
 

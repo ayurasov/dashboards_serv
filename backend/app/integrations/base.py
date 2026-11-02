@@ -15,7 +15,9 @@
         def check(self) -> CheckResult:
             with self.http() as client:
                 meta = client.get_json("api/meta")
-            return CheckResult(True, f"Подключено: {meta.get('name')}")
+            warnings = [] if meta.get("stats") else ["нет права на показатели — заблокированные задачи не считаются"]
+            return CheckResult(True, f"Подключено: {meta.get('name')}", {"version": meta.get("version")},
+                               warnings=warnings)
 
         def run(self, action: str, ctx: RunContext) -> RunResult:
             ...
@@ -70,6 +72,22 @@ COMMON_COUNTER_LABELS: dict[str, str] = {
     **INBOX_STATUS_COUNTER_LABELS,
 }
 
+# Подписи подробностей проверки (CheckResult.details), общие для коннекторов (Connector.detail_labels дополняет
+# и уточняет их). Интерфейс показывает в «Подробностях» только подписанные ключи; ключи вложенных записей
+# ({"id", "title"} списков, {"login", "name"} учётной записи) подписываются тем же словарём, а название и id записи
+# (title, name, label, displayName, id, login) — её заголовок, без подписи. Неподписанные ключи и ключи из
+# technical_details — в свёрнутых «Технических подробностях»
+COMMON_DETAIL_LABELS: dict[str, str] = {
+    "mode": "Режим подключения", "version": "Версия", "user": "Учётная запись", "key": "Ключ", "scopes": "Права",
+    "departments": "Подразделений", "lists": "Списки задач", "projects": "Проектов", "role": "Роль",
+    "department": "Подразделение",
+}
+# Служебные ключи подробностей (код ошибки, внутренние номера, сырые ответы): не в «Подробностях», а в «Технических
+# подробностях»; code (код ошибки для подсказки интерфейса) интерфейс не показывает вовсе
+COMMON_TECHNICAL_DETAILS: tuple[str, ...] = ("code",)
+# Ключи вложенной записи, из которых складывается её заголовок «Название (id)», — подписи не нужны
+DETAIL_TITLE_KEYS: tuple[str, ...] = ("title", "name", "label", "displayName", "id", "login")
+
 
 # ---------------------------------------------------------------- описание настроек
 
@@ -85,7 +103,9 @@ class Field:
     multiselect · list (список строк) · time (ЧЧ:ММ) · json (разобранное значение JSON — список правил,
     запросов; принимает и JSON-текст, до 64 КБ). secret=True — значение шифруется и не
     возвращается (в API — только признак «задано»). show_if — {поле: [значения]}: показывать поле,
-    только когда другое поле имеет одно из значений (например, логин — только для типа «cloud»)."""
+    только когда другое поле имеет одно из значений (например, логин — только для типа «cloud»).
+    placeholder_if — {поле: {значение: заполнитель}}: заполнитель, когда другое поле имеет это значение (у «По Делу»
+    в режиме ключа пустой список задач — все списки ключа); иначе — placeholder."""
 
     key: str
     label: str
@@ -99,6 +119,7 @@ class Field:
     min: int | None = None
     max: int | None = None
     show_if: dict[str, tuple[str, ...]] | None = None
+    placeholder_if: dict[str, dict[str, str]] | None = None
 
     def __post_init__(self):
         if self.type not in FIELD_TYPES:  # pragma: no cover - ошибка программиста
@@ -109,7 +130,8 @@ class Field:
                 "required": self.required, "secret": self.secret, "default": self.default,
                 "placeholder": self.placeholder, "min": self.min, "max": self.max,
                 "options": [{"value": o.value, "label": o.label} for o in self.options],
-                "show_if": {k: list(v) for k, v in (self.show_if or {}).items()} or None}
+                "show_if": {k: list(v) for k, v in (self.show_if or {}).items()} or None,
+                "placeholder_if": {k: dict(v) for k, v in (self.placeholder_if or {}).items()} or None}
 
     def visible(self, config: dict) -> bool:
         return not self.show_if or all(config.get(k) in v for k, v in self.show_if.items())
@@ -132,12 +154,23 @@ class Action:
 
 @dataclass
 class CheckResult:
+    """Итог проверки подключения.
+
+    ok — подключение работает: действия можно запускать, подключение можно включить. message — коротко, что
+    проверено («Подключено к «Пульс проекта» 0.6.0 …»), без перечня замечаний. warnings — замечания при ok:
+    подключение работает, но не всё (у ключа нет области для одного из действий, показатель будет создан при первом
+    запуске, строка сопоставления не сработает) — интерфейс показывает «Подключено с замечаниями» со списком;
+    по фразе на замечание, без «Внимание:». При ok=False замечания тоже показываются — под текстом ошибки.
+    details — сведения для «Подробностей» (версия, учётная запись, списки): подписи — Connector.detail_labels."""
+
     ok: bool
     message: str
     details: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        return {"ok": self.ok, "message": self.message, "details": jsonable_encoder(self.details)}
+        return {"ok": self.ok, "message": self.message, "warnings": [str(w) for w in self.warnings if w],
+                "details": jsonable_encoder(self.details)}
 
 
 @dataclass
@@ -388,6 +421,12 @@ class Connector(ABC):
     # Подписи счётчиков журнала запусков (RunResult.counters) по-русски: {"tasks": "задач в списке"}; общие
     # счётчики (значения, файлы во «Входящие», статусы) подписаны каркасом — COMMON_COUNTER_LABELS
     counter_labels: ClassVar[dict[str, str]] = {}
+    # Подписи подробностей проверки (CheckResult.details) по-русски: {"entity_sets": "Опубликовано наборов"}; общие
+    # (режим, версия, учётная запись, ключ …) подписаны каркасом — COMMON_DETAIL_LABELS. Ключи вложенных записей
+    # подписываются тем же словарём (со строчной буквы интерфейс начинает сам)
+    detail_labels: ClassVar[dict[str, str]] = {}
+    # Служебные ключи подробностей (внутренние номера, сырые ответы) — в свёрнутых «Технических подробностях»
+    technical_details: ClassVar[tuple[str, ...]] = ()
     # Только для тестов: не показывается в списке видов
     hidden: ClassVar[bool] = False
 
@@ -408,7 +447,8 @@ class Connector(ABC):
                 "url_field": cls.url_field, "secret_url_fields": list(binding), "singleton": cls.singleton,
                 "allowed_hosts_env": allowed_hosts_env(cls.kind) if cls.url_field or binding else None,
                 "order": cls.order, "admin_only": cls.admin_only, "admin_only_note": cls.admin_only_note(),
-                "counter_labels": cls.all_counter_labels()}
+                "counter_labels": cls.all_counter_labels(), "detail_labels": cls.all_detail_labels(),
+                "technical_details": list(cls.all_technical_details())}
 
     @classmethod
     def admin_only_note(cls) -> str:
@@ -421,6 +461,16 @@ class Connector(ABC):
     def all_counter_labels(cls) -> dict[str, str]:
         """Подписи счётчиков журнала запусков: общие каркаса и свои коннектора (свои сильнее)."""
         return {**COMMON_COUNTER_LABELS, **cls.counter_labels}
+
+    @classmethod
+    def all_detail_labels(cls) -> dict[str, str]:
+        """Подписи подробностей проверки: общие каркаса и свои коннектора (свои сильнее)."""
+        return {**COMMON_DETAIL_LABELS, **cls.detail_labels}
+
+    @classmethod
+    def all_technical_details(cls) -> tuple[str, ...]:
+        """Служебные ключи подробностей проверки: общие каркаса (code) и свои коннектора."""
+        return tuple(dict.fromkeys((*COMMON_TECHNICAL_DETAILS, *cls.technical_details)))
 
     @classmethod
     def binding_fields(cls) -> tuple[str, ...]:
@@ -516,7 +566,8 @@ class Connector(ABC):
     @abstractmethod
     def check(self) -> CheckResult:
         """Проверка подключения: адрес, доступ, версия. Сеть и ответы — через self.http(); ошибки —
-        IntegrationError (каркас превратит в {ok: false, message})."""
+        IntegrationError (каркас превратит в {ok: false, message}). Работает, но не всё — CheckResult(True,
+        короткое сообщение, details, warnings=[…]); ключи details — с подписями (detail_labels)."""
 
     @abstractmethod
     def run(self, action: str, ctx: RunContext) -> RunResult:

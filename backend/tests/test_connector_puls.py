@@ -262,9 +262,10 @@ def test_check_session_reads_version_and_directions(admin, fake):
 def test_check_reports_mapping_problems(admin, fake):
     item = _create(admin, fake, directions="Внедрение = NOPE\nПродажи = PROJ")
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert check["ok"]
-    assert check["details"]["problems"] == ["строка 1 («Внедрение»): подразделение «NOPE» не найдено",
-                                            "направления «Продажи» нет в «Пульсе»"]
+    assert check["ok"] and "Проверьте" not in check["message"]
+    assert check["warnings"] == ["сопоставление, строка 1 («Внедрение»): подразделение «NOPE» не найдено",
+                                 "направления «Продажи» нет в «Пульсе»"]
+    assert "problems" not in check["details"]
 
 
 def test_check_failures(admin, fake):
@@ -442,7 +443,8 @@ def test_key_check_reports_key_rights_and_directions_by_id(admin, fake):
                                 "подразделения (в корень структуры): Маркетинг")
     details = check["details"]
     assert details["key"] == {"name": "Дашборды компании", "scopes": ["projects.read", "projects.stats"]}
-    assert details["stats"] is True and details["total"] == 6 and details["without_direction"] == 1
+    assert details["stats"] is True and details["projects"] == 6 and details["without_direction"] == 1
+    assert check["warnings"] == [] and "total" not in details and "limited" not in details
     assert details["directions"] == [
         {"id": 1, "name": "Внедрение", "projects": 2, "department": "АЛМИ Партнер / Проектная служба"},
         {"id": 2, "name": "Разработка", "projects": 2,
@@ -459,11 +461,16 @@ def test_key_check_without_stats_warns_and_flags_id_lines(admin, fake):
     item = _create_key(admin, fake)
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert check["ok"]
-    assert ("Внимание: у ключа нет права «Показатели проектов» (projects.stats): «Пульс» не отдаёт задачи «в работе» "
-            "и «заблокировано» и id направлений — puls.blocked не обновляется, направления сопоставляются только по "
-            "названию") in check["message"]
-    assert check["details"]["problems"] == ["строка 2 («2»): без права projects.stats направление сопоставляется "
-                                            "только по названию — укажите «Разработка»"]
+    assert check["message"] == ("Подключено к «Пульс проекта» 0.6.0 (ключ интеграции «Дашборды компании», права: "
+                                "projects.read): проектов 6, направлений 3, сопоставлено 2; без подразделения (в "
+                                "корень структуры): Маркетинг"), "замечания — отдельным списком"
+    assert check["warnings"] == [
+        "у ключа нет права «Показатели проектов» (projects.stats): «Пульс» не отдаёт задачи «в работе» и "
+        "«заблокировано» и id направлений — puls.blocked не обновляется, направления сопоставляются только по "
+        "названию",
+        "сопоставление, строка 2 («2»): без права projects.stats направление сопоставляется только по названию — "
+        "укажите «Разработка»"]
+    assert check["details"]["stats"] is False and "warnings" not in check["details"]
 
 
 def test_key_check_failures(admin, fake):
@@ -563,7 +570,7 @@ def test_key_mode_warns_about_200_projects(admin, fake, db):
     item = _create_key(admin, fake)
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
     assert check["ok"] and "проектов в «Пульсе» 250, а API отдаёт не больше 200 — показатели будут посчитаны по " \
-        "первым 200" in check["message"]
+        "первым 200" in check["warnings"]
     run = _run(admin, item)
     assert run["status"] == "ok" and run["summary"]["projects"] == 200
     assert run["message"].endswith(". Возможно, проектов больше 200 — показатели посчитаны по первым 200")

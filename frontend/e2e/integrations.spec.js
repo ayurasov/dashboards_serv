@@ -287,6 +287,83 @@ test('несколько расписаний «По Делу»: структу�
   expect(errors).toEqual([])
 })
 
+test('«По Делу» по ключу: заполнитель списка по режиму, проверка с замечаниями, подробности по-русски, журнал без повторов', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  await page.goto('/admin/integrations')
+  await page.getByTestId('integration-add').click()
+  await page.getByTestId('kind-podelu').click()
+  const editor = page.getByRole('dialog').filter({ hasText: 'Новое подключение' })
+  // Пустой «Список задач с данными» в режиме ключа — все списки ключа; у служебной учётной записи — пример названия
+  const dataList = editor.locator('[data-field=data_list] input')
+  await expect(dataList).toHaveAttribute('placeholder', 'пусто — все списки ключа')
+  await editor.getByTestId('choice-mode-session').check()
+  await expect(dataList).toHaveAttribute('placeholder', 'Данные для дашбордов')
+  await editor.getByTestId('choice-mode-key').check()
+  await expect(dataList).toHaveAttribute('placeholder', 'пусто — все списки ключа')
+
+  // Ответ проверки «По Делу» с ключом без части областей (как у сервера; самой «По Делу» у e2e нет)
+  await page.route('**/api/integrations/check', (route) => route.fulfill({ json: {
+    ok: true, draft: true, checked_at: '2026-11-02T09:00:00',
+    message: 'Подключено к «По Делу» 1.4.5 по ключу «Дашборды — файлы задач», списки ключа: «Данные для дашбордов»',
+    warnings: ['не хватает области «Структура компании» (org.read) — для «Синхронизировать структуру»',
+      'добавьте области ключу: «По Делу» → «Настройки → Интеграции → Ключи интеграций»'],
+    details: { mode: 'key', version: '1.4.5', key: { name: 'Дашборды — файлы задач', app: 'dashboards' }, scopes: ['tasks.attachments.read'],
+      departments: null, lists: [{ id: 'L1', title: 'Данные для дашбордов' }], data_list: null },
+  } }))
+  await editor.getByTestId('field-base_url').fill('https://podelu.company.ru')
+  await editor.getByTestId('secret-key').fill('podelu_e2e-key')
+  await editor.getByTestId('editor-check').click()
+  const result = editor.getByTestId('editor-check-result')
+  await expect(result).toHaveClass(/warn/)
+  await expect(result.locator('.msg')).toHaveText('Подключено с замечаниями')
+  await expect(result.getByTestId('check-message')).toContainText('по ключу «Дашборды — файлы задач»')
+  await expect(result.getByTestId('check-warnings').locator('li')).toHaveText([
+    'Не хватает области «Структура компании» (org.read) — для «Синхронизировать структуру»',
+    'Добавьте области ключу: «По Делу» → «Настройки → Интеграции → Ключи интеграций»',
+  ])
+  // Подробности — подписями вида с сервера (detail_labels); режим — подписью варианта; служебное (app) не видно
+  const details = result.getByTestId('check-details')
+  await details.locator('summary').click()
+  await expect(details).toContainText('Режим подключения')
+  await expect(details).toContainText('Ключ интеграции (По Делу 1.4.5 и новее)')
+  await expect(details).toContainText('Области ключа')
+  await expect(details).toContainText('Данные для дашбордов (L1)')
+  await expect(details).not.toContainText(/\b(mode|scopes|lists|app|dashboards)\b/)
+  await expect(result.getByTestId('check-technical')).toHaveCount(0)
+  await page.unroute('**/api/integrations/check')
+  await editor.getByRole('button', { name: 'Отмена' }).click()
+
+  // Журнал запусков: сообщение — в строке, счётчики — только в раскрытых подробностях запуска
+  const name = uniq('По Делу')
+  const created = await api(page, 'POST', '/integrations', {
+    kind: 'podelu', name, config: { base_url: 'https://podelu.company.ru', mode: 'key' }, secrets: { key: 'podelu_e2e-key' },
+  })
+  try {
+    await page.route(`**/api/integrations/${created.id}/runs*`, (route) => route.fulfill({ json: [{
+      id: 1, integration_id: created.id, action: 'pull', trigger: 'manual', trigger_label: 'Вручную', status: 'ok', status_label: 'Успешно',
+      started_at: '2026-11-02T09:00:00', finished_at: '2026-11-02T09:00:02', username: 'admin', error: '',
+      message: 'Списки ключа «Дашборды» (2): задач с новыми вложениями 1, файлов во «Входящие» 2, уже забранных 0',
+      summary: { tasks: 3, candidates: 1, files: 2, added: 2, structure_item: 7 },
+    }] }))
+    await page.reload()
+    await page.locator(`article[data-integration="${created.id}"]`).getByTestId('integration-journal').click()
+    const journal = page.getByRole('dialog').filter({ hasText: 'Журнал запусков' })
+    const row = journal.getByTestId('runs-table').locator('tbody tr').first()
+    await expect(row.getByTestId('run-message')).toContainText('задач с новыми вложениями 1')
+    await expect(row.getByTestId('run-counters')).toBeHidden()
+    await row.getByTestId('run-more').locator('summary').click()
+    await expect(row.getByTestId('run-counters')).toBeVisible()
+    await expect(row.getByTestId('run-counters')).toContainText('задач просмотрено: 3')
+    await expect(row.getByTestId('run-counters')).not.toContainText('structure')
+    await journal.getByRole('button', { name: 'Закрыть' }).click()
+  } finally {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+    await api(page, 'DELETE', `/integrations/${created.id}`)
+  }
+  expect(errors).toEqual([])
+})
+
 test('«Тип подключения» Jira не обрезается; «Копировать» не закрывает код ключей', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'admin')

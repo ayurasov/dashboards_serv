@@ -245,10 +245,13 @@ def test_check_ok_and_parent(admin, fake):
     assert check["message"] == ("Подключено как Служебная учётная запись · пространство «Отчёты» (REP) · "
                                 "родительская страница «Отчёты компании»")
     assert fake.requests[0].headers["authorization"] == f"Bearer {TOKEN}"
+    assert check["warnings"] == []
     missing = admin.post(f"/api/integrations/{item['id']}/check",
                          json={"config": {"parent_id": "777", "root": "NOPE"}}).json()
-    assert missing["ok"] and "родительская страница 777 не найдена" in missing["message"]
-    assert "подразделение «NOPE» не найдено" in missing["message"]
+    assert missing["ok"]
+    assert missing["message"] == "Подключено как Служебная учётная запись · пространство «Отчёты» (REP)"
+    assert missing["warnings"][0] == "родительская страница 777 не найдена или недоступна"
+    assert "подразделение «NOPE» не найдено" in missing["warnings"][1] and "warnings" not in missing["details"]
 
 
 def test_check_failures(admin, fake):

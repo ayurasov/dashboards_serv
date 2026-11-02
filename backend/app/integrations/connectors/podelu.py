@@ -279,6 +279,7 @@ class PodeluConnector(Connector):
         Field("verify_tls", "Проверять TLS-сертификат", "bool", default=True,
               hint="Выключите только для самоподписанного или корпоративного сертификата"),
         Field("data_list", "Список задач с данными", placeholder="Данные для дашбордов",
+              placeholder_if={"mode": {KEY_MODE: "пусто — все списки ключа"}},
               hint="Ключ интеграции: необязательно — id или название одного из списков ключа; пусто — все списки "
                    "ключа. Служебная учётная запись: id или название списка, в задачи которого кладут выгрузки "
                    "(учётная запись — его участник). Списки — в результате проверки подключения"),
@@ -315,6 +316,13 @@ class PodeluConnector(Connector):
         "tasks": "задач просмотрено", "candidates": "задач с новыми вложениями", "comments": "задач отмечено",
         "comment_errors": "не удалось отметить", "comments_disabled": "не отмечено: комментарии выключены",
     }
+    # Подробности проверки: режим, версия, ключ или учётная запись, права, списки задач
+    detail_labels = {
+        "user": "Служебная учётная запись", "admin": "Администратор «По Делу»", "capabilities": "Полномочия",
+        "scopes": "Области ключа", "lists": "Доступные списки задач", "data_list": "Список задач с данными",
+        "comments": "Комментарии",
+    }
+    technical_details = ("app",)
     # Ключ и пароль уходят на адрес для запросов сервера (если он задан): привязка — к обоим адресам в обоих режимах
     secret_url_fields = ("base_url", "server_url")
 
@@ -418,7 +426,7 @@ class PodeluConnector(Connector):
         details = {
             "mode": SESSION_MODE, "version": version, "user": {"login": user.get("login"), "name": user.get("name")},
             "admin": can["admin"], "capabilities": [r for r in (ORG_RIGHT, USERS_RIGHT) if can[r]],
-            "departments": departments, "missing": missing, "warnings": warnings,
+            "departments": departments,
             "lists": [{"id": x.get("id"), "title": x.get("title")} for x in lists if isinstance(x, dict)],
             "data_list": {"id": chosen.get("id"), "title": chosen.get("title"),
                           "comments": comments_allowed(chosen)} if chosen else None,
@@ -426,14 +434,13 @@ class PodeluConnector(Connector):
         where = f"«{TITLE}» {version}".strip() if version else f"«{TITLE}»"
         if missing:
             return CheckResult(False, f"Вход в {where} как {name} выполнен, но не хватает: " + "; ".join(missing),
-                               details)
+                               details, warnings)
         parts = [f"Подключено к {where} как {name}"]
         if departments is not None:
             parts.append(f"подразделений: {departments}")
         if chosen:
             parts.append(f"список «{chosen.get('title')}»")
-        message = ", ".join(parts) + (f". Внимание: {'; '.join(warnings)}" if warnings else "")
-        return CheckResult(True, message, details)
+        return CheckResult(True, ", ".join(parts), details, warnings)
 
     def check_key(self) -> CheckResult:
         """Ключ: версия, название и области ключа, списки ключа (названия — по задачам), чего не хватает
@@ -451,17 +458,19 @@ class PodeluConnector(Connector):
         version = str(ping.get("version") or "")
         key = ping.get("key") if isinstance(ping.get("key"), dict) else {}
         key_name = api.key_name or "без названия"
-        missing: list[str] = []
+        # Недостающие области: (область, для чего) — в тексте ошибки «не хватает: область …», в замечаниях —
+        # «не хватает области …»
+        lacking: list[tuple[str, str]] = []
         problems: list[str] = []
         if SCOPE_ORG not in scopes:
-            missing.append(f"область {SCOPE_LABELS[SCOPE_ORG]} — для «Синхронизировать структуру»")
+            lacking.append((SCOPE_LABELS[SCOPE_ORG], "для «Синхронизировать структуру»"))
         if SCOPE_USERS not in scopes:
-            missing.append(f"область {SCOPE_LABELS[SCOPE_USERS]} — для сотрудников в «Синхронизировать структуру»")
+            lacking.append((SCOPE_LABELS[SCOPE_USERS], "для сотрудников в «Синхронизировать структуру»"))
         files = SCOPE_TASKS in scopes and bool(list_ids)
         if not files:
-            missing.append(f"область {SCOPE_LABELS[SCOPE_TASKS]} со списками задач — для «Забрать данные из задач»")
+            lacking.append((f"{SCOPE_LABELS[SCOPE_TASKS]} со списками задач", "для «Забрать данные из задач»"))
         if mark and SCOPE_COMMENT not in scopes:
-            missing.append(f"область {SCOPE_LABELS[SCOPE_COMMENT]} — для «Отмечать задачу комментарием»")
+            lacking.append((SCOPE_LABELS[SCOPE_COMMENT], "для «Отмечать задачу комментарием»"))
         chosen = find_list(lists, ref) if ref else None
         if ref and chosen is None and files:
             problems.append(f"доступ ключа к списку «{ref}» — выберите список для ключа или оставьте «Список задач "
@@ -469,13 +478,12 @@ class PodeluConnector(Connector):
         ok = not problems and (files or (SCOPE_ORG in scopes and SCOPE_USERS in scopes))
         details = {
             "mode": KEY_MODE, "version": version, "key": {"name": api.key_name, "app": key.get("app")},
-            "scopes": scopes, "departments": departments, "lists": lists,
-            "data_list": chosen, "missing": [*problems, *missing],
+            "scopes": scopes, "departments": departments, "lists": lists, "data_list": chosen,
         }
         where = f"«{TITLE}» {version}".strip() if version else f"«{TITLE}»"
-        lacking = "; ".join([*problems, *missing])
         if not ok:
-            return CheckResult(False, f"Ключ «{key_name}» принят в {where}, но не хватает: {lacking} — {KEYS_PLACE}",
+            missing = "; ".join([*problems, *(f"область {scope} — {why}" for scope, why in lacking)])
+            return CheckResult(False, f"Ключ «{key_name}» принят в {where}, но не хватает: {missing} — {KEYS_PLACE}",
                                details)
         parts = [f"Подключено к {where} по ключу «{key_name}»"]
         if departments is not None:
@@ -484,10 +492,10 @@ class PodeluConnector(Connector):
             parts.append(f"список {list_label(chosen)}")
         elif files:
             parts.append(f"списки ключа: {', '.join(list_label(x) for x in lists)}")
-        message = ", ".join(parts)
-        if missing:
-            message += f". Не хватает: {lacking} — добавьте ключу: {KEYS_PLACE}"
-        return CheckResult(True, message, details)
+        warnings = [f"не хватает области {scope} — {why}" for scope, why in lacking]
+        if warnings:
+            warnings.append(f"добавьте области ключу: {KEYS_PLACE}")
+        return CheckResult(True, ", ".join(parts), details, warnings)
 
     def _key_lists(self, api: KeyApi, scopes: list[str], list_ids: list[str]) -> list[dict]:
         """Списки ключа [{id, title}]: названий «По Делу» не отдаёт — они берутся из задач (listTitle): первая

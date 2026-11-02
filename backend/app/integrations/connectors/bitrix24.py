@@ -140,6 +140,8 @@ class Bitrix24Connector(Connector):
     order = 50
     counter_labels = {"deals_won": "выигранных сделок", "deals_open": "открытых сделок",
                       "deals_unmapped": "сделок без подразделения"}
+    detail_labels = {"portal": "Портал", "user": "Пользователь вебхука", "scopes": "Права вебхука"}
+    technical_details = ("user_id",)
     title = "Bitrix24"
     description = ("Сделки CRM → показатели продаж сквозного отчёта: выручка (сумма выигранных сделок за месяц), "
                    "число выигранных сделок и сумма открытых сделок — по подразделениям ответственных, помесячно. "
@@ -290,10 +292,8 @@ class Bitrix24Connector(Connector):
         targets = list(metrics.parse_pairs(self.config.get("department_map"), "", "").values()) + \
             list(metrics.parse_pairs(self.config.get("user_map"), "", "").values())
         warnings += metrics.diagnose([k for k in keys if k], targets)
-        if warnings:
-            message += ". Внимание: " + "; ".join(warnings)
         return CheckResult(True, message, {"portal": host, "user": name, "user_id": profile.get("ID"),
-                                           "scopes": scopes, "warnings": warnings})
+                                           "scopes": scopes}, warnings)
 
     # --- запуск
     def specs(self) -> dict[str, metrics.IndicatorSpec]:

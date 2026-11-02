@@ -217,6 +217,7 @@ class ConfluenceConnector(Connector):
     admin_only_reason = "публикует полный сквозной отчёт"
     counter_labels = {"version": "версия страницы", "created": "страница создана", "units": "подразделений",
                       "indicators": "показателей", "violations": "нарушений полноты"}
+    detail_labels = {"space": "Пространство", "space_name": "Название пространства"}
     title = "Confluence"
     description = ("Публикация сквозного отчёта страницей Confluence по расписанию: одна страница, которая "
                    "обновляется, или новая страница каждую неделю; статусы — макросами Confluence. Публикуется "
@@ -293,10 +294,8 @@ class ConfluenceConnector(Connector):
                 message += f" · родительская страница «{parent.get('title') or parent.get('id')}»"
         if self.config.get("root"):
             warnings += metrics.diagnose([], [self.config["root"]])
-        if warnings:
-            message += ". Внимание: " + "; ".join(warnings)
-        return CheckResult(True, message, {"user": name, "space": space_key, "space_name": space.get("name"),
-                                           "warnings": warnings})
+        return CheckResult(True, message, {"user": name, "space": space_key, "space_name": space.get("name")},
+                           warnings)
 
     # --- запуск
     def page_title(self, period_label: str, period_key: str, root: str) -> str:

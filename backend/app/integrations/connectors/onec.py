@@ -333,6 +333,7 @@ class OneCConnector(Connector):
     kind = "onec"
     order = 70
     counter_labels = {"rows": "строк 1С", "rows_unmapped": "строк без подразделения"}
+    detail_labels = {"entity_sets": "Опубликовано наборов OData", "queries": "Запросов"}
     title = "1С (OData)"
     description = (
         "Значения показателей сквозного отчёта из 1С (ЗУП, Бухгалтерия) через стандартный интерфейс OData "
@@ -434,15 +435,14 @@ class OneCConnector(Connector):
         meta = parse_metadata(content)
         problems = self.problems(meta, queries)
         sets = len(meta["EntitySet"])
-        details = {"entity_sets": sets, "queries": len(queries), "problems": problems}
+        details = {"entity_sets": sets, "queries": len(queries)}
         if problems:
             return CheckResult(False, f"Подключено, опубликовано наборов: {sets}; в запросах ошибки: "
                                       + "; ".join(problems), details)
         warnings = metrics.diagnose([q.indicator.key for q in queries], [q.unit_code for q in queries if q.unit_code]
                                     + list(metrics.parse_pairs(self.config.get("department_map"), "", "").values()))
-        details["warnings"] = warnings
         message = f"Подключено, опубликовано наборов: {sets}; запросов: {len(queries)}, наборы на месте"
-        return CheckResult(True, message + (". Внимание: " + "; ".join(warnings) if warnings else ""), details)
+        return CheckResult(True, message, details, warnings)
 
     # --- запуск
     def load_catalog(self, odata: OData) -> dict[str, tuple[str, str]]:

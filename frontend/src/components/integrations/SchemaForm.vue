@@ -3,14 +3,15 @@ import { computed, useId } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import RichText from '@/components/ui/RichText.vue'
 import ToggleSwitch from '@/components/admin/ToggleSwitch.vue'
-import { allowedHostsHint, fieldVisible, isChoiceField, isJsonField, isMonospace, isWideField, jsonRows, parseJsonField } from '@/domain/integrations'
+import { allowedHostsHint, fieldPlaceholder, fieldVisible, isChoiceField, isJsonField, isMonospace, isWideField, jsonRows, parseJsonField } from '@/domain/integrations'
 
 /**
  * Форма настроек подключения по описанию полей вида (GET /api/integrations/kinds → fields): типы
  * string · text · url · password · int · bool · select · multiselect · list · time · json, show_if, подсказки,
- * заполнители, значения по умолчанию, обязательность. Выбор из 2–4 вариантов с длинными подписями («Тип
- * подключения») — списком переключателей, остальные длинные списки — на всю ширину: подпись не обрезается. Секретные поля сервер не возвращает: сохранённый
- * секрет — «задан» с «Заменить» и «Очистить».
+ * заполнители (и по значению другого поля — placeholder_if), значения по умолчанию, обязательность. Выбор из 2–4
+ * вариантов с длинными подписями («Тип подключения») — списком переключателей, остальные длинные списки — на всю
+ * ширину: подпись не обрезается. Секретные поля сервер не возвращает: сохранённый секрет — «задан» с «Заменить»
+ * и «Очистить».
  */
 const props = defineProps({
   kind: { type: Object, required: true },
@@ -50,6 +51,8 @@ function formatJson(f) {
 const urlShown = computed(() => shown.value.some((f) => f.key === props.kind.url_field))
 const hostsHint = (f) => !!props.kind.allowed_hosts_env && (f.key === props.kind.url_field || (!urlShown.value && f.type === 'url'))
 const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
+// Заполнитель может зависеть от другого поля (placeholder_if): у «По Делу» в режиме ключа — «пусто — все списки ключа»
+const placeholderOf = (f) => fieldPlaceholder(f, props.values)
 </script>
 
 <template>
@@ -104,7 +107,7 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
         </div>
         <div v-else class="secret-input">
           <input :id="idOf(f)" class="input" type="password" autocomplete="new-password" spellcheck="false" :class="{ invalid: errorOf(f) }"
-                 :value="secrets[f.key]?.value || ''" :placeholder="isSaved(f) && !rebind ? 'Новое значение' : f.placeholder || ''" :data-testid="`secret-${f.key}`"
+                 :value="secrets[f.key]?.value || ''" :placeholder="isSaved(f) && !rebind ? 'Новое значение' : placeholderOf(f) || ''" :data-testid="`secret-${f.key}`"
                  @input="setSecret(f.key, { mode: 'replace', value: $event.target.value })" />
           <button v-if="isSaved(f) && !rebind" type="button" class="btn btn-sm btn-ghost" @click="setSecret(f.key, { mode: 'keep', value: '' })">Оставить прежнее</button>
         </div>
@@ -118,12 +121,12 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
         <label :for="idOf(f)" class="sf-label">{{ f.label }}<span v-if="f.required" class="req" aria-hidden="true">*</span></label>
         <select v-if="f.type === 'select'" :id="idOf(f)" class="select" :class="{ invalid: errorOf(f) }" :value="values[f.key]" :required="f.required"
                 @change="setValue(f.key, $event.target.value)">
-          <option v-if="(!f.required && (f.default === null || f.default === undefined || f.default === '')) || !values[f.key]" value="">{{ f.placeholder || 'Не выбрано' }}</option>
+          <option v-if="(!f.required && (f.default === null || f.default === undefined || f.default === '')) || !values[f.key]" value="">{{ placeholderOf(f) || 'Не выбрано' }}</option>
           <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
         <template v-else-if="isMonospace(f)">
           <textarea :id="idOf(f)" class="textarea mono" :class="{ invalid: errorOf(f) }" :rows="jsonRows(values[f.key])" spellcheck="false" autocapitalize="off"
-                    :value="values[f.key]" :placeholder="f.placeholder || ''" :required="f.required" :data-testid="`field-${f.key}`"
+                    :value="values[f.key]" :placeholder="placeholderOf(f) || ''" :required="f.required" :data-testid="`field-${f.key}`"
                     @input="setValue(f.key, $event.target.value)" />
           <div v-if="isJsonField(f)" class="json-bar">
             <span v-if="values[f.key] && !jsonError(f)" class="json-ok">JSON без ошибок</span>
@@ -131,12 +134,12 @@ const secretMode = (f) => props.secrets[f.key]?.mode || 'replace'
           </div>
         </template>
         <textarea v-else-if="f.type === 'text' || f.type === 'list'" :id="idOf(f)" class="textarea" :class="{ invalid: errorOf(f) }" rows="3" spellcheck="false"
-                  :value="values[f.key]" :placeholder="f.placeholder || (f.type === 'list' ? 'По одному значению в строке' : '')" :required="f.required"
+                  :value="values[f.key]" :placeholder="placeholderOf(f) || (f.type === 'list' ? 'По одному значению в строке' : '')" :required="f.required"
                   @input="setValue(f.key, $event.target.value)" />
         <input v-else :id="idOf(f)" class="input" :class="{ invalid: errorOf(f), num: f.type === 'int' }" spellcheck="false" autocomplete="off"
                :type="f.type === 'int' ? 'number' : f.type === 'time' ? 'time' : f.type === 'password' ? 'password' : f.type === 'url' ? 'url' : 'text'"
                :inputmode="f.type === 'int' ? 'numeric' : undefined" :min="f.min ?? undefined" :max="f.max ?? undefined" :step="f.type === 'int' ? 1 : undefined"
-               :value="values[f.key]" :placeholder="f.placeholder || (f.type === 'url' ? 'https://' : '')" :required="f.required"
+               :value="values[f.key]" :placeholder="placeholderOf(f) || (f.type === 'url' ? 'https://' : '')" :required="f.required"
                :data-testid="`field-${f.key}`" @input="setValue(f.key, $event.target.value)" />
         <small v-if="f.type === 'list' && !f.hint" class="help">По одному значению в строке или через запятую</small>
         <small v-if="f.type === 'int' && (f.min !== null && f.min !== undefined || f.max !== null && f.max !== undefined)" class="help">

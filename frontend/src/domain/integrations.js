@@ -232,6 +232,18 @@ export function fieldVisible(field, values = {}) {
 
 export const visibleFields = (fields = [], values = {}) => fields.filter((f) => fieldVisible(f, values))
 
+/**
+ * Заполнитель поля при этих значениях формы: placeholder_if = { поле: { значение: заполнитель } } — первое
+ * подходящее правило (у «По Делу» в режиме ключа «Список задач с данными» — «пусто — все списки ключа»); иначе placeholder.
+ */
+export function fieldPlaceholder(field, values = {}) {
+  for (const [key, byValue] of Object.entries(field?.placeholder_if || {})) {
+    const value = values?.[key]
+    if (value !== null && value !== undefined && byValue && Object.hasOwn(byValue, String(value))) return byValue[String(value)]
+  }
+  return field?.placeholder || ''
+}
+
 /** Значение поля для формы: список — строками, число — текстом, да/нет — булево. */
 export function toFormValue(field, value) {
   switch (field.type) {
@@ -411,24 +423,115 @@ export function allowedHostsHint(kind) {
   return `Узел должен быть разрешён на сервере переменной ${kind.allowed_hosts_env} (через запятую; «.company.ru» — домен и поддомены; пусто — без ограничения)`
 }
 
-/** Значение подробности словами: да/нет, списки — через запятую (длинные — с «и ещё N»), записи — числом. */
-export function detailValue(value, limit = 160) {
-  let text
-  if (value === true || value === false) text = value ? 'да' : 'нет'
-  else if (Array.isArray(value)) {
-    if (value.some((v) => v && typeof v === 'object')) text = `${value.length} ${plural(value.length, ['запись', 'записи', 'записей'])}`
-    else text = value.slice(0, 6).join(', ') + (value.length > 6 ? ` и ещё ${value.length - 6}` : '')
-  } else if (value && typeof value === 'object') text = JSON.stringify(value)
-  else text = String(value)
+/**
+ * Итог проверки: ok — «Подключено» (зелёный); ok с замечаниями (warnings) — «Подключено с замечаниями» (жёлтый);
+ * иначе — ошибка (красный). { tone: 'ok' | 'warn' | 'bad', title, icon }.
+ */
+export function checkState(result) {
+  if (!result?.ok) return { tone: 'bad', title: 'Проверка не прошла', icon: 'alert' }
+  if (checkWarnings(result).length) return { tone: 'warn', title: 'Подключено с замечаниями', icon: 'alert' }
+  return { tone: 'ok', title: 'Подключение работает', icon: 'check' }
+}
+
+/** Фраза с заглавной буквы: замечания сервер пишет со строчной («у ключа нет права …»). */
+export const sentence = (text) => {
+  const s = String(text ?? '').trim()
+  return s ? s[0].toUpperCase() + s.slice(1) : ''
+}
+
+/** Замечания проверки списком — фразами с заглавной буквы, без пустых. */
+export const checkWarnings = (result) => (Array.isArray(result?.warnings) ? result.warnings : []).map(sentence).filter(Boolean)
+
+/**
+ * Подписи подробностей проверки — с сервера: detail_labels вида подключения (GET /kinds: общие подписи каркаса
+ * и свои коннектора). Запасные — общие подписи каркаса на случай, если описания вида нет.
+ */
+const FALLBACK_DETAIL_LABELS = {
+  mode: 'Режим подключения', version: 'Версия', user: 'Учётная запись', key: 'Ключ', scopes: 'Права',
+  departments: 'Подразделений', lists: 'Списки задач', projects: 'Проектов', role: 'Роль', department: 'Подразделение',
+}
+// Код ошибки — для подсказки (checkHint), не для показа; заголовок вложенной записи — «Название (id)», без подписей
+const HIDDEN_DETAILS = ['code']
+const RECORD_TITLE = ['title', 'name', 'label', 'displayName']
+const RECORD_REF = ['id', 'login']
+const DETAIL_LIST_LIMIT = 30
+
+const isRecord = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+const present = (v) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length) && !(isRecord(v) && !Object.keys(v).length)
+
+/** Подпись внутри строки — со строчной буквы («проектов: 2»), сокращения — как есть («ID пользователя»). */
+export function inlineLabel(label) {
+  const s = String(label || '')
+  return s.length > 1 && /\p{Lu}/u.test(s[0]) && /\p{Ll}/u.test(s[1]) ? s[0].toLowerCase() + s.slice(1) : s
+}
+
+function scalarText(value) {
+  if (value === true || value === false) return value ? 'да' : 'нет'
+  if (typeof value === 'number') return formatNumber(value)
+  return String(value)
+}
+
+function listText(values, limit = 12) {
+  const shown = values.slice(0, limit).map((v) => (isRecord(v) || Array.isArray(v) ? JSON.stringify(v) : scalarText(v)))
+  return shown.join(', ') + (values.length > limit ? ` и ещё ${formatNumber(values.length - limit)}` : '')
+}
+
+/**
+ * Вложенная запись строкой: «Название (id) · подпись: значение · …». Название — title, name, label или displayName;
+ * id или login — в скобках (или вместо названия, если его нет); остальные ключи — только подписанные и не служебные.
+ */
+export function recordText(record, labels = {}, technical = new Set()) {
+  const pick = (keys) => keys.map((k) => record[k]).find(present)
+  const title = pick(RECORD_TITLE)
+  const ref = pick(RECORD_REF)
+  const head = present(title) ? (present(ref) && String(ref) !== String(title) ? `${title} (${ref})` : String(title)) : present(ref) ? String(ref) : ''
+  const rest = Object.entries(record)
+    .filter(([k, v]) => ![...RECORD_TITLE, ...RECORD_REF].includes(k) && !technical.has(k) && labels[k] && present(v))
+    .map(([k, v]) => `${inlineLabel(labels[k])}: ${Array.isArray(v) ? listText(v) : isRecord(v) ? JSON.stringify(v) : scalarText(v)}`)
+  return [head, ...rest].filter(Boolean).join(' · ')
+}
+
+/** Значение поля-выбора подписью варианта: mode «key» — «Ключ интеграции (По Делу 1.4.5 и новее)». */
+function optionLabel(kind, key, value) {
+  const field = (kind?.fields || []).find((f) => f.key === key && f.options?.length)
+  return field?.options.find((o) => o.value === String(value))?.label
+}
+
+/** Служебное значение для «Технических подробностей»: как есть, длинное — с многоточием. */
+function rawText(value, limit = 300) {
+  const text = isRecord(value) || Array.isArray(value) ? JSON.stringify(value) : String(value)
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }
 
-/** Подробности проверки для показа: [{ key, value }] без служебного кода. */
-export function checkDetails(details) {
-  if (!details || typeof details !== 'object') return []
-  return Object.entries(details)
-    .filter(([key, value]) => key !== 'code' && value !== null && value !== undefined && value !== '')
-    .map(([key, value]) => ({ key, value: detailValue(value) }))
+/**
+ * Подробности проверки для показа: { main, technical }. main — [{ key, label, text, items }] ключей с русской
+ * подписью (detail_labels вида): да/нет, числа, списки через запятую, записи строкой «Название (id) · …», списки
+ * записей — items, по строке на запись; поле-выбор (mode) — подписью варианта. technical — [{ key, value }]: служебные
+ * (technical_details) и неподписанные ключи — для свёрнутых «Технических подробностей». Пустые значения и код ошибки
+ * не показываются.
+ */
+export function checkDetails(details, kind = null) {
+  const out = { main: [], technical: [] }
+  if (!isRecord(details)) return out
+  const labels = { ...FALLBACK_DETAIL_LABELS, ...(kind?.detail_labels || {}) }
+  const technical = new Set(['code', ...(kind?.technical_details || [])])
+  for (const [key, value] of Object.entries(details)) {
+    if (HIDDEN_DETAILS.includes(key) || !present(value)) continue
+    if (technical.has(key) || !labels[key]) {
+      out.technical.push({ key, value: rawText(value) })
+      continue
+    }
+    const entry = { key, label: labels[key], text: '', items: null }
+    if (Array.isArray(value) && value.some(isRecord)) {
+      const lines = value.map((v) => (isRecord(v) ? recordText(v, labels, technical) : scalarText(v))).filter(Boolean)
+      entry.items = lines.slice(0, DETAIL_LIST_LIMIT)
+      if (lines.length > DETAIL_LIST_LIMIT) entry.items.push(`и ещё ${formatNumber(lines.length - DETAIL_LIST_LIMIT)}`)
+    } else if (Array.isArray(value)) entry.text = listText(value)
+    else if (isRecord(value)) entry.text = recordText(value, labels, technical)
+    else entry.text = optionLabel(kind, key, value) || scalarText(value)
+    if (entry.text || entry.items?.length) out.main.push(entry)
+  }
+  return out
 }
 
 /** Что делать, если проверка не прошла, — по коду ошибки. */

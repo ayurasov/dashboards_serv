@@ -286,6 +286,8 @@ class JiraConnector(Connector):
     kind = "jira"
     order = 30
     counter_labels = {"issues": "задач Jira", **{key: f"задач: {text}" for key, text in PROBLEMS.items()}}
+    detail_labels = {"api": "Версия REST API", "version": "Версия Jira", "deployment": "Тип установки",
+                     "rules": "Правил показателей"}
     title = "Jira"
     description = ("Показатели сквозного отчёта по JQL: число задач или сумма поля (оценка, остаток, затраты — "
                    "в часах) по подразделениям, помесячно; признаки качества данных — как в Burndown. Cloud — email "
@@ -358,10 +360,9 @@ class JiraConnector(Connector):
         elif deployment in ("Server", "DataCenter") and self.cloud:
             warnings.append("это Jira Server / Data Center — выберите тип подключения Server")
         warnings += metrics.diagnose([r.indicator.key for r in rules], [q.unit for r in rules for q in r.queries])
-        message = " · ".join(parts) + (". Внимание: " + "; ".join(warnings) if warnings else "")
-        return CheckResult(True, message, {"user": name, "api": self.api, "version": version or None,
-                                           "deployment": deployment or None, "rules": len(rules),
-                                           "warnings": warnings})
+        return CheckResult(True, " · ".join(parts), {"user": name, "api": self.api, "version": version or None,
+                                                     "deployment": deployment or None, "rules": len(rules)},
+                           warnings)
 
     # --- запуск
     def run(self, action: str, ctx: RunContext) -> RunResult:

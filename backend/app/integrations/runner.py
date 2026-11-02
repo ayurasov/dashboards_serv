@@ -22,7 +22,7 @@ running_since занимается тем же приёмом (begin_running).
 begin_running и планировщик (reclaim_stale) занимают его заново и отмечают такие записи журнала прерванными.
 
 Секреты не попадают ни в журнал сервера, ни в журнал запусков, ни в ответы API: тексты проверки и запуска
-(сообщение, ошибка, подробности, last_error) и журнал неожиданных исключений (сообщение и трассировка —
+(сообщение, замечания, ошибка, подробности, last_error) и журнал неожиданных исключений (сообщение и трассировка —
 без log.exception) проходят через http.scrub с секретами коннектора (Connector.secret_values()).
 """
 from __future__ import annotations
@@ -83,7 +83,8 @@ def _log_failure(what: str, row: Integration, exc: BaseException, secrets: Itera
 
 
 def clean_check(result: CheckResult, secrets: Iterable[str]) -> CheckResult:
-    return CheckResult(result.ok, scrub(result.message, secrets), scrub_data(result.details, secrets))
+    return CheckResult(result.ok, scrub(result.message, secrets), scrub_data(result.details, secrets),
+                       [scrub(str(w), secrets) for w in result.warnings or []])
 
 
 def clean_run(result: RunResult, secrets: Iterable[str]) -> RunResult:

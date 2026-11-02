@@ -268,6 +268,13 @@ class PulsConnector(Connector):
         "values_update": "значений: изменено", "values_unchanged": "значений без изменений",
         "values_cleared": "значений очищено", "values_errors": "ошибок в значениях",
     }
+    # Подробности проверки: версия, режим, ключ (название и права) или учётная запись, направления с подразделениями
+    detail_labels = {
+        "user": "Служебная учётная запись", "stats": "Право «Показатели проектов»",
+        "without_direction": "Проектов без направления", "directions": "Направления",
+        "unmapped": "Без подразделения (в корень структуры)", "role": "Роль в «Пульсе»",
+    }
+    technical_details = ("schema",)
     title = TITLE
     description = ("Проекты «Пульса проекта» → показатели сквозного отчёта по подразделениям (сопоставление "
                    "«направление → подразделение»): проекты в работе, просроченные, заблокированные задачи, средний "
@@ -470,14 +477,13 @@ class PulsConnector(Connector):
                    f"проектов {total}, направлений {len(directions)}, сопоставлено {len(directions) - len(unmapped)}")
         if unmapped:
             message += f"; без подразделения (в корень структуры): {', '.join(unmapped[:10])}"
-        if warnings:
-            message += ". Внимание: " + "; ".join(warnings)
-        if problems:
-            message += ". Проверьте: " + "; ".join(problems)
-        details = {**info, "projects": total, "directions": listed, "unmapped": unmapped, "problems": problems}
-        if key_mode:
-            details["warnings"] = warnings
-        return CheckResult(True, message, details)
+        # Число проектов — projects (у ключа total — оно же); limited — признак запуска: проверка по ключу проекты не
+        # читает, предел видно по числу проектов
+        details = {**{k: v for k, v in info.items() if k not in ("limited", "total")}, "projects": total,
+                   "directions": listed, "unmapped": unmapped}
+        # Замечания: права и пределы ключа, затем строки сопоставления, которые не сработают
+        problems = [f"сопоставление, {p}" if p.startswith("строка ") else p for p in problems]
+        return CheckResult(True, message, details, [*warnings, *problems])
 
     # --- запуск
     def run(self, action: str, ctx: RunContext) -> RunResult:

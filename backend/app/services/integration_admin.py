@@ -293,9 +293,12 @@ def check(db: Session, actor: User, row: Integration, body: dict | None = None,
         record_health(row, ok=result.ok, error=result.message, now=now)
         row.verified_at = now if result.ok else None
     audit.record(db, actor, entity_type="integration", entity_id=row.id, action="check",
-                 summary=f"Проверка подключения «{row.name}»: {'успешно' if result.ok else 'ошибка'}"
+                 summary=f"Проверка подключения «{row.name}»: "
+                         + ("ошибка" if not result.ok else "успешно, с замечаниями" if result.warnings else "успешно")
                          + (" (несохранённые настройки)" if draft else ""),
-                 after={"ok": result.ok, "message": result.message[:300]}, request=request)
+                 after={"ok": result.ok, "message": result.message[:300],
+                        **({"warnings": [w[:300] for w in result.warnings[:10]]} if result.warnings else {})},
+                 request=request)
     db.flush()
     return {**result.as_dict(), "checked_at": now, "draft": draft}
 

@@ -142,6 +142,50 @@ test('счётчик «ожидают» — из профиля; строка «
   expect(errors).toEqual([])
 })
 
+test('подвал карточки элемента: кнопки — одной строкой, подсказка над ними; на телефоне — как прежде', async ({ page }) => {
+  const errors = collectErrors(page)
+  await login(page, 'admin')
+  const mark = uniq('footer')
+  // Элемент «ожидает» с планом — загрузкой через API (файл — multipart)
+  const csrf = (await page.context().cookies()).find((c) => c.name === 'ds_csrf')?.value || ''
+  const response = await page.request.post('/api/inbox', {
+    headers: { 'X-CSRF-Token': csrf },
+    multipart: { file: csv(`${mark}.csv`, [`IT;Выполнение плана работ;2026-07;95;100;${mark}`]), dataset: 'indicators', apply: 'false' },
+  })
+  expect(response.status()).toBe(201)
+  const { id } = await response.json()
+  try {
+    await page.goto(`/inbox?item=${id}`)
+    const item = drawer(page)
+    await expect(item.getByTestId('inbox-item-status')).toHaveText('Ожидает')
+    const footer = item.getByTestId('inbox-footer')
+    const hint = footer.getByTestId('inbox-footer-hint')
+    const rows = async () => {
+      const tops = await footer.locator('.foot-actions .btn').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))
+      return [...new Set(tops)]
+    }
+    for (const width of [1440, 1280, 1100, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(hint).toHaveText('Всё будет записано одной операцией; при ошибках ничего не записывается.')
+      // «Отклонить», «Повторить», «Применить» и «Скачать» — одной строкой; подсказка целиком — над ними
+      expect(await rows(), `${width} px`).toHaveLength(1)
+      const [hintBox, apply, download] = await Promise.all([hint.boundingBox(), footer.getByTestId('inbox-apply').boundingBox(), footer.getByTestId('inbox-download').boundingBox()])
+      expect(hintBox.y + hintBox.height, `${width} px`).toBeLessThanOrEqual(apply.y + 0.5)
+      expect(Math.abs(download.y + download.height / 2 - (apply.y + apply.height / 2)), `${width} px`).toBeLessThan(2)
+      expect(await hint.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)).toBe(true)
+    }
+    // Телефон: подсказки нет, «Применить» — во всю ширину отдельной строкой (как было)
+    await page.setViewportSize({ width: 360, height: 800 })
+    await expect(hint).toBeHidden()
+    expect(await rows()).toHaveLength(2)
+    await expect(footer.getByTestId('inbox-apply')).toBeVisible()
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await api(page, 'POST', `/inbox/${id}/reject`, { reason: 'проверка подвала' })
+  }
+  expect(errors).toEqual([])
+})
+
 test('нераспознанный файл: выбор набора, план с ошибками, отклонение с причиной', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'admin')

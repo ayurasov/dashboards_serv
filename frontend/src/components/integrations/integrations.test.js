@@ -6,6 +6,8 @@ import OneTimeKey from './OneTimeKey.vue'
 import ScheduleEditor from './ScheduleEditor.vue'
 import IntegrationCard from './IntegrationCard.vue'
 import KindPicker from './KindPicker.vue'
+import CheckResult from './CheckResult.vue'
+import RunsJournal from './RunsJournal.vue'
 import CodeBlock from '@/components/ui/CodeBlock.vue'
 import RichText from '@/components/ui/RichText.vue'
 
@@ -88,6 +90,104 @@ describe('SchemaForm — «Тип подключения» не обрезает
     const w = mount(SchemaForm, { props: { kind, values: { owner: '1' }, secrets: {} } })
     expect(w.find('[data-field=owner] select').exists()).toBe(true)
     expect(w.find('[data-field=owner]').classes()).toContain('wide')
+  })
+})
+
+describe('SchemaForm — заполнитель по режиму (placeholder_if)', () => {
+  it('«По Делу» по ключу: «пусто — все списки ключа»; служебная учётная запись — пример названия списка', async () => {
+    const kind = { kind: 'podelu', fields: [
+      { key: 'mode', label: 'Режим подключения', type: 'select', required: true, secret: false, default: 'key', options: [{ value: 'key', label: 'Ключ' }, { value: 'session', label: 'Учётная запись' }] },
+      { key: 'data_list', label: 'Список задач с данными', type: 'string', required: false, secret: false, default: null, options: [], placeholder: 'Данные для дашбордов', placeholder_if: { mode: { key: 'пусто — все списки ключа' } } },
+    ] }
+    const w = mount(SchemaForm, { props: { kind, values: { mode: 'key', data_list: '' }, secrets: {} } })
+    expect(w.find('[data-field=data_list] input').attributes('placeholder')).toBe('пусто — все списки ключа')
+    await w.setProps({ values: { mode: 'session', data_list: '' } })
+    expect(w.find('[data-field=data_list] input').attributes('placeholder')).toBe('Данные для дашбордов')
+  })
+})
+
+describe('CheckResult — замечания и подписанные подробности', () => {
+  const kind = {
+    kind: 'puls', fields: [{ key: 'mode', type: 'select', options: [{ value: 'key', label: 'Ключ интеграции (Пульс 0.6.0 и новее)' }] }],
+    detail_labels: { mode: 'Режим подключения', version: 'Версия', key: 'Ключ', scopes: 'Права', stats: 'Право «Показатели проектов»', directions: 'Направления', projects: 'Проектов', department: 'Подразделение' },
+    technical_details: ['code', 'schema'],
+  }
+  const result = {
+    ok: true, message: 'Подключено к «Пульс проекта» 0.6.0: проектов 9',
+    warnings: ['у ключа нет права «Показатели проектов» (projects.stats)', 'сопоставление, строка 3 («7»): укажите «Разработка»'],
+    details: { mode: 'key', version: '0.6.0', key: { name: 'Дашборды', scopes: ['projects.read'] }, stats: false, schema: '0021',
+      directions: [{ id: 3, name: 'Внедрение', projects: 3, department: 'АЛМИ Партнер / Проектная служба' }] },
+  }
+
+  it('ok с замечаниями — жёлтый «Подключено с замечаниями», сообщение и замечания списком', () => {
+    const w = mount(CheckResult, { props: { result, kind } })
+    expect(w.classes()).toContain('warn')
+    expect(w.find('.msg').text()).toBe('Подключено с замечаниями')
+    expect(w.find('[data-testid=check-message]').text()).toBe(result.message)
+    expect(w.findAll('[data-testid=check-warnings] li').map((li) => li.text())).toEqual([
+      'У ключа нет права «Показатели проектов» (projects.stats)', 'Сопоставление, строка 3 («7»): укажите «Разработка»',
+    ])
+  })
+
+  it('подробности — русскими подписями, служебные — в свёрнутых «Технических подробностях»', () => {
+    const w = mount(CheckResult, { props: { result, kind } })
+    const details = w.find('[data-testid=check-details]')
+    expect(details.find('summary').text()).toBe('Подробности · 5')
+    expect(details.text()).toContain('Режим подключенияКлюч интеграции (Пульс 0.6.0 и новее)')
+    expect(details.text()).toContain('Дашборды · права: projects.read')
+    expect(details.text()).toContain('Внедрение (3) · проектов: 3 · подразделение: АЛМИ Партнер / Проектная служба')
+    expect(details.text()).not.toMatch(/\b(mode|stats|directions|schema)\b/)
+    const technical = w.find('[data-testid=check-technical]')
+    expect(technical.find('summary').text()).toBe('Технические подробности · 1')
+    expect(technical.text()).toContain('schema')
+  })
+
+  it('без замечаний — зелёный с сообщением; ошибка — красная, код ошибки не показывается', () => {
+    const ok = mount(CheckResult, { props: { result: { ok: true, message: 'Подключено', warnings: [], details: { version: '1.4.5' } }, kind } })
+    expect(ok.classes()).toContain('ok')
+    expect(ok.find('.msg').text()).toBe('Подключено')
+    expect(ok.find('[data-testid=check-warnings]').exists()).toBe(false)
+    expect(ok.find('[data-testid=check-details]').text()).toBe('Версия1.4.5')
+    const bad = mount(CheckResult, { props: { result: { ok: false, message: 'Ключ отозван', details: { code: 'key_revoked' } }, kind } })
+    expect(bad.classes()).toContain('bad')
+    expect(bad.text()).not.toContain('key_revoked')
+    expect(bad.find('[data-testid=check-technical]').exists()).toBe(false)
+  })
+})
+
+describe('RunsJournal — сводка без повторов', () => {
+  const RUNS = [
+    { id: 2, action: 'indicators', trigger_label: 'Вручную', status: 'ok', status_label: 'Успешно', username: 'admin', started_at: '2026-11-02T05:55:00', finished_at: '2026-11-02T05:55:01',
+      message: 'Показатели проектов за ноябрь 2026: значений новых 0, без изменений 20', error: '', summary: { values_unchanged: 20, projects: 9, structure_item: 4 } },
+    { id: 1, action: 'indicators', trigger_label: 'Вручную', status: 'ok', status_label: 'Успешно', username: 'admin', started_at: '2026-11-02T05:54:00', finished_at: '2026-11-02T05:54:01',
+      message: '', error: '', summary: { projects: 9 } },
+  ]
+  const kind = { kind: 'puls', actions: [{ key: 'indicators', label: 'Обновить показатели проектов' }], counter_labels: { values_unchanged: 'значений без изменений', projects: 'проектов' } }
+
+  it('сообщение — в строке, счётчики — под «Подробности»; запуск без сообщения — счётчики сразу', async () => {
+    const { integrationsApi } = await import('@/api/integrations')
+    const runs = integrationsApi.runs
+    integrationsApi.runs = async () => RUNS
+    try {
+      const w = mount(RunsJournal, {
+        props: { integration: { id: 5, name: 'Пульс проекта' }, kind },
+        global: { stubs: { SideDrawer: { template: '<div><slot name="header" /><slot /></div>' } } },
+      })
+      await new Promise((r) => setTimeout(r))
+      await w.vm.$nextTick()
+      const rows = w.findAll('[data-testid=runs-table] tbody tr')
+      expect(rows).toHaveLength(2)
+      expect(rows[0].find('[data-testid=run-message]').text()).toBe(RUNS[0].message)
+      const more = rows[0].find('[data-testid=run-more]')
+      expect(more.element.tagName).toBe('DETAILS')
+      expect(more.find('summary').text()).toBe('Подробности · 2')
+      expect(more.find('[data-testid=run-counters]').text()).toContain('значений без изменений: 20')
+      expect(rows[0].find('td.sum > [data-testid=run-counters]').exists()).toBe(false)
+      expect(rows[1].find('[data-testid=run-more]').exists()).toBe(false)
+      expect(rows[1].find('[data-testid=run-counters]').text()).toBe('проектов: 9')
+    } finally {
+      integrationsApi.runs = runs
+    }
   })
 })
 

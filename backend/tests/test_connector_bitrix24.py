@@ -238,11 +238,15 @@ def test_check_reports_portal_user_and_scopes(admin, fake):
     assert check["ok"], check
     assert check["message"].startswith("Подключено к порталу 127.0.0.1 как Анна Смирнова (ID 1), администратор "
                                        "портала · права вебхука: crm, user, department")
-    assert "«crm.revenue» нет в каталоге" in check["message"]
+    assert check["message"] == ("Подключено к порталу 127.0.0.1 как Анна Смирнова (ID 1), администратор портала · "
+                                "права вебхука: crm, user, department"), "замечания — отдельным списком"
+    assert any("«crm.revenue» нет в каталоге" in w for w in check["warnings"])
+    assert check["details"]["scopes"] == ["crm", "user", "department"] and "warnings" not in check["details"]
     assert [c[0] for c in fake.calls] == ["profile", "scope"]
     fake.scopes = ["user"]
     check = admin.post(f"/api/integrations/{item['id']}/check").json()
-    assert check["ok"] and "нет прав «CRM»" in check["message"]
+    assert check["ok"] and "у вебхука нет прав «CRM» — сделки не прочитать" in check["warnings"]
+    assert "Внимание" not in check["message"]
 
 
 def test_check_failures_never_show_webhook_code(admin, fake):
