@@ -21,6 +21,8 @@ cryptography==50.0.2
 
 # Подключения к корпоративным системам (ADR-0011)
 requests==2.34.2
+# Exchange Server по EWS — необязательно: без пакета режим EWS недоступен, IMAP и Microsoft Graph работают
+exchangelib==5.6.0
 
 # Отчёты и импорт
 openpyxl==3.1.5
