@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from './auth'
 import { navItemAllowed, SERVICE_NAV } from '@/router/navigation'
@@ -98,5 +98,30 @@ describe('права текущего пользователя', () => {
     expect(visible('hr')).not.toContain('/hr/registry')
     auth.setUser({ ...EMPLOYEE, effective_access: { ...EMPLOYEE.effective_access, services: { hr: 'viewer' }, can_view_records: true, data_classes: ['operational', 'personal'] } })
     expect(visible('hr')).toContain('/hr/registry')
+  })
+
+  it('входящие данные: с data.manage — сразу; иначе — по ответу сервера (набор с can_apply), до смены пользователя', async () => {
+    const replies = []
+    globalThis.fetch = vi.fn(async (url) => {
+      replies.push(url)
+      if (url.startsWith('/api/inbox/datasets')) return new Response(JSON.stringify({ datasets: [{ key: 'hr-months', can_apply: true }], can_manage: false }), { status: 200, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({ items: [], total: 0, counts: { pending: 3 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    auth.setUser({ id: 1, role: 'user', capabilities: ['data.manage'], effective_access: { services: {} } })
+    expect(await auth.loadInboxAccess()).toBe(true)
+    expect(replies.some((u) => u.startsWith('/api/inbox/datasets'))).toBe(false)
+    expect(auth.inboxPending).toBe(3)
+
+    auth.setUser(EMPLOYEE)
+    expect(auth.inbox).toBeNull()
+    expect(await auth.loadInboxAccess()).toBe(true)
+    const calls = replies.length
+    expect(await auth.loadInboxAccess()).toBe(true)
+    expect(replies).toHaveLength(calls) // запомнено
+
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ detail: 'Входящие данные вам недоступны', code: 'forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }))
+    auth.setUser({ ...EMPLOYEE, id: 10 })
+    expect(await auth.loadInboxAccess()).toBe(false)
+    expect(auth.inbox).toBe(false)
   })
 })

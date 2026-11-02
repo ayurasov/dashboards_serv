@@ -157,7 +157,7 @@ function memoryFile(name, mimeType, content) {
   await dialogShot(p, 'admin/12-department-edit')
   await open(p, '/admin/access-profiles', 1200); await shot(p, 'admin/18-access-profiles')
   await shot(p, 'admin/19-profile-comparison', { element: p.locator('section.card', { has: p.locator('h3', { hasText: 'Сравнение профилей' }) }) })
-  await open(p, '/admin/integrations'); await shot(p, 'admin/21-domain-login')
+  await open(p, '/admin/directory'); await shot(p, 'admin/21-domain-login')
   await open(p, '/admin/audit'); await shot(p, 'admin/06-audit')
   await open(p, '/admin/palettes'); await shot(p, 'admin/07-palettes')
   await open(p, '/admin/system'); await shot(p, 'admin/08-system')

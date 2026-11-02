@@ -122,6 +122,7 @@ p { margin: 0; }
 .badge-yellow { background: color-mix(in srgb, var(--light-yellow) 16%, transparent); color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
 .badge-red { background: color-mix(in srgb, var(--light-red) 13%, transparent); color: var(--light-red); }
 .badge-gray { background: var(--surface-3); color: var(--muted); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
 
 /* ---------- таблицы ---------- */
 .table-wrap { overflow: auto; border-radius: var(--radius-lg); }

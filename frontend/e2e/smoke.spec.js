@@ -29,6 +29,8 @@ const PAGES = [
   ['/admin/audit', 'Журнал'], ['/admin/palettes', 'Палитр'], ['/admin/system', 'систем'], ['/profile', 'Профиль'],
   ['/guide', 'Руководство пользователя'], ['/guide/admin', 'Руководство администратора'], ['/about', 'О программе'],
   ['/reports', 'Сквозной отчёт'], ['/reports/entry', 'Ввод показателей'], ['/admin/indicators', 'Показатели'],
+  ['/inbox', 'Входящие данные'], ['/inbox?tab=rules', 'Входящие данные'], ['/inbox?tab=folder', 'Входящие данные'],
+  ['/admin/integrations', 'Интеграции'], ['/admin/integrations?tab=keys', 'Интеграции'], ['/admin/directory', 'Вход по домену'],
 ]
 
 test('все страницы открываются без ошибок', async ({ page }) => {

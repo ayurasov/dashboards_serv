@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { toastError } from '@/composables/useToast'
+import { writeClipboard } from '@/utils/clipboard'
 
 /** Временный пароль: показывается один раз, с кнопкой копирования. */
 const props = defineProps({
@@ -12,25 +13,6 @@ const props = defineProps({
 })
 const emit = defineEmits(['close'])
 const copied = ref('')
-
-async function writeClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    // Небезопасный контекст (http не на localhost) — через скрытое поле
-    const area = document.createElement('textarea')
-    area.value = text
-    area.setAttribute('readonly', '')
-    area.style.position = 'fixed'
-    area.style.opacity = '0'
-    document.body.appendChild(area)
-    area.select()
-    const ok = document.execCommand('copy')
-    area.remove()
-    return ok
-  }
-}
 
 async function copy(kind) {
   const text = kind === 'both' ? `Логин: ${props.user.username}\nПароль: ${props.password}` : props.password

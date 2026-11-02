@@ -10,10 +10,15 @@ export { LEVEL_LABELS }
  * структуры, классы данных, глубина, исходные записи, выгрузка. Интерфейс по ним скрывает разделы
  * и кнопки; сервер всё равно проверяет каждый запрос сам.
  */
+let inboxCheck = null
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
     loaded: false,
+    // Доступ к «Входящим данным»: null — ещё не известен (см. loadInboxAccess)
+    inbox: null,
+    inboxPending: 0,
   }),
   getters: {
     isLoggedIn: (s) => !!s.user,
@@ -49,9 +54,47 @@ export const useAuthStore = defineStore('auth', {
   },
   actions: {
     setUser(user) {
+      if (user?.id !== this.user?.id) {
+        this.inbox = null
+        this.inboxPending = 0
+        inboxCheck = null
+      }
       this.user = user
       this.loaded = true
       setCsrfToken(user?.csrf_token || '')
+    },
+    /**
+     * «Входящие данные» доступны с полномочием data.manage и тем, кто применяет хотя бы один набор
+     * (редакторы служб, ведущие структуру и отчёты) — это знает сервер: /api/inbox/datasets отвечает
+     * наборами с can_apply или 403. Ответ запоминается до смены пользователя; заодно — сколько ждут.
+     */
+    async loadInboxAccess({ force = false } = {}) {
+      if (!this.user || this.mustChangePassword) return false
+      if (!force && this.inbox !== null) return this.inbox
+      if (!force && inboxCheck) return inboxCheck
+      inboxCheck = (async () => {
+        let allowed = this.hasCapability('data.manage')
+        if (!allowed) {
+          try {
+            const meta = await api.get('/inbox/datasets', null, { silent: true })
+            allowed = !!(meta?.can_manage || meta?.datasets?.some((d) => d.can_apply))
+          } catch {
+            allowed = false
+          }
+        }
+        if (allowed) {
+          try {
+            this.inboxPending = (await api.get('/inbox', { status: 'pending', page_size: 1 }, { silent: true }))?.counts?.pending || 0
+          } catch {}
+        }
+        this.inbox = allowed
+        return allowed
+      })()
+      try {
+        return await inboxCheck
+      } finally {
+        inboxCheck = null
+      }
     },
     async load() {
       try {

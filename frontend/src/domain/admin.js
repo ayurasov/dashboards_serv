@@ -235,8 +235,14 @@ export function avatarTone(seed) {
 export const ACTION_LABELS = {
   create: 'Создание', update: 'Изменение', delete: 'Удаление', login: 'Вход', password: 'Пароль', import: 'Загрузка',
   grant: 'Выдача доступа',
+  // входящие данные и интеграции (0.4.0)
+  receive: 'Получение', duplicate: 'Повтор файла', apply: 'Применение', reject: 'Отклонение', retry: 'Повторная обработка',
+  check: 'Проверка', run: 'Запуск', reissue: 'Выпуск заново', revoke: 'Отзыв',
 }
-export const ACTION_TONES = { create: 'green', update: 'blue', delete: 'red', login: 'gray', password: 'yellow', import: 'dark', grant: 'green' }
+export const ACTION_TONES = {
+  create: 'green', update: 'blue', delete: 'red', login: 'gray', password: 'yellow', import: 'dark', grant: 'green',
+  receive: 'gray', duplicate: 'gray', apply: 'green', reject: 'yellow', retry: 'blue', check: 'gray', run: 'dark', reissue: 'yellow', revoke: 'red',
+}
 
 export const ENTITY_LABELS = {
   indicator: 'Показатель',
@@ -261,6 +267,10 @@ export const ENTITY_LABELS = {
   service_setting: 'Настройка службы',
   custom_dashboard: 'Мой дашборд',
   session: 'Сессия',
+  inbox_item: 'Элемент входящих',
+  inbox_rule: 'Правила входящих',
+  integration: 'Подключение',
+  inbound_key: 'Ключ входящих вызовов',
 }
 
 export const actionLabel = (action) => ACTION_LABELS[action] || action || '—'

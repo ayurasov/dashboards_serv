@@ -27,11 +27,13 @@ export function configureClient({ unauthorized, passwordChangeRequired } = {}) {
 }
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'error', fields = {} } = {}) {
+  constructor(message, { status = 0, code = 'error', fields = {}, body = null } = {}) {
     super(message)
     this.status = status
     this.code = code
     this.fields = fields
+    // Тело ответа целиком: у части ошибок там данные для экрана (409 import_has_errors — свежий план)
+    this.body = body
   }
 }
 
@@ -52,10 +54,14 @@ async function parseError(response) {
   const message = typeof body.detail === 'string' && body.detail
     ? body.detail
     : response.status >= 500 ? 'Ошибка сервера. Попробуйте позже' : `Ошибка ${response.status}`
-  return new ApiError(message, { status: response.status, code: body.code || 'error', fields: body.fields || {} })
+  return new ApiError(message, { status: response.status, code: body.code || 'error', fields: body.fields || {}, body })
 }
 
-export async function request(method, path, { body, params, silent = false, raw = false, form } = {}) {
+/**
+ * handled — коды ошибок, которые вызывающий показывает сам (например, check_required — с кнопкой
+ * «Проверить»): для них нет всплывающего сообщения, остальные ошибки — как обычно.
+ */
+export async function request(method, path, { body, params, silent = false, raw = false, form, handled = [] } = {}) {
   const headers = { Accept: 'application/json' }
   if (method !== 'GET' && method !== 'HEAD') headers['X-CSRF-Token'] = csrfToken || readCsrfCookie()
   let payload
@@ -85,7 +91,7 @@ export async function request(method, path, { body, params, silent = false, raw 
     }
     // Ошибки полей формы (422 или 409 «уже есть» с fields) форма показывает рядом с полями — без второго уведомления
     const formErrors = (response.status === 422 || response.status === 409) && method !== 'GET' && Object.keys(error.fields).length > 0
-    if (!silent && !formErrors) toastError(error.message)
+    if (!silent && !formErrors && !handled.includes(error.code)) toastError(error.message)
     throw error
   }
   if (raw) return response

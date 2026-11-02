@@ -31,13 +31,18 @@ jobs:
         env:
           DATABASE_URL: sqlite:////tmp/e2e.db
           DEMO_DATA: "true"
+          # Папка «Входящие» (0.4.0): вкладка «Папка» и подключение папки в e2e
+          INBOX_DIR: /tmp/e2e-inbox
+          INBOX_SETTLE_SECONDS: "1"
         run: |
+          mkdir -p /tmp/e2e-inbox
           python -m app.cli migrate
           nohup uvicorn app.main:app --port 8000 > /tmp/server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/api/health && break; sleep 1; done
       - working-directory: frontend
         env:
           E2E_BASE_URL: http://127.0.0.1:8000
+          E2E_INBOX_DIR: /tmp/e2e-inbox
         run: npx playwright test
       - if: failure()
         uses: actions/upload-artifact@v4

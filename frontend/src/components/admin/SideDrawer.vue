@@ -66,7 +66,7 @@ h2 { font-size: 17px; }
 .close { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
 .close:hover { background: var(--surface-3); color: var(--text); }
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 24px; }
-.foot { display: flex; align-items: center; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--surface-2); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes slide { from { transform: translateX(24px); opacity: .4; } }
 .grabber { display: none; }
