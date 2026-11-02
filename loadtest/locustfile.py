@@ -3,7 +3,9 @@
 Каждый виртуальный пользователь входит один раз (сессия в cookie) и дальше открывает
 страницы с паузой на чтение 5–20 с. «Страница» — тот же набор запросов API, что делает
 интерфейс. Смесь страниц отражает ожидаемую работу: обзор и дашборды чаще всего,
-PDF и ввод данных — редко.
+PDF и ввод данных — редко. С 0.4.0 — «Входящие данные» и «Интеграции» для тех, у кого они есть,
+и внешние системы (1С, скрипты), которые раз в 30–60 с присылают файл значений показателей
+по API с ключом интеграции (InboundSystem, 2 экземпляра).
 
     locust -f loadtest/locustfile.py --host http://127.0.0.1:8000 \
         --users 1000 --spawn-rate 25 --run-time 6m --headless --csv loadtest/results/u1000
@@ -13,6 +15,7 @@ PDF и ввод данных — редко.
 from __future__ import annotations
 
 import random
+import uuid
 
 from locust import HttpUser, between, events, task
 
@@ -40,6 +43,14 @@ class Employee(HttpUser):
         self.client.get("/api/auth/me", name="GET /api/auth/me")
         self.client.get("/api/services", name="GET /api/services")
         self.client.get("/api/palette/active", name="GET /api/palette/active")
+        # «Входящие данные» в меню — у кого есть хотя бы один набор (403 для остальных ожидаем)
+        self.inbox = False
+        with self.client.get("/api/inbox/datasets", name="GET /api/inbox/datasets", catch_response=True) as r:
+            if r.status_code == 200:
+                data = r.json()
+                self.inbox = bool(data.get("can_manage") or any(d.get("can_apply") for d in data.get("datasets", [])))
+            elif r.status_code == 403:
+                r.success()
 
     def page(self, *paths):
         service = {"hr": "hr", "tp": "tech", "partnerships": "project_product"}.get(paths[0].split("?")[0].split("/")[2])
@@ -128,6 +139,22 @@ class Employee(HttpUser):
     def org_person(self):
         self.client.get(f"/api/org/people/{random.randint(1, 9)}", name="GET /api/org/people/{id}")
 
+    # --- 0.4.0: входящие данные и интеграции
+    @task(2)
+    def inbox(self):
+        if not self.inbox:
+            return
+        status = random.choice(["", "pending", "applied,error"])
+        self.client.get(f"/api/inbox?page=1&page_size=50{'&status=' + status if status else ''}",
+                        name="GET /api/inbox")
+
+    @task(1)
+    def integrations(self):
+        if self.username != "admin":
+            return
+        for path in ("/api/integrations", "/api/integrations/kinds", "/api/integrations/keys"):
+            self.client.get(path, name=f"GET {path}")
+
     # --- редкие тяжёлые операции
     @task(1)
     def pdf(self):
@@ -144,6 +171,39 @@ class Employee(HttpUser):
         value = round(random.uniform(1.5, 4.5), 2)
         self.client.put("/api/hr/months/2026-07/metrics", json=[{"metric_key": "turnover", "value": value}],
                         headers={"X-CSRF-Token": self.csrf}, name="PUT /api/hr/months/{key}/metrics")
+
+
+class InboundSystem(HttpUser):
+    """Внешняя система (1С, скрипт): ключ интеграции и файл значений показателей раз в 30–60 с."""
+
+    fixed_count = 2
+    wait_time = between(30, 60)
+
+    def on_start(self):
+        self.key = ""
+        r = self.client.post("/api/auth/login", json={"username": "admin", "password": "admin123"},
+                             name="POST /api/auth/login")
+        csrf = r.json().get("csrf_token", "") if r.status_code == 200 else ""
+        r = self.client.post("/api/integrations/keys", json={"name": f"Нагрузка {uuid.uuid4().hex[:6]}",
+                                                             "scopes": ["files", "status"]},
+                             headers={"X-CSRF-Token": csrf}, name="POST /api/integrations/keys")
+        if r.status_code == 201:
+            self.key = r.json()["key"]
+        self.client.cookies.clear()  # дальше — только ключ, без сессии
+
+    @task
+    def send_values(self):
+        if not self.key:
+            return
+        value = f"{random.uniform(50, 70):.1f}".replace(".", ",")
+        body = f"\ufeffПодразделение;Показатель;Период;Значение;Комментарий\nCOMM;fin.revenue;{random.choice(MONTHS)};" \
+               f"{value};из 1С ({uuid.uuid4().hex[:8]})\n"
+        r = self.client.post("/api/inbound/v1/files", headers={"Authorization": f"Bearer {self.key}"},
+                             files={"file": ("values.csv", body.encode("utf-8"), "text/csv")},
+                             data={"dataset": "indicators", "apply": "true"}, name="POST /api/inbound/v1/files")
+        if r.status_code in (200, 201):
+            self.client.get(f"/api/inbound/v1/files/{r.json()['id']}", headers={"Authorization": f"Bearer {self.key}"},
+                            name="GET /api/inbound/v1/files/{id}")
 
 
 @events.quitting.add_listener
