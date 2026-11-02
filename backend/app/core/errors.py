@@ -1,4 +1,7 @@
-"""Единый формат ошибок API: {"detail": "текст для человека", "code": "машинный код"}."""
+"""Единый формат ошибок API: {"detail": "текст для человека", "code": "машинный код"}.
+
+Под /api/inbound/ (приём по API для внешних систем, ADR-0011) — те же значения ещё и в полях
+{"error": код, "message": текст}, как в соглашениях интеграций «По Делу» и «Пульса»."""
 from __future__ import annotations
 
 import logging
@@ -17,7 +20,7 @@ class AppError(Exception):
     code = "bad_request"
 
     def __init__(self, detail: str, *, code: str | None = None, status_code: int | None = None,
-                 fields: dict[str, str] | None = None):
+                 fields: dict[str, str] | None = None, headers: dict[str, str] | None = None):
         super().__init__(detail)
         self.detail = detail
         if code:
@@ -25,6 +28,7 @@ class AppError(Exception):
         if status_code:
             self.status_code = status_code
         self.fields = fields or {}
+        self.headers = headers or {}
 
 
 class NotFound(AppError):
@@ -91,31 +95,38 @@ VALIDATION_MESSAGES = {
 }
 
 
-def _body(detail: str, code: str, fields: dict | None = None) -> dict:
+INTEROP_PREFIX = "/api/inbound/"
+
+
+def _body(detail: str, code: str, fields: dict | None = None, request: Request | None = None) -> dict:
     body = {"detail": detail, "code": code}
     if fields:
         body["fields"] = fields
+    if request is not None and request.url.path.startswith(INTEROP_PREFIX):
+        body.update(error=code, message=detail)
     return body
 
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
-    async def _app_error(_request: Request, exc: AppError):
-        headers = {"Retry-After": "5"} if exc.status_code == 503 else None
-        return JSONResponse(_body(exc.detail, exc.code, exc.fields), status_code=exc.status_code, headers=headers)
+    async def _app_error(request: Request, exc: AppError):
+        headers = {"Retry-After": "5"} if exc.status_code == 503 else {}
+        headers.update(exc.headers)
+        return JSONResponse(_body(exc.detail, exc.code, exc.fields, request), status_code=exc.status_code,
+                            headers=headers or None)
 
     @app.exception_handler(StarletteHTTPException)
-    async def _http_error(_request: Request, exc: StarletteHTTPException):
+    async def _http_error(request: Request, exc: StarletteHTTPException):
         detail = exc.detail if isinstance(exc.detail, str) else "Ошибка запроса"
         if exc.status_code == 404 and detail == "Not Found":
             detail = "Ресурс не найден"
         if exc.status_code == 405:
             detail = "Метод не поддерживается"
-        return JSONResponse(_body(detail, HTTP_CODES.get(exc.status_code, "error")),
+        return JSONResponse(_body(detail, HTTP_CODES.get(exc.status_code, "error"), request=request),
                             status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(_request: Request, exc: RequestValidationError):
+    async def _validation_error(request: Request, exc: RequestValidationError):
         fields: dict[str, str] = {}
         for err in exc.errors():
             loc = [str(p) for p in err.get("loc", ()) if p not in ("body", "query", "path")]
@@ -128,14 +139,15 @@ def install_error_handlers(app: FastAPI) -> None:
             fields.setdefault(name, message)
         first = next(iter(fields.items()), ("", "Проверьте введённые данные"))
         detail = f"{first[1]}: {first[0]}" if first[0] and first[0] != "body" else first[1]
-        return JSONResponse(_body(detail, "validation_error", fields), status_code=422)
+        return JSONResponse(_body(detail, "validation_error", fields, request), status_code=422)
 
     @app.exception_handler(IntegrityError)
-    async def _integrity_error(_request: Request, exc: IntegrityError):
+    async def _integrity_error(request: Request, exc: IntegrityError):
         log.warning("integrity error: %s", exc.orig)
-        return JSONResponse(_body("Запись конфликтует с существующими данными", "conflict"), status_code=409)
+        return JSONResponse(_body("Запись конфликтует с существующими данными", "conflict", request=request),
+                            status_code=409)
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception):  # pragma: no cover - страховка
         log.exception("unhandled error on %s %s", request.method, request.url.path)
-        return JSONResponse(_body("Внутренняя ошибка сервера", "internal_error"), status_code=500)
+        return JSONResponse(_body("Внутренняя ошибка сервера", "internal_error", request=request), status_code=500)

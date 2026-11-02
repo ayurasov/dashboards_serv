@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from './auth'
 import { navItemAllowed, SERVICE_NAV } from '@/router/navigation'
@@ -98,5 +98,49 @@ describe('права текущего пользователя', () => {
     expect(visible('hr')).not.toContain('/hr/registry')
     auth.setUser({ ...EMPLOYEE, effective_access: { ...EMPLOYEE.effective_access, services: { hr: 'viewer' }, can_view_records: true, data_classes: ['operational', 'personal'] } })
     expect(visible('hr')).toContain('/hr/registry')
+  })
+
+  it('входящие данные: доступ и счётчик — из профиля /api/auth/me, без отдельных запросов', async () => {
+    const calls = []
+    globalThis.fetch = vi.fn(async (url) => {
+      calls.push(url)
+      return new Response(JSON.stringify({ ...EMPLOYEE, inbox: { available: true, pending: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    auth.setUser({ id: 1, role: 'user', capabilities: ['data.manage'], effective_access: { services: {} }, inbox: { available: true, pending: 3 } })
+    expect(await auth.loadInboxAccess()).toBe(true)
+    expect(auth.inboxPending).toBe(3)
+    auth.setUser({ ...EMPLOYEE, inbox: { available: true, pending: 4 } })
+    expect(auth.inbox).toBe(true)
+    expect(await auth.loadInboxAccess()).toBe(true)
+    expect(auth.inboxPending).toBe(4)
+    expect(calls).toEqual([]), 'меню не делает запросов /api/inbox/datasets и /api/inbox'
+    // после применения, отклонения или загрузки — счётчик тем же /api/auth/me; одновременные вызовы — один запрос
+    await Promise.all([auth.refreshInbox(), auth.refreshInbox()])
+    expect(calls).toEqual(['/api/auth/me'])
+    expect(auth.inboxPending).toBe(1)
+    expect(auth.user.username).toBe('engineer')
+    auth.setUser({ ...EMPLOYEE, id: 10, inbox: { available: false, pending: 0 } })
+    expect(await auth.loadInboxAccess()).toBe(false)
+    expect(auth.inbox).toBe(false)
+    expect(auth.inboxPending).toBe(0)
+    auth.setUser({ ...EMPLOYEE, id: 11 })
+    expect(auth.inbox).toBe(false)
+  })
+})
+
+describe('руководство администратора', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('администратору и любому полномочию администрирования; остальным — нет', () => {
+    const auth = useAuthStore()
+    expect(auth.canReadAdminGuide).toBe(false)
+    auth.setUser(EMPLOYEE)
+    expect(auth.canReadAdminGuide).toBe(false)
+    for (const capability of ['org.manage', 'users.manage', 'reports.manage', 'data.manage', 'integrations.manage']) {
+      auth.setUser({ ...EMPLOYEE, capabilities: [capability] })
+      expect(auth.canReadAdminGuide).toBe(true)
+    }
+    auth.setUser({ ...EMPLOYEE, role: 'admin' })
+    expect(auth.canReadAdminGuide).toBe(true)
   })
 })

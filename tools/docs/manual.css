@@ -51,7 +51,7 @@ li { margin: .8mm 0; }
 li::marker { color: var(--blue); }
 strong { font-weight: 650; }
 a { color: var(--blue-dark); }
-code { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 8.8pt; background: #eef1f8; border-radius: 3px; padding: .3mm 1.2mm; }
+code { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-variant-ligatures: none; font-feature-settings: "calt" 0, "liga" 0; font-size: 8.8pt; background: #eef1f8; border-radius: 3px; padding: .3mm 1.2mm; }
 pre { background: #1d2433; color: #e8ecf5; border-radius: 3mm; padding: 4mm 5mm; font-size: 8.5pt; line-height: 1.5; overflow: hidden; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }
 pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
 

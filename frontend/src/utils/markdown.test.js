@@ -49,4 +49,48 @@ describe('markdown for the in-app user guide', () => {
     expect(missing).toEqual([])
     expect(html).not.toMatch(/<script|javascript:/i)
   })
+
+  it('renders fenced code blocks as is, also inside list items', () => {
+    const source = [
+      '1. Отправьте файл:', '', '   ```bash', '   curl -X POST "/api/inbound/v1/files" \\', '     -F "file=@a.csv"', '   ```', '',
+      '```json', '[{"indicator": "jira.resolved", "jql": "a < \\"{month_start}\\""}]', '# не заголовок', '```', '',
+      'Абзац после кода.',
+    ].join('\n')
+    const { html, headings } = renderMarkdown(source)
+    expect(headings).toEqual([])
+    expect(html).toContain('<pre class="md-code" data-lang="bash"><code>curl -X POST &quot;/api/inbound/v1/files&quot; \\\n  -F &quot;file=@a.csv&quot;</code></pre>')
+    expect(html).toContain('<pre class="md-code" data-lang="json"><code>[{&quot;indicator&quot;: &quot;jira.resolved&quot;, &quot;jql&quot;: &quot;a &lt; \\&quot;{month_start}\\&quot;&quot;}]\n# не заголовок</code></pre>')
+    expect(html).toContain('<p>Абзац после кода.</p>')
+  })
+
+  it('renders the whole admin guide with every screenshot resolved', () => {
+    const source = readFileSync(resolve(process.cwd(), '../docs/manuals/admin-guide.md'), 'utf8')
+    const missing = []
+    const { html, headings, meta } = renderMarkdown(source, {
+      resolveImage: (src) => { if (!src.startsWith('images/admin/')) missing.push(src); return src },
+    })
+    expect(meta.title).toContain('руководство администратора')
+    expect(new Set(headings.map((h) => h.id)).size).toBe(headings.length)
+    expect(missing).toEqual([])
+    expect(html).not.toMatch(/<script|javascript:/i)
+    // Строки «# …» внутри примеров кода — не заголовки
+    expect(headings.some((h) => h.text.startsWith('Маркетинговые проекты'))).toBe(false)
+  })
+
+  it('every «?» help anchor of the router exists in its guide', () => {
+    const routes = readFileSync(resolve(process.cwd(), 'src/router/index.js'), 'utf8')
+    const ids = {
+      user: new Set(renderMarkdown(readFileSync(resolve(process.cwd(), '../docs/manuals/user-guide.md'), 'utf8')).headings.map((h) => h.id)),
+      admin: new Set(renderMarkdown(readFileSync(resolve(process.cwd(), '../docs/manuals/admin-guide.md'), 'utf8')).headings.map((h) => h.id)),
+    }
+    const anchors = routes.split('\n').filter((line) => /guide: '/.test(line) && /path: '/.test(line)).map((line) => ({
+      path: line.match(/path: '([^']+)'/)[1],
+      id: line.match(/guide: '([^']+)'/)[1],
+      kind: /guideKind: 'admin'/.test(line) && !/path: '\/guide/.test(line) ? 'admin' : 'user',
+    }))
+    expect(anchors.length).toBeGreaterThan(20)
+    expect(anchors).toContainEqual({ path: '/inbox', id: 'входящие-данные', kind: 'user' })
+    expect(anchors).toContainEqual({ path: '/admin/integrations', id: 'интеграции', kind: 'admin' })
+    expect(anchors.filter((a) => !ids[a.kind].has(a.id))).toEqual([])
+  })
 })

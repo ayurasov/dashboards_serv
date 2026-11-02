@@ -2,6 +2,56 @@
 
 Технические и эксплуатационные изменения. Пользовательское окно «Что нового» использует `docs/versions.md`.
 
+## Версия 0.4.0 (Ноябрь 2026 г.)
+
+Интеграции и входящие данные: единый конвейер файлов (папка, загрузка, приём по API, подключения) с распознаванием набора, планом и применением сразу или после подтверждения; подключения к «По Делу», «Пульсу проекта», Jira, Confluence, Bitrix24, Exchange и 1С с зашифрованными секретами, несколькими расписаниями и журналом запусков; «По Делу» и «Пульс» — по ключам интеграций; планировщик `worker`. Нагрузочная проверка: 1000 пользователей — p50 19 мс, p95 63 мс без ошибок сервера ([отчёт](performance/load-test-0.4.0.md)). Подробности — [release notes](release-notes/v0.4.0.md), решение — [ADR-0011](architecture/adr-0011-integrations.md), регламенты — [обновление до 0.4.0](runbooks/upgrade-to-0.4.0.md), [неполадки интеграций](runbooks/integrations-troubleshooting.md).
+
+### Схема БД — `0016_integrations` (откат поддерживается)
+
+- новые таблицы: `integrations` (вид, название, `enabled`, `config` без секретов, `secret_encrypted` и `secret_bound_url`, `schedule` — список до 5 записей, `next_runs` — следующий запуск каждой записи, `next_run_at` — ближайший, `running_since`, `state`, `verified_at`, `last_run_at`, `last_ok_at`, `last_error_at`, `last_error`), `integration_runs` (действие, повод `manual` · `schedule` · `cli`, итог `ok` · `partial` · `error` · `interrupted`, сводка, сообщение, ошибка, кто), `inbound_keys` (название, `sha256`, `prefix` — 12 символов, `scopes` `files` · `status`, выпуск, `last_used_at`, `revoked_at`, окно ограничения частоты `rate_window_start` и `rate_count`), `inbox_items` (источник `folder` · `upload` · `api` · `integration`, файл до срока хранения, SHA-256, набор, статус, план, сводка, итог, пояснение источника), `inbox_rules` (источник × набор → `auto_apply`);
+- частичный уникальный индекс `(dataset, sha256)` по живым статусам (`received`, `recognized`, `pending`, `applied`) — повтор файла распознаётся и при одновременном приёме;
+- существующие таблицы не меняются; отметки `worker_status` и `inbox_folder_status` — в `app_settings`;
+- откат (`downgrade 0015_reports`) удаляет таблицы и снимает `data.manage` и `integrations.manage` в `users.capabilities`.
+
+### Входящие данные
+
+- наборы (`hr-months`, `hr-events`, `tp-weekly`, `naumen`, `partnerships`, `indicators`, `structure`, `employees`) — те же движки плана и применения, что у ручной загрузки; распознавание: подпапка, выбор, `dataset` API, затем содержимое (порог 50 баллов, имя файла по шаблону — +20, равенство лучших — не распознан), JSON по полю `format` (в том числе `podelu.org-structure`, `podelu.employees`);
+- применение от имени источника (`source_actor`: все службы и классы данных, `org.manage` и `reports.manage`, без администратора и `users.manage`) или пользователя (с `data.manage` — права источника и журнал на пользователя, иначе — свои права); перед применением план строится заново; правила `inbox_rules` — для `folder`, `api`, `integration`; `apply=false` — только план;
+- папка: `INBOX_SETTLE_SECONDS`, захват `os.replace` в `.work/`, `O_NOFOLLOW`, ссылки за пределы папки не читаются, `processed/ГГГГ-ММ/` и `rejected/` с `*.result.json`, возврат из `.work/` через час;
+- срок хранения: содержимое завершённых элементов (`applied`, `rejected`, `duplicate`, `error`) старше `INBOX_RETENTION_DAYS` — `NULL` в базе, старые файлы — из `processed/` и `rejected/`; раз в час в планировщике или `inbox cleanup`;
+- приём по API: Bearer `dash_` + `token_urlsafe(32)`, SHA-256 и `compare_digest`, `last_used_at` не чаще раза в минуту, `INBOUND_RATE_LIMIT` в минуту на ключ — счётчик окна в строке ключа, один атомарный `UPDATE … RETURNING` (`hit_rate_limit`), общий для всех процессов, `Retry-After` — секунд до конца окна; 201 — новый, 200 — повтор; ошибки дублируются в `error`/`message` для совместимости с «По Делу» и «Пульсом»;
+- значения показателей: строка `clear` (столбец «Очистить»: «да», 1, x, +) удаляет сохранённое значение — действие `clear`, в сводке `cleared`; загрузка без изменений не пишет журнал и не меняет ревизию отчётов;
+- загрузка и «Повторить» человеком применяются по флажку «применить сразу» без правила; сообщения ожидания — «Загружено для проверки — посмотрите план и примените», «План построен заново — посмотрите его и примените», у API с `apply=false` — «Ожидает подтверждения: отправитель попросил только план».
+
+### Интеграции
+
+- каркас `app/integrations`: `Connector` (поля, действия, `check`, `run`, `validate_config`, `secret_url` и `secret_url_fields`), реестр `@register`, `RunContext` (`inbox.add(..., note=)`, `plans.*`, `plans.ensure_indicator`, `state`), `HttpClient` (адрес, `<ВИД>_ALLOWED_HOSTS`, без перенаправлений, 5/30 с, 20 МБ, повтор 429/503 только у GET/HEAD/OPTIONS, вычистка секретов), `runner` (атомарный `claim_due` и `begin_running`, `RUNNING_TIMEOUT` 2 ч, `INTEGRATION_RUNS_KEEP`);
+- расписание — список до 5 записей (`interval` 5–10080 мин или `daily` ЧЧ:ММ с днями недели, у каждой свои `actions`), прежний вид (один объект) читается как одна запись (`entries_of`); `claim_due` занимает только наступившие записи и переносит их одним `UPDATE` с проверкой прочитанного `next_run_at`; `schedule_label` — «В 06:00 ежедневно — Синхронизировать структуру; Каждые 30 мин — Забрать данные из задач»;
+- прерванный запуск: `running` старше `RUNNING_TIMEOUT` в API — `interrupted` («Запуск прерван»), `begin_running` и планировщик (`reclaim_stale`) занимают подключение заново и отмечают записи журнала; `current_error` — последняя ошибка, только если она новее последнего успеха;
+- `Connector.admin_only` (Confluence: публикует полный отчёт) — создать, изменить, проверить, запустить, удалить только администратору (403 `admin_only`), у подключения `can_manage`; `Connector.order` — порядок видов и карточек; `counter_labels` и общие `COMMON_COUNTER_LABELS` — подписи счётчиков журнала (без подписи не показываются); `Connector.stored_config` — чтение настроек, сохранённых до появления поля (подключения «По Делу» и «Пульса» без `mode` — служебная учётная запись); предпросмотр Jira, Bitrix24 и 1С считает значения показателей, которые будут созданы (`values_pending`);
+- проверка: `CheckResult(ok, message, details, warnings)` — замечания при `ok` («Подключено с замечаниями», журнал изменений — «успешно, с замечаниями»), без хвостов «Внимание:» в сообщении; подписи подробностей — `Connector.detail_labels` (общие — каркаса), служебные ключи — `technical_details`; поле с `placeholder_if` (у «По Делу» в режиме ключа — «пусто — все списки ключа»);
+- прокси: `HTTPS_PROXY` / `HTTP_PROXY` с разбором `NO_PROXY` в каркасе (`*.домен`, `IP:порт`, сеть, `*`), ошибка соединения называет прокси; IMAP — напрямую;
+- секреты: Fernet, ключ `urlsafe_b64(sha256("integration:" + SECRET_KEY))`, в шифротексте — адрес привязки и владелец `integration:<id>`; смена адреса без новых секретов — 422 `secret_rebind_required`; смена `SECRET_KEY` — `secret_problem` у подключения, перешифрования нет;
+- включение только после успешной проверки текущих настроек (409 `check_required`), изменение настроек или секретов снимает `verified_at`;
+- коннекторы: `podelu`, `puls`, `jira`, `confluence`, `bitrix24`, `exchange`, `onec`, `folder` (одиночный); «По Делу» и «Пульс» — режим `mode`: `key` (по умолчанию) — ключ интеграции «По Делу» 1.4.5+ (`podelu_…`, `/api/integrations/v1`, области `org.read`, `users.read`, `tasks.attachments.read`, `tasks.comment`; задачи по курсору `activityAt`, повторы по `sha256` без скачивания, комментарий системы, 403 `comments_disabled` — предупреждение, 429 — «Частично» с продолжением) и «Пульса» 0.6.0+ (`puls_…`, `/api/integration/v1`, права `projects.read` и `projects.stats`, не больше 200 проектов), `session` — служебная учётная запись (CSRF, вход, выход всегда) для более ранних версий; ошибки ключа — не принят (401), отозван (`key_revoked`), нет области (`insufficient_scope`), лимит (429), нет API ключей (404 на `/ping`); ссылки наружу — по `PUBLIC_URL`; Confluence публикует `reports.company_scorecard` (отчёт без пользователя), поле «Адрес «Дашбордов компании»» убрано; «По Делу» с «Отключать отсутствующих» отключает только своих (`org_source = podelu`, журнал — «нет среди активных в «По Делу»»), служебная учётная запись защищена (`keep`).
+
+### Доступ и администрирование
+
+- полномочия `data.manage` («Входящие данные») и `integrations.manage` («Интеграции»); доступ ко «Входящим» без полномочия — `Dataset.can_apply` хотя бы одного набора (у `indicators` — любой уровень `editor`), видимость — свои наборы и свои загрузки;
+- `/api/auth/me` → `inbox: {available, pending}` — пункт меню и счётчик (один COUNT по индексу): с `data.manage` — все ожидающие, иначе — наборов, которые пользователь применяет;
+- `/api/inbox/rules` — `{rules: […]}`, `/api/inbox/folder` → `folders[].patterns` и `detect {threshold, name_bonus}`, `/api/integrations/keys` → `rate_limit`, `GET /api/integrations/keys/scopes` — подписи областей, `/kinds` → `secret_url_fields`, `order`, `admin_only`, `admin_only_note`, `counter_labels`; у подключения — `schedule` (записи с `label` и `next_run_at`), `can_manage`, `current_error`;
+- описания `data.manage` и `integrations.manage` называют доступ к данным; «Руководство администратора» (`/guide/admin`) и «?» на страницах администрирования — администратору и сотрудникам с любым полномочием администрирования (`auth.canReadAdminGuide`), остальным — «Нет доступа» с причиной `admin-guide`;
+- «Вход по домену» — `/admin/directory` (прежний `/admin/integrations` занят «Интеграциями»);
+- журнал изменений: `inbox_item`, `inbox_rule`, `integration`, `inbound_key`.
+
+### Развёртывание
+
+- сервис `worker` (`python -m app.cli worker`, тот же образ, переменные — якорь `*app-environment`, том `inbox`, `depends_on: app healthy`, без healthcheck, `stop_grace_period: 60s`); несколько экземпляров безопасны;
+- переменные `INBOX_DIR` (`/data/inbox`), `INBOX_SETTLE_SECONDS` (10), `INBOX_MAX_MB` (20), `INBOX_RETENTION_DAYS` (90), `INBOUND_RATE_LIMIT` (120), `WORKER_TICK_SECONDS` (30), `INTEGRATION_RUNS_KEEP` (200), `PUBLIC_URL`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (передаются в `app` и `worker`), `PODELU_`, `PULS_`, `JIRA_`, `CONFLUENCE_`, `BITRIX24_`, `EXCHANGE_`, `ONEC_ALLOWED_HOSTS`;
+- зависимости `requests`, `cryptography`, `exchangelib` (необязательная, для EWS); `docker-compose.yml` — тег образа по умолчанию `0.4.0`;
+- команды `worker [--once]`, `inbox scan`, `inbox cleanup`, `integrations list`, `integrations run ID|ВИД [--action] [--force]` (выключенное подключение — только по номеру с `--force`, по виду — только включённые);
+- интерфейс: контраст приглушённого текста и значков статусов — WCAG AA в светлой и тёмной теме.
+
 ## Версия 0.3.0 (Ноябрь 2026 г.)
 
 Сквозные отчёты, светофоры и статусы по уровням сотрудников: каталог показателей, свёртка по структуре, статус подразделений с объяснением, отбор под доступ пользователя (область, глубина детализации, классы данных), ввод значений и загрузка Excel, PDF. Подробности — [release notes](release-notes/v0.3.0.md), решение — [ADR-0010](architecture/adr-0010-cross-reports.md), регламент — [обновление до 0.3.0](runbooks/upgrade-to-0.3.0.md).

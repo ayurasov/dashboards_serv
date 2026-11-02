@@ -26,7 +26,7 @@ RUN pip install -r backend/requirements.txt
 COPY backend/ backend/
 COPY --from=frontend /build/frontend/dist frontend/dist/
 RUN sed -i 's/\r$//' backend/docker-entrypoint.sh && chmod 755 backend/docker-entrypoint.sh \
-    && mkdir -p /data && chown -R app:app /data /app
+    && mkdir -p /data/inbox && chown -R app:app /data /app
 USER app
 # Рабочий каталог — сервер: «docker compose exec app python -m app.cli …» работает без -w
 WORKDIR /app/backend

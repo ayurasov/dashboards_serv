@@ -294,7 +294,7 @@ def test_import_plan_lists_errors_and_apply_is_refused(login, admin, db):
     plan = _import(c, content)
     assert plan.status_code == 200, plan.text
     data = plan.json()
-    assert data["summary"] == {"rows": 12, "create": 1, "update": 1, "unchanged": 1, "errors": 9}
+    assert data["summary"] == {"rows": 12, "create": 1, "update": 1, "cleared": 0, "unchanged": 1, "errors": 9}
     assert not data["can_apply"] and not data["applied"]
     rows = {r["line"]: r for r in data["rows"]}
     assert rows[2]["action"] == "update" and rows[2]["before"]["value"] == 96 and rows[2]["after"]["value"] == 97
@@ -335,6 +335,72 @@ def test_import_apply_writes_values(login, admin, db):
     form = c.get("/api/reports/values?period=2026-07").json()
     assert next(v for v in form["values"] if v["department_id"] == codes["TECH"]
                 and v["indicator_key"] == "ops.plan")["source_label"] == "загружено из файла"
+
+
+def test_import_without_changes_writes_no_audit_and_keeps_revision(login, admin, db):
+    from app.models import ReportRevision
+
+    c = _as(login, "tech_dir")
+    content = "\n".join([HEADER, "TECH;ops.plan;2026-07;96;;"])     # то же, что уже сохранено
+    plan = _import(c, content).json()
+    assert plan["summary"]["unchanged"] == 1 and plan["can_apply"]
+    before = len(_audit(db, "indicator_value"))
+    revision = db.get(ReportRevision, 1).revision
+    result = _import(c, content, apply=True)
+    assert result.status_code == 200 and result.json()["applied"]
+    assert len(_audit(db, "indicator_value")) == before, "без изменений — без записи в журнале"
+    db.expire_all()
+    assert db.get(ReportRevision, 1).revision == revision, "и без роста ревизии отчётов"
+    changed = _import(c, "\n".join([HEADER, "TECH;ops.plan;2026-07;97;;"]), apply=True)
+    assert changed.json()["applied"] and len(_audit(db, "indicator_value")) == before + 1
+    db.expire_all()
+    assert db.get(ReportRevision, 1).revision == revision + 1
+
+
+def test_import_clear_column_deletes_stored_value(login, admin, db):
+    codes = _codes(admin)
+    c = _as(login, "tech_dir")
+    header = HEADER + ";Очистить"
+    content = "\n".join([header, "TECH;ops.plan;2026-07;;;;да", "SUP-OS;ops.plan;2026-09;;;;x",
+                         "SUP-OFFICE;ops.plan;2026-07;80;;;", "IT;ops.plan;2026-07;5;;;да",
+                         "SUP-OS;ops.csat;2026-07;;;;может быть"])
+    plan = _import(c, content).json()
+    rows = {r["line"]: r for r in plan["rows"]}
+    assert rows[2]["action"] == "clear" and rows[2]["clear"] and rows[2]["before"]["value"] == 96
+    assert rows[2]["after"] is None
+    assert rows[3]["action"] == "unchanged", "значения нет — очищать нечего"
+    assert rows[4]["action"] == "update" and not rows[4]["clear"]
+    assert rows[5]["errors"] == ["Строка «очистить» — без значения, цели и комментария"]
+    assert rows[6]["errors"] == ["«Очистить» — «да» или пусто: может быть"]
+    assert plan["summary"]["cleared"] == 1 and plan["summary"]["errors"] == 2
+    valid = "\n".join([header, "TECH;ops.plan;2026-07;;;;да", "SUP-OFFICE;ops.plan;2026-07;80;;;"])
+    result = _import(c, valid, apply=True).json()
+    assert result["applied"] and result["summary"] == {"rows": 2, "create": 0, "update": 1, "cleared": 1,
+                                                       "unchanged": 0, "errors": 0}
+    assert _value(db, "ops.plan", codes["TECH"]) is None, "сохранённое значение удалено"
+    assert _value(db, "ops.plan", codes["SUP-OFFICE"]).value == 80
+    entry = _audit(db, "indicator_value")[-1]
+    assert entry.summary.endswith("новых 0, обновлено 1, очищено 1")
+    assert entry.before["cleared"][0]["before"]["value"] == 96 and entry.before["cleared"][0]["period"] == "2026-07"
+    again = _import(c, valid, apply=True).json()
+    assert again["summary"]["cleared"] == 0 and again["summary"]["unchanged"] == 2, "повтор — очищать уже нечего"
+
+
+def test_import_clear_rows_from_connector(admin, db):
+    from app.services import report_admin
+    from app.services.inbox import source_actor
+
+    codes = _codes(admin)
+    actor = source_actor("Подключение «Тест»")
+    rows = [{"line": 1, "department": "TECH", "indicator": "ops.plan", "period": "2026-07", "value": None,
+             "target": None, "comment": None, "clear": True},
+            {"line": 2, "department": "IT", "indicator": "ops.plan", "period": "2026-07", "value": "0",
+             "target": None, "comment": "нет данных"}]
+    result, applied = report_admin.apply_import(db, actor, rows, "тест")
+    db.commit()
+    assert applied and result["summary"]["cleared"] == 1 and result["rows"][1]["action"] == "update"
+    assert _value(db, "ops.plan", codes["TECH"]) is None
+    assert _value(db, "ops.plan", codes["IT"]).value == 0, "ноль — значение, а не очистка"
 
 
 def test_import_xlsx_upload(admin, db):

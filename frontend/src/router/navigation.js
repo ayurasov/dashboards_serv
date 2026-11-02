@@ -37,7 +37,8 @@ export const ADMIN_NAV = [
   { to: '/admin/departments', label: 'Подразделения', icon: 'building', capability: 'org.manage' },
   { to: '/admin/org-transfer', label: 'Импорт и экспорт', icon: 'upload', capability: 'org.manage' },
   { to: '/admin/indicators', label: 'Показатели', icon: 'target', capability: 'reports.manage' },
-  { to: '/admin/integrations', label: 'Вход по домену', icon: 'key', admin: true },
+  { to: '/admin/integrations', label: 'Интеграции', icon: 'plug', capability: 'integrations.manage' },
+  { to: '/admin/directory', label: 'Вход по домену', icon: 'key', admin: true },
   { to: '/admin/audit', label: 'Журнал изменений', icon: 'history', admin: true },
   { to: '/admin/palettes', label: 'Палитры', icon: 'palette', admin: true },
   { to: '/admin/system', label: 'О системе', icon: 'server', admin: true },
@@ -45,7 +46,8 @@ export const ADMIN_NAV = [
 
 export const HELP_NAV = [
   { to: '/guide', label: 'Руководство', icon: 'book' },
-  { to: '/guide/admin', label: 'Руководство администратора', icon: 'shield', admin: true },
+  // Администратору и тем, у кого есть любое полномочие администрирования (auth.canReadAdminGuide)
+  { to: '/guide/admin', label: 'Руководство администратора', icon: 'shield', adminGuide: true },
   { to: '/about', label: 'О программе', icon: 'info' },
 ]
 

@@ -246,7 +246,10 @@ test('индивидуальная настройка (viewer) работает 
 test('вход по домену не настроен: состояние, проверка, переменные окружения', async ({ page }) => {
   const errors = collectErrors(page)
   await login(page, 'admin')
-  await page.goto('/admin/integrations')
+  // Страница переехала в 0.4.0: /admin/integrations — «Интеграции»; пункт меню — тот же «Вход по домену»
+  await page.getByRole('link', { name: 'Вход по домену', exact: true }).click()
+  await expect(page).toHaveURL(/\/admin\/directory$/)
+  await expect(page.getByRole('heading', { name: 'Вход по домену', level: 1 })).toBeVisible()
   await expect(page.getByTestId('ldap-status')).toContainText('Не настроен')
   await expect(page.getByTestId('ldap-status')).toContainText('Вход по домену не настроен')
   await page.getByRole('button', { name: 'Проверить подключение' }).click()

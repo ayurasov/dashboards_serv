@@ -1,4 +1,4 @@
-# Дашборды компании: приложение + PostgreSQL.
+# Дашборды компании: приложение, планировщик (worker) и PostgreSQL.
 #   cp .env.example .env   # задайте SECRET_KEY, POSTGRES_PASSWORD, ADMIN_PASSWORD
 #   docker compose up -d --build
 services:
@@ -20,14 +20,14 @@ services:
 
   app:
     build: .
-    image: dashboards:${APP_VERSION:-0.3.0}
+    image: dashboards:${APP_VERSION:-0.4.0}
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "${APP_PORT:-8000}:8000"
-    environment:
+    environment: &app-environment
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dashboards}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dashboards}
       SECRET_KEY: ${SECRET_KEY:?Задайте SECRET_KEY в .env (openssl rand -hex 32)}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
@@ -43,12 +43,57 @@ services:
       PDF_CONCURRENCY: ${PDF_CONCURRENCY:-2}
       LOG_JSON: ${LOG_JSON:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Адрес «Дашбордов» для ссылок наружу (Confluence, комментарии «По Делу»); пусто — без ссылок
+      PUBLIC_URL: ${PUBLIC_URL:-}
       # Вход по учётной записи домена; остальные AUTH_LDAP_* и AD_SYNC_* — в docker-compose.override.yml
       AUTH_LDAP_ENABLED: ${AUTH_LDAP_ENABLED:-false}
       AUTH_LDAP_URL: ${AUTH_LDAP_URL:-}
       AUTH_LDAP_BASE_DN: ${AUTH_LDAP_BASE_DN:-}
       AUTH_LDAP_BIND_DN: ${AUTH_LDAP_BIND_DN:-}
       AUTH_LDAP_BIND_PASSWORD: ${AUTH_LDAP_BIND_PASSWORD:-}
+      # Входящие данные и интеграции (ADR-0011): папка «Входящие» — том inbox, общий с планировщиком
+      INBOX_DIR: ${INBOX_DIR:-/data/inbox}
+      INBOX_SETTLE_SECONDS: ${INBOX_SETTLE_SECONDS:-10}
+      INBOX_MAX_MB: ${INBOX_MAX_MB:-20}
+      INBOX_RETENTION_DAYS: ${INBOX_RETENTION_DAYS:-90}
+      INBOUND_RATE_LIMIT: ${INBOUND_RATE_LIMIT:-120}
+      # Прокси для подключений по HTTP(S) (Jira, Confluence, «По Делу», «Пульс», Bitrix24, 1С, EWS и Microsoft Graph);
+      # пусто — без прокси. NO_PROXY — узлы без прокси через запятую («.company.ru», «10.0.0.0/8», «localhost»).
+      # IMAP почтового ящика ходит напрямую — прокси HTTP к нему не применяется
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+      # Разрешённые узлы подключений: «jira.company.ru» или «.company.ru» (домен и поддомены); пусто — любые
+      PODELU_ALLOWED_HOSTS: ${PODELU_ALLOWED_HOSTS:-}
+      PULS_ALLOWED_HOSTS: ${PULS_ALLOWED_HOSTS:-}
+      JIRA_ALLOWED_HOSTS: ${JIRA_ALLOWED_HOSTS:-}
+      CONFLUENCE_ALLOWED_HOSTS: ${CONFLUENCE_ALLOWED_HOSTS:-}
+      BITRIX24_ALLOWED_HOSTS: ${BITRIX24_ALLOWED_HOSTS:-}
+      EXCHANGE_ALLOWED_HOSTS: ${EXCHANGE_ALLOWED_HOSTS:-}
+      ONEC_ALLOWED_HOSTS: ${ONEC_ALLOWED_HOSTS:-}
+    volumes:
+      - inbox:/data/inbox
+
+  # Планировщик: папка «Входящие», запуски подключений по расписанию, срок хранения.
+  # Тот же образ; миграции выполняет только app — worker ждёт актуальную схему и не мигрирует сам.
+  worker:
+    image: dashboards:${APP_VERSION:-0.4.0}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    command: ["python", "-m", "app.cli", "worker"]
+    environment: *app-environment
+    volumes:
+      - inbox:/data/inbox
+    # У планировщика нет HTTP-сервера; признак работы — «Планировщик» на экране «Входящие → Папка»
+    healthcheck:
+      disable: true
+    # SIGTERM: текущий такт (разбор файла, запуск подключения) доделывается
+    stop_grace_period: 60s
 
 volumes:
   pg_data:
+  inbox:

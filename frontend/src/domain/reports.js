@@ -628,6 +628,8 @@ export function entryPeriods(current, count = 24) {
 // ---------------------------------------------------------------- загрузка значений
 
 export const IMPORT_COLUMNS = ['Подразделение', 'Показатель', 'Период', 'Значение', 'Цель', 'Комментарий']
+/** Необязательный столбец загрузки: «да» — удалить сохранённое значение за месяц (без значения, цели и комментария). */
+export const IMPORT_CLEAR_COLUMN = 'Очистить'
 export const IMPORT_FILTERS = [
   { value: 'changes', label: 'Изменения и ошибки' },
   { value: 'errors', label: 'Ошибки' },
@@ -636,16 +638,18 @@ export const IMPORT_FILTERS = [
 export const IMPORT_ACTIONS = {
   create: { label: 'Новое', tone: 'green' },
   update: { label: 'Изменится', tone: 'blue' },
+  clear: { label: 'Очистить', tone: 'red' },
   unchanged: { label: 'Без изменений', tone: 'gray' },
   error: { label: 'Ошибка', tone: 'red' },
 }
 
 const rowHasErrors = (row) => row.action === 'error' || (row.errors || []).length > 0
+const IMPORT_CHANGES = ['create', 'update', 'clear']
 
 /** Строки плана загрузки: изменения и ошибки / только ошибки / все. */
 export function filterImportRows(rows = [], filter = 'changes') {
   if (filter === 'errors') return rows.filter(rowHasErrors)
-  if (filter === 'changes') return rows.filter((r) => r.action === 'create' || r.action === 'update' || rowHasErrors(r))
+  if (filter === 'changes') return rows.filter((r) => IMPORT_CHANGES.includes(r.action) || rowHasErrors(r))
   return rows
 }
 
@@ -657,6 +661,7 @@ export function importChips(summary) {
     chip('Строк', summary.rows),
     chip('Новых', summary.create, 'green'),
     chip('Изменится', summary.update, 'blue'),
+    ...(summary.cleared ? [chip('Очистится', summary.cleared, 'red')] : []),
     chip('Без изменений', summary.unchanged),
     chip('Ошибок', summary.errors, 'red'),
   ]

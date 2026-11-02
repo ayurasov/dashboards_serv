@@ -259,7 +259,8 @@ class ImportRowOut(Schema):
     value: float | None = None
     target: float | None = None
     comment: str | None = None
-    action: Literal["create", "update", "unchanged", "error"]
+    clear: bool = Field(default=False, description="Строка «очистить»: удалить сохранённое значение")
+    action: Literal["create", "update", "clear", "unchanged", "error"]
     before: CellStateOut | None = None
     after: CellStateOut | None = None
     errors: list[str] = []
@@ -269,6 +270,7 @@ class ImportSummaryOut(Schema):
     rows: int
     create: int
     update: int
+    cleared: int = 0
     unchanged: int
     errors: int
 

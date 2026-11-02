@@ -1130,6 +1130,23 @@ def periods_data(db: Session, user: User) -> dict:
             "latest": period_key(periods[0]) if periods else None, "current": period_key(current_period())}
 
 
+def company_viewer(snap: org.OrgSnapshot, classes: Iterable[str] | None = None) -> Viewer:
+    """Просмотр «как у администратора» без пользователя: вся компания, все уровни детализации, классы данных
+    classes (по умолчанию — все), без исходных записей и выгрузки."""
+    allowed = frozenset(DATA_CLASSES if classes is None else (c for c in classes if c in DATA_CLASSES))
+    return Viewer(user_id=0, scope="company", roots=tuple(snap.roots()), depth=None, classes=allowed, services=(),
+                  can_records=False, can_export=False, can_manage=True)
+
+
+def company_scorecard(db: Session, period: date, root: int | None = None, *,
+                      classes: Iterable[str] | None = None) -> dict:
+    """Полный сквозной отчёт компании без пользователя — для публикаций (страница Confluence): как его видит
+    администратор, вся компания или ветка root, классы данных classes (по умолчанию все). Кто увидит
+    опубликованное, решают права там, куда публикуют."""
+    st = state(db)
+    return scorecard_data(db, st, company_viewer(st.snap, classes), period, root)
+
+
 def scorecard(db: Session, user: User, period_text: str | None = None, root: int | None = None) -> dict:
     """Отчёт пользователя словарём (для PDF и проверок)."""
     st = state(db)

@@ -49,7 +49,12 @@ def test_meta_for_any_user(client, login):
     assert [d["key"] for d in data["dimensions"]] == list(ACCESS_DIMENSIONS)
     assert [lvl["key"] for lvl in data["levels"]] == ["none", "viewer", "editor", "manager"]
     assert data["levels"][0]["label"] == "Нет" and data["max_drill_depth"] == MAX_DRILL_DEPTH
-    assert {c["key"] for c in data["capabilities"]} == {"org.manage", "users.manage", "reports.manage"}
+    assert {c["key"] for c in data["capabilities"]} == {"org.manage", "users.manage", "reports.manage", "data.manage",
+                                                    "integrations.manage"}
+    labels = {c["key"]: c["label"] for c in data["capabilities"]}
+    assert "содержимое каждого входящего файла" in labels["data.manage"] and \
+        "персональные и финансовые данные" in labels["data.manage"], "выдающий полномочие видит, что оно открывает"
+    assert all(word in labels["integrations.manage"] for word in ("подключения", "запускает", "ключи", "Confluence"))
     hr = data["services"][0]
     assert hr["key"] == "hr" and hr["has_dashboard"] and hr["levels"] == ["none", "viewer", "editor", "manager"]
     assert len(data["services"]) == 9

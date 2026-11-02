@@ -25,7 +25,11 @@ const groups = computed(() => app.dashboards
     items: SERVICE_NAV[s.key].filter((i) => navItemAllowed(auth, s.key, i)),
   })))
 
-const helpItems = computed(() => HELP_NAV.filter((i) => !i.admin || auth.isAdmin))
+// «Входящие данные» — с полномочием data.manage или правом применять набор: сервер сообщает это и число
+// ожидающих в профиле (/api/auth/me → inbox), отдельных запросов меню не делает
+const showInbox = computed(() => auth.inbox)
+
+const helpItems = computed(() => HELP_NAV.filter((i) => (i.adminGuide ? auth.canReadAdminGuide : !i.admin || auth.isAdmin)))
 const adminItems = computed(() => ADMIN_NAV.filter((i) => (i.admin ? auth.isAdmin : auth.hasCapability(i.capability))))
 
 function isActive(item) {
@@ -77,6 +81,10 @@ async function logout() {
       </router-link>
       <router-link to="/reports" class="item" :class="{ active: route.path === '/reports' || route.path.startsWith('/reports/') }" title="Сквозной отчёт">
         <AppIcon name="traffic" :size="17" /><span class="label">Сквозной отчёт</span>
+      </router-link>
+      <router-link v-if="showInbox" to="/inbox" class="item" :class="{ active: route.path === '/inbox' }" title="Входящие данные" data-testid="nav-inbox">
+        <AppIcon name="inbox" :size="17" /><span class="label">Входящие данные</span>
+        <span v-if="auth.inboxPending" class="count num" :title="`Ожидают подтверждения: ${auth.inboxPending}`">{{ auth.inboxPending > 99 ? '99+' : auth.inboxPending }}</span>
       </router-link>
 
       <div class="section-label">Службы</div>
@@ -157,6 +165,8 @@ async function logout() {
 .chev { color: var(--faint); transition: transform var(--t); transform: rotate(-90deg); }
 .chev.open { transform: rotate(0); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); }
+.count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 99px; background: var(--surface-3); color: var(--text-2); font-size: 10.5px; font-weight: 650; line-height: 18px; text-align: center; }
+.item.active .count { background: var(--brand); color: #fff; }
 .empty { margin: 8px 12px; font-size: var(--fs-sm); color: var(--muted); }
 .footer { display: flex; align-items: center; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
 .me { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 4px; border-radius: 10px; }
@@ -177,6 +187,7 @@ async function logout() {
 .collapsed .section-label { display: block; height: 1px; margin: 10px 8px; background: var(--border); font-size: 0; }
 .collapsed .footer { flex-direction: column; padding: 10px 6px; }
 .collapsed .dot { position: absolute; top: 6px; right: 12px; }
+.collapsed .count { position: absolute; top: 3px; right: 6px; min-width: 16px; height: 15px; padding: 0 4px; line-height: 15px; font-size: 9.5px; }
 
 @media (max-width: 960px) {
   .sidebar { width: var(--sidebar-w); transform: translateX(-100%); box-shadow: var(--shadow-lg); }

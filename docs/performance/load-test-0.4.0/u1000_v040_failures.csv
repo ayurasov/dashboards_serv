@@ -1,0 +1,7 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,GET /api/overview,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-02T04:14:49Z,2026-11-02T04:14:49Z
+GET,GET /api/org/tree,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-02T04:14:43Z,2026-11-02T04:14:43Z
+GET,GET /api/hr/months,"ConnectionResetError(104, 'Connection reset by peer')",2,2026-11-02T04:14:10Z,2026-11-02T04:14:28Z
+GET,GET /api/tp/naumen/filters,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-02T04:13:35Z,2026-11-02T04:13:35Z
+GET,GET /api/reports/periods,"ConnectionResetError(104, 'Connection reset by peer')",2,2026-11-02T04:14:28Z,2026-11-02T04:14:36Z
+GET,GET /api/reports/summary,"ConnectionResetError(104, 'Connection reset by peer')",1,2026-11-02T04:18:29Z,2026-11-02T04:18:29Z

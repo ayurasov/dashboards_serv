@@ -90,6 +90,18 @@ def _admin_access() -> EffectiveAccess:
     )
 
 
+def source_access() -> EffectiveAccess:
+    """Доступ источника данных (входящие, подключения): все службы и классы данных, вся компания,
+    без роли администратора и без выгрузок. Используется движками загрузки, когда данные применяет
+    источник или пользователь с полномочием data.manage (app/services/inbox.py)."""
+    return EffectiveAccess(
+        is_admin=False, profile_key=None, profile_name="Источник данных",
+        services={key: "manager" for key in SERVICE_KEYS}, service_scopes={}, org_scope="company",
+        data_classes=ALL_CLASSES, drill_depth=None, can_view_records=True, can_export=False,
+        sources={name: "source" for name in ("services", *INDIVIDUAL_DEFAULTS)},
+    )
+
+
 def compute(user: User) -> EffectiveAccess:
     if user.is_admin:
         return _admin_access()

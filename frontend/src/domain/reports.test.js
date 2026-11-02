@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   accessLine, ancestorIds, reasonParts, reasonText, buildTree, canEnterCell, cellCounts, cellErrors, cellStateText, cellTooltip, cellView, entryChanges,
-  entryDraft, entryKey, entryOriginal, entryPeriods, entryRows, evaluateRule, expandToDepth, expectedEmpty, filterImportRows,
+  IMPORT_ACTIONS, entryDraft, entryKey, entryOriginal, entryPeriods, entryRows, evaluateRule, expandToDepth, expectedEmpty, filterImportRows,
   filteredCount, groupByClass, hasViolation, importChips, matchesFilter, matrixColumns, matrixRows, noteByline, parseInput,
   ratedIndicators, resolveReportView, ruleBands, ruleSummary, shortNumber, sortIndicators, sourceText, statusSegments,
   templateCsv, toInput, treeDepth, trendOption, trendPointText, unitsByStatus, violationsText,
@@ -329,6 +329,13 @@ describe('загрузка значений', () => {
       { label: 'Без изменений', value: 1, tone: 'gray' }, { label: 'Ошибок', value: 0, tone: 'gray' },
     ])
     expect(importChips(null)).toEqual([])
+  })
+  it('строка «очистить»: видна среди изменений, в сводке — «Очистится»', () => {
+    const withClear = [...rows, { line: 6, action: 'clear', clear: true, errors: [] }]
+    expect(filterImportRows(withClear, 'changes').map((r) => r.line)).toEqual([2, 4, 5, 6])
+    expect(IMPORT_ACTIONS.clear).toEqual({ label: 'Очистить', tone: 'red' })
+    expect(importChips({ rows: 2, create: 0, update: 1, cleared: 1, unchanged: 0, errors: 0 }).map((c) => [c.label, c.value, c.tone]))
+      .toEqual([['Строк', 2, 'gray'], ['Новых', 0, 'gray'], ['Изменится', 1, 'blue'], ['Очистится', 1, 'red'], ['Без изменений', 0, 'gray'], ['Ошибок', 0, 'gray']])
   })
   it('шаблон CSV: заголовки, строки по ячейкам формы, сохранённые значения', () => {
     const csv = templateCsv({

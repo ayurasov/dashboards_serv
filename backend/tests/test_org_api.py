@@ -19,6 +19,7 @@ from app.core.errors import Conflict
 from app.models import AuditEntry, Department, DepartmentHead, User
 from app.schemas.org import DepartmentCreateIn
 from app.services import org, org_admin
+from tests.conftest import drop_pg_database
 
 from .conftest import ApiClient
 
@@ -593,8 +594,7 @@ def pg_session_factory(monkeypatch):
     yield factory
     engine.dispose()
     org.invalidate()
-    with server.connect() as conn:
-        conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    drop_pg_database(server, name)
     server.dispose()
 
 

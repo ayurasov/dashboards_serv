@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
-from ...core.db import get_db, utcnow
+from ...core.db import get_db
 from ...models import DataImport, NaumenTicket, TpWeeklyReport, User
 from ...schemas.common import ImportResult
-from ...services import access, audit
+from ...services import access
 from ...services import naumen as naumen_service
 from ...services.cache import cached_json
 from ..deps import require_service
@@ -87,43 +87,8 @@ async def import_tickets(request: Request, file: UploadFile = File(...),
     replace — все заявки заменяются содержимым файла."""
     raw = await read_upload(file)
     records, skipped = naumen_service.parse_xlsx(raw)
-    created = updated = 0
-    now = utcnow()
-    if mode == "replace":
-        db.query(NaumenTicket).delete()
-        db.flush()
-        existing: dict = {}
-    else:
-        numbers = [r["number"] for r in records if r["number"] is not None]
-        existing = {t.number: t for t in db.scalars(select(NaumenTicket).where(NaumenTicket.number.in_(numbers)))} \
-            if numbers else {}
-    seen: set[int] = set()
-    for rec in records:
-        number = rec["number"]
-        if number is not None and number in seen:
-            skipped += 1
-            continue
-        if number is not None:
-            seen.add(number)
-        ticket = existing.get(number) if number is not None else None
-        if ticket is None:
-            db.add(NaumenTicket(**rec, imported_at=now))
-            created += 1
-        else:
-            for key, value in rec.items():
-                setattr(ticket, key, value)
-            ticket.imported_at = now
-            updated += 1
-    total = len(records) + skipped
-    db.add(DataImport(service_key=SERVICE, dataset="naumen", filename=(file.filename or "")[:300], mode=mode,
-                      rows_total=total, rows_created=created, rows_updated=updated, rows_skipped=skipped,
-                      user_id=user.id, username=user.username))
-    audit.record(db, user, service_key=SERVICE, entity_type="naumen_ticket", action="import",
-                 summary=f"Загружена выгрузка Naumen «{file.filename}»: новых {created}, обновлено {updated}",
-                 after={"mode": mode, "created": created, "updated": updated, "skipped": skipped}, request=request)
+    result, _ = naumen_service.apply_import(db, user, records, skipped, mode, file.filename or "", request)
     db.commit()
-    message = f"Новых заявок: {created}, обновлено: {updated}"
-    if skipped:
-        message += f", пропущено строк: {skipped}"
-    return ImportResult(dataset="naumen", mode=mode, rows_total=total, rows_created=created,
-                        rows_updated=updated, rows_skipped=skipped, message=message)
+    return ImportResult(dataset="naumen", mode=mode, rows_total=result["summary"]["rows"],
+                        rows_created=result["created"], rows_updated=result["updated"],
+                        rows_skipped=result["skipped"], message=result["message"])

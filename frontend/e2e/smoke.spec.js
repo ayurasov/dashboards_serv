@@ -29,6 +29,8 @@ const PAGES = [
   ['/admin/audit', 'Журнал'], ['/admin/palettes', 'Палитр'], ['/admin/system', 'систем'], ['/profile', 'Профиль'],
   ['/guide', 'Руководство пользователя'], ['/guide/admin', 'Руководство администратора'], ['/about', 'О программе'],
   ['/reports', 'Сквозной отчёт'], ['/reports/entry', 'Ввод показателей'], ['/admin/indicators', 'Показатели'],
+  ['/inbox', 'Входящие данные'], ['/inbox?tab=rules', 'Входящие данные'], ['/inbox?tab=folder', 'Входящие данные'],
+  ['/admin/integrations', 'Интеграции'], ['/admin/integrations?tab=keys', 'Интеграции'], ['/admin/directory', 'Вход по домену'],
 ]
 
 test('все страницы открываются без ошибок', async ({ page }) => {
@@ -75,10 +77,10 @@ test('тема переключается и запоминается', async ({
 test('история версий и руководство встроены в приложение', async ({ page }) => {
   await login(page)
   await page.getByRole('button', { name: 'Что нового' }).click()
-  await expect(page.getByRole('dialog')).toContainText('Версия 0.3.0')
+  await expect(page.getByRole('dialog')).toContainText('Версия 0.4.0')
   await page.keyboard.press('Escape')
   await page.goto('/about')
-  await expect(page.getByTestId('about-version')).toHaveText('0.3.0')
+  await expect(page.getByTestId('about-version')).toHaveText('0.4.0')
   await page.goto('/guide')
   await page.getByPlaceholder('Найти в руководстве').fill('светофор')
   await expect(page.locator('.toc li').first()).toBeVisible()

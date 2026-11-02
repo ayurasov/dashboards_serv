@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, setCsrfToken } from '@/api/client'
-import { hasLevel, LEVEL_LABELS, scopeFor, userAccess } from '@/domain/access'
+import { ADMIN_CAPABILITIES, hasLevel, LEVEL_LABELS, scopeFor, userAccess } from '@/domain/access'
 
 export { LEVEL_LABELS }
 
@@ -9,7 +9,12 @@ export { LEVEL_LABELS }
  * Права — действующий доступ из /api/auth/me (effective_access, ADR-0009): уровни служб, область
  * структуры, классы данных, глубина, исходные записи, выгрузка. Интерфейс по ним скрывает разделы
  * и кнопки; сервер всё равно проверяет каждый запрос сам.
+ *
+ * «Входящие данные» — тоже из /api/auth/me: inbox.available (data.manage или право применять набор)
+ * и inbox.pending — сколько ожидающих элементов пользователь может применить (счётчик в меню).
  */
+let inboxRefresh = null
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
@@ -46,12 +51,46 @@ export const useAuthStore = defineStore('auth', {
     dataClasses() {
       return this.access?.data_classes || ['operational']
     },
+    /** «Входящие данные» доступны (с сервера: data.manage или право применять хотя бы один набор). */
+    inbox() {
+      return !!this.user?.inbox?.available || this.hasCapability('data.manage')
+    },
+    /** Ожидающие элементы, которые пользователь может применить или отклонить. */
+    inboxPending: (s) => Number(s.user?.inbox?.pending) || 0,
+    /**
+     * Руководство администратора: администратору и тем, у кого есть любое полномочие администрирования
+     * (org.manage, users.manage, reports.manage, data.manage, integrations.manage) — они открывают страницы
+     * администрирования, и «?» на этих страницах ведёт в него.
+     */
+    canReadAdminGuide: (s) => s.user?.role === 'admin' || ADMIN_CAPABILITIES.some((c) => s.user?.capabilities?.includes(c)),
   },
   actions: {
     setUser(user) {
+      if (user?.id !== this.user?.id) inboxRefresh = null
       this.user = user
       this.loaded = true
       setCsrfToken(user?.csrf_token || '')
+    },
+    /** Доступ к «Входящим данным» — уже в профиле (/api/auth/me): отдельных запросов нет. */
+    async loadInboxAccess() {
+      if (!this.user || this.mustChangePassword) return false
+      return this.inbox
+    },
+    /**
+     * Обновить счётчик «ожидают» (и доступ) после применения, отклонения или загрузки — тем же лёгким
+     * /api/auth/me. Одновременные вызовы сливаются в один запрос.
+     */
+    async refreshInbox() {
+      if (!this.user) return this.inboxPending
+      if (!inboxRefresh) {
+        const id = this.user.id
+        inboxRefresh = api.get('/auth/me', null, { silent: true })
+          .then((me) => { if (me?.id === id && this.user?.id === id) this.user = { ...this.user, inbox: me.inbox } })
+          .catch(() => {})
+          .finally(() => { inboxRefresh = null })
+      }
+      await inboxRefresh
+      return this.inboxPending
     },
     async load() {
       try {

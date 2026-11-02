@@ -137,7 +137,7 @@ const activeTocId = computed(() => {
 .toc .lvl-2 a { padding-left: 20px; }
 .toc .lvl-3 a { padding-left: 30px; font-size: var(--fs-xs); }
 .toc li.active a { background: var(--brand-soft); color: var(--brand); }
-.content { padding: 10px 40px 40px; font-size: 14.5px; line-height: 1.65; color: var(--text-2); }
+.content { min-width: 0; padding: 10px 40px 40px; font-size: 14.5px; line-height: 1.65; color: var(--text-2); }
 .content :deep(h1) { font-size: 22px; margin: 36px 0 12px; padding-top: 24px; border-top: 1px solid var(--border); scroll-margin-top: calc(var(--topbar-h) + 16px); color: var(--text); }
 .content :deep(h1:first-child) { border-top: 0; padding-top: 0; margin-top: 24px; }
 .content :deep(h2) { font-size: 17.5px; margin: 28px 0 10px; scroll-margin-top: calc(var(--topbar-h) + 16px); color: var(--text); }
@@ -146,7 +146,7 @@ const activeTocId = computed(() => {
 .content :deep(ul), .content :deep(ol) { margin: 0 0 13px; padding-left: 22px; }
 .content :deep(li) { margin: 4px 0; }
 .content :deep(strong) { color: var(--text); }
-.content :deep(code) { background: var(--surface-3); border-radius: 5px; padding: 1px 6px; font-size: 13px; font-family: var(--font-mono); }
+.content :deep(code) { overflow-wrap: anywhere; background: var(--surface-3); border-radius: 5px; padding: 1px 6px; font-size: 13px; font-family: var(--font-mono); }
 .content :deep(a) { color: var(--accent); }
 .content :deep(blockquote) { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--brand); background: var(--surface-2); border-radius: 0 10px 10px 0; }
 .content :deep(blockquote p:last-child) { margin-bottom: 0; }
@@ -160,5 +160,5 @@ const activeTocId = computed(() => {
 .zoom { position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: rgba(10, 12, 18, .85); cursor: zoom-out; }
 .zoom img { max-width: 96vw; max-height: 86vh; border-radius: 10px; }
 .zoom p { color: #e8eaef; font-size: var(--fs-sm); }
-@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } .toc { position: static; max-height: 260px; } .content { padding: 6px 18px 24px; } }
+@media (max-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr); } .toc { position: static; max-height: 260px; } .content { padding: 6px 18px 24px; } }
 </style>

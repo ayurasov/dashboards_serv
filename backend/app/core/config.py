@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -109,11 +110,30 @@ class Settings(BaseSettings):
     # Часовой пояс компании: границы дней в фильтрах журнала, время в PDF-отчётах
     timezone: str = "Europe/Moscow"
 
+    # Адрес, по которому пользователи открывают «Дашборды» (https://dashboards.company.ru), — для ссылок наружу:
+    # страница сквозного отчёта в Confluence, комментарий в задаче «По Делу». Пусто — ссылки не ставятся
+    public_url: str = ""
+
     cors_origins: str = ""
     log_level: str = "INFO"
     log_json: bool = False
 
     max_upload_mb: int = Field(default=20, ge=1, le=200)
+
+    # Входящие данные (ADR-0011). Папка «Входящие» на сервере (в Docker — том /data/inbox);
+    # пусто — папка не опрашивается. Файл берётся в работу, когда не меняется дольше INBOX_SETTLE_SECONDS.
+    inbox_dir: str = ""
+    inbox_settle_seconds: int = Field(default=10, ge=0, le=3600)
+    # Предел размера файла во входящих (папка, загрузка, приём по API)
+    inbox_max_mb: int = Field(default=20, ge=1, le=200)
+    # Сколько дней хранятся исходные файлы обработанных элементов (в базе и в processed/, rejected/ папки)
+    inbox_retention_days: int = Field(default=90, ge=1, le=3650)
+    # Планировщик (python -m app.cli worker): период опроса папки и расписаний, секунд
+    worker_tick_seconds: int = Field(default=30, ge=1, le=3600)
+    # Запусков в журнале каждого подключения (старые удаляются)
+    integration_runs_keep: int = Field(default=200, ge=10, le=10000)
+    # Приём по API (/api/inbound/v1): запросов в минуту на один ключ
+    inbound_rate_limit: int = Field(default=120, ge=1, le=10000)
 
     # Кэш готовых ответов аналитики (сбрасывается по ревизии данных службы)
     response_cache: bool = True
@@ -130,6 +150,18 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             value = "postgresql+psycopg://" + value[len("postgresql://"):]
         return value
+
+    @field_validator("public_url")
+    @classmethod
+    def _check_public_url(cls, value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        if text.endswith("/"):
+            raise ValueError("PUBLIC_URL — без «/» в конце: https://dashboards.company.ru")
+        if not re.match(r"^https?://[^\s/?#@]+(/[^\s?#]*)?$", text, re.IGNORECASE):
+            raise ValueError("PUBLIC_URL — адрес http(s)://узел[:порт][/путь] без логина, «?» и «#»")
+        return text
 
     @model_validator(mode="after")
     def _check_production(self) -> Settings:
@@ -151,6 +183,10 @@ class Settings(BaseSettings):
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def inbox_path(self) -> Path | None:
+        return Path(self.inbox_dir).expanduser() if self.inbox_dir.strip() else None
 
 
 @lru_cache

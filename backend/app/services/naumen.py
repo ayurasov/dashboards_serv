@@ -1,4 +1,8 @@
-"""Аналитика заявок Naumen SD и сопоставление с недельным отчётом ТП."""
+"""Аналитика заявок Naumen SD и сопоставление с недельным отчётом ТП.
+
+Загрузка выгрузки — в два шага: plan_import (без записи) и apply_import (одной транзакцией);
+ими пользуются страница службы и конвейер входящих данных.
+"""
 from __future__ import annotations
 
 import io
@@ -7,8 +11,17 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
 
+from fastapi import Request
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from ..core.db import utcnow
 from ..core.errors import ValidationFailed
-from ..models import NaumenTicket, TpWeeklyReport
+from ..models import DataImport, NaumenTicket, TpWeeklyReport, User
+from . import audit
+
+SERVICE = "tech"
+IMPORT_MODES = ("merge", "replace")
 
 CLOSED_STATUSES = ("Закрыта", "Выполнена")
 # Признаки организаций группы РусГидро в названии
@@ -304,3 +317,89 @@ def parse_xlsx(raw: bytes) -> tuple[list[dict], int]:
     if not out:
         raise ValidationFailed("В файле нет ни одной заявки с датой регистрации")
     return out, skipped
+
+
+# ---------- загрузка: план и применение ----------
+
+def _existing(db: Session, records: list[dict], mode: str) -> dict:
+    if mode == "replace":
+        return {}
+    numbers = [r["number"] for r in records if r["number"] is not None]
+    if not numbers:
+        return {}
+    out: dict = {}
+    for start in range(0, len(numbers), 500):
+        chunk = numbers[start:start + 500]
+        out.update({t.number: t for t in db.scalars(select(NaumenTicket).where(NaumenTicket.number.in_(chunk)))})
+    return out
+
+
+def _walk(records: list[dict], existing: dict):
+    """(запись, заявка в базе или None, повтор номера в файле)."""
+    seen: set[int] = set()
+    for rec in records:
+        number = rec["number"]
+        repeated = number is not None and number in seen
+        if number is not None:
+            seen.add(number)
+        yield rec, (existing.get(number) if number is not None else None), repeated
+
+
+def plan_import(db: Session, records: list[dict], skipped: int = 0, mode: str = "merge") -> dict:
+    """merge — заявки сопоставляются по номеру: новые добавляются, известные обновляются;
+    replace — все заявки заменяются содержимым файла. Повтор номера в файле пропускается."""
+    if mode not in IMPORT_MODES:
+        raise ValidationFailed("Режим загрузки: merge или replace")
+    existing = _existing(db, records, mode)
+    in_file = len(records) + skipped
+    rows = []
+    for rec, ticket, repeated in _walk(records, existing):
+        if repeated:
+            skipped += 1
+            continue
+        changes = [] if ticket is None else [k for k, v in rec.items() if getattr(ticket, k) != v]
+        rows.append({"number": rec["number"], "registered_at": rec["registered_at"].isoformat(),
+                     "status": rec["status"], "action": "create" if ticket is None else
+                     ("update" if changes else "unchanged"), "changes": changes, "errors": []})
+    actions = [r["action"] for r in rows]
+    delete_count = (db.scalar(select(func.count()).select_from(NaumenTicket)) or 0) if mode == "replace" else 0
+    summary = {"rows": in_file, "create": actions.count("create"), "update": actions.count("update"),
+               "unchanged": actions.count("unchanged"), "delete": delete_count, "skipped": skipped, "errors": 0}
+    return {"dataset": "naumen", "mode": mode, "summary": summary, "rows": rows, "errors": [], "can_apply": True}
+
+
+def apply_import(db: Session, actor: User | None, records: list[dict], skipped: int = 0, mode: str = "merge",
+                 filename: str = "", request: Request | None = None) -> tuple[dict, bool]:
+    """(план с итогом, применён ли); commit — у вызывающего."""
+    plan = plan_import(db, records, skipped, mode)
+    now = utcnow()
+    if mode == "replace":
+        db.execute(delete(NaumenTicket))
+        db.flush()
+    existing = _existing(db, records, mode)
+    created = updated = 0
+    for rec, ticket, repeated in _walk(records, existing):
+        if repeated:
+            continue
+        if ticket is None:
+            db.add(NaumenTicket(**rec, imported_at=now))
+            created += 1
+        else:
+            for key, value in rec.items():
+                setattr(ticket, key, value)
+            ticket.imported_at = now
+            updated += 1
+    skipped = plan["summary"]["skipped"]
+    total = plan["summary"]["rows"]
+    db.add(DataImport(service_key=SERVICE, dataset="naumen", filename=(filename or "")[:300], mode=mode,
+                      rows_total=total, rows_created=created, rows_updated=updated, rows_skipped=skipped,
+                      user_id=actor.id if actor else None, username=actor.username if actor else "system"))
+    audit.record(db, actor, service_key=SERVICE, entity_type="naumen_ticket", action="import",
+                 summary=f"Загружена выгрузка Naumen «{filename}»: новых {created}, обновлено {updated}",
+                 after={"mode": mode, "created": created, "updated": updated, "skipped": skipped}, request=request)
+    db.flush()
+    message = f"Новых заявок: {created}, обновлено: {updated}"
+    if skipped:
+        message += f", пропущено строк: {skipped}"
+    return {**plan, "applied": True, "created": created, "updated": updated, "skipped": skipped,
+            "message": message}, True

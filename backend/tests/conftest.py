@@ -149,3 +149,80 @@ def login(app):
 @pytest.fixture()
 def admin(login) -> ApiClient:
     return login("admin")
+
+
+def drop_pg_database(admin_engine, name: str, attempts: int = 20) -> None:
+    """Удаление временной базы PostgreSQL. DROP … WITH (FORCE) не может прервать служебные процессы
+    сервера (autovacuum) у роли без pg_signal_backend — тогда ждём их завершения и повторяем."""
+    import time
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    for attempt in range(attempts):
+        try:
+            with admin_engine.connect() as conn:
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+            return
+        except DBAPIError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
+
+
+def assert_details_labelled(check: dict, kind: str) -> dict:
+    """Каждый ключ подробностей проверки подписан по-русски (Connector.detail_labels и общие подписи каркаса) или
+    отмечен служебным (technical_details) — «Подробности» не показывают английских ключей. Проверяются и ключи
+    вложенных записей (кроме заголовка записи — base.DETAIL_TITLE_KEYS); замечания — отдельный список строк."""
+    from app.integrations import base
+
+    cls = base.get(kind)
+    labels, technical = cls.all_detail_labels(), set(cls.all_technical_details())
+    missing: set[str] = set()
+
+    def records(value) -> list[dict]:
+        if isinstance(value, dict):
+            return [value]
+        return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+    for key, value in (check.get("details") or {}).items():
+        if key in technical:
+            continue
+        if key not in labels:
+            missing.add(key)
+        for record in records(value):
+            missing |= {k for k in record if k not in labels and k not in technical and k not in base.DETAIL_TITLE_KEYS}
+    assert not missing, f"{kind}: подробности проверки без подписи: {sorted(missing)}"
+    assert all(label and label == label.strip() and not label.isascii() for label in labels.values()), labels
+    assert isinstance(check.get("warnings"), list) and all(isinstance(w, str) and w for w in check["warnings"]), check
+    assert not any(w.startswith(("Внимание", "Проверьте")) for w in check["warnings"]), check["warnings"]
+    return check
+
+
+@pytest.fixture(autouse=True)
+def _check_details_labelled(monkeypatch):
+    """Все проверки подключений в тестах (API, черновик, командная строка) — с подписанными подробностями."""
+    from app.integrations import runner
+
+    original = runner.check
+
+    def check(row, **kwargs):
+        result = original(row, **kwargs)
+        assert_details_labelled(result.as_dict(), row.kind)
+        return result
+
+    monkeypatch.setattr(runner, "check", check)
+
+
+def assert_counters_labelled(run: dict, kind: str, *, unlabelled: tuple[str, ...] = ()) -> dict:
+    """Каждый числовой счётчик запуска подписан по-русски (Connector.counter_labels и общие подписи каркаса) — журнал
+    запусков не показывает английских ключей; unlabelled — служебные числа (номер элемента), которые не показываются."""
+    from app.integrations import base
+
+    labels = base.get(kind).all_counter_labels()
+    numbers = {k for k, v in (run.get("summary") or {}).items()
+               if isinstance(v, int | float) and not isinstance(v, bool)}
+    missing = sorted(numbers - set(labels) - set(unlabelled))
+    assert not missing, f"{kind}: счётчики журнала без подписи: {missing}"
+    assert all(label and label == label.strip() and not label.isascii() for label in labels.values()), labels
+    return run

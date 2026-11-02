@@ -63,7 +63,7 @@ const FEATURES = [
             </div>
           </div>
         </div>
-        <div v-if="auth.isAdmin" class="card doc">
+        <div v-if="auth.canReadAdminGuide" class="card doc">
           <AppIcon name="shield" :size="22" />
           <div>
             <h4>Руководство администратора</h4>

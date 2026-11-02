@@ -24,7 +24,7 @@
 .block-title h3 { margin: 0; }
 .bordered { border: 1px solid var(--border); border-radius: 12px; max-height: 460px; }
 .bordered .table td { vertical-align: top; font-size: var(--fs-sm); }
-.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
 .empty { padding: 16px; border: 1px dashed var(--border-strong); border-radius: 12px; text-align: center; font-size: var(--fs-sm); color: var(--muted); }
 .plan-foot { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 -20px; padding: 14px 20px;
   border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(6px); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }

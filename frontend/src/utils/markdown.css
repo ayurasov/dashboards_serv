@@ -1,0 +1,22 @@
+/* Блоки кода руководств в приложении (``` в docs/manuals): примеры запросов, JSON, 1С. Подписи и
+   отступы — как у таблиц руководства; код в строке (.content code в GuideView) внутри блока не выделяется. */
+.md-code {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 4;
+}
+.md-code code {
+  background: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  font-size: inherit !important;
+}

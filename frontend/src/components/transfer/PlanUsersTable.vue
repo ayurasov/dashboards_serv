@@ -45,7 +45,7 @@ const fieldLabel = (f) => FIELDS[f] || f
 <style scoped>
 .plan-table { border: 1px solid var(--border); border-radius: 12px; max-height: 520px; }
 .table td { vertical-align: top; font-size: var(--fs-sm); }
-.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
 .who strong { display: block; font-weight: 600; }
 .who small, .src { display: block; font-size: var(--fs-xs); color: var(--muted); }
 .who .badge { margin-top: 4px; }
