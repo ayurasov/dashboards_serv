@@ -4,9 +4,11 @@ import { useRoute } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { routeService } from '@/router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const app = useAppStore()
+const auth = useAuthStore()
 
 const crumbs = computed(() => {
   const out = []
@@ -24,7 +26,10 @@ const themeTitle = computed(() => ({ light: 'Светлая тема', dark: 'Т
 function cycleTheme() {
   app.setTheme({ system: 'light', light: 'dark', dark: 'system' }[app.theme])
 }
-const guideLink = computed(() => ({ path: '/guide', hash: route.meta.guide ? `#${route.meta.guide}` : '' }))
+// «?» — раздел руководства о странице; руководство администратора открывается только администратору
+const adminGuide = computed(() => route.meta.guideKind === 'admin')
+const showGuide = computed(() => !!route.meta.guide && (!adminGuide.value || auth.isAdmin))
+const guideLink = computed(() => ({ path: adminGuide.value ? '/guide/admin' : '/guide', hash: route.meta.guide ? `#${route.meta.guide}` : '' }))
 </script>
 
 <template>
@@ -45,7 +50,7 @@ const guideLink = computed(() => ({ path: '/guide', hash: route.meta.guide ? `#$
       <span v-if="route.path === '/'" class="crumb current">Обзор</span>
     </nav>
     <div class="spacer" />
-    <router-link v-if="route.meta.guide" :to="guideLink" class="tb-btn" title="Справка по этой странице">
+    <router-link v-if="showGuide" :to="guideLink" class="tb-btn" title="Справка по этой странице">
       <AppIcon name="help" :size="17" />
     </router-link>
     <button class="tb-btn" type="button" :title="`${themeTitle} — переключить`" @click="cycleTheme">

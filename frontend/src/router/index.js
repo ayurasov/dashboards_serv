@@ -7,7 +7,8 @@ import { useAuthStore } from '@/stores/auth'
  * страницы (personal, financial); admin — только администратор; capability — полномочие
  * администрирования (org.manage, users.manage, reports.manage, data.manage, integrations.manage);
  * inbox — «Входящие данные»: полномочие data.manage или право применять хотя бы один набор (это
- * знает сервер, см. auth.loadInboxAccess); public — без входа; guide — раздел руководства;
+ * знает сервер, см. auth.loadInboxAccess); public — без входа; guide — раздел руководства (якорь заголовка),
+ * guideKind: 'admin' — раздел руководства администратора (ссылка «?» видна администратору);
  * parent — раздел над страницей в «хлебных крошках» ({ label, to }).
  */
 const routes = [
@@ -20,7 +21,7 @@ const routes = [
   { path: '/reports/entry', name: 'reports-entry', component: () => import('@/views/reports/ReportsEntry.vue'), meta: { title: 'Ввод показателей', guide: 'ввод-показателей', parent: { label: 'Сквозной отчёт', to: '/reports' } } },
 
   // Входящие данные (ADR-0011): папка, загрузка, приём по API, подключения — план и применение
-  { path: '/inbox', name: 'inbox', component: () => import('@/views/InboxView.vue'), meta: { inbox: true, title: 'Входящие данные' } },
+  { path: '/inbox', name: 'inbox', component: () => import('@/views/InboxView.vue'), meta: { inbox: true, title: 'Входящие данные', guide: 'входящие-данные' } },
 
   // Служба персонала
   { path: '/hr', name: 'hr-dashboard', component: () => import('@/views/hr/HrDashboard.vue'), meta: { service: 'hr', title: 'Дашборд', guide: 'дашборд-службы-персонала' } },
@@ -53,7 +54,7 @@ const routes = [
   { path: '/admin/departments', name: 'admin-departments', component: () => import('@/views/admin/AdminDepartments.vue'), meta: { capability: 'org.manage', title: 'Подразделения' } },
   { path: '/admin/org-transfer', name: 'admin-org-transfer', component: () => import('@/views/admin/OrgTransfer.vue'), meta: { capability: 'org.manage', title: 'Импорт и экспорт' } },
   { path: '/admin/indicators', name: 'admin-indicators', component: () => import('@/views/admin/AdminIndicators.vue'), meta: { capability: 'reports.manage', title: 'Показатели' } },
-  { path: '/admin/integrations', name: 'admin-integrations', component: () => import('@/views/admin/AdminIntegrations.vue'), meta: { capability: 'integrations.manage', title: 'Интеграции' } },
+  { path: '/admin/integrations', name: 'admin-integrations', component: () => import('@/views/admin/AdminIntegrations.vue'), meta: { capability: 'integrations.manage', title: 'Интеграции', guide: 'интеграции', guideKind: 'admin' } },
   { path: '/admin/directory', name: 'admin-directory', component: () => import('@/views/admin/AdminDirectory.vue'), meta: { admin: true, title: 'Вход по домену' } },
   { path: '/admin/audit', name: 'admin-audit', component: () => import('@/views/admin/AdminAudit.vue'), meta: { admin: true, title: 'Журнал изменений' } },
   { path: '/admin/palettes', name: 'admin-palettes', component: () => import('@/views/admin/AdminPalettes.vue'), meta: { admin: true, title: 'Палитры' } },

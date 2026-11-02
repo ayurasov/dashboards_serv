@@ -3,8 +3,11 @@
  *
  * Поддерживает то, что используют руководства: титульный блок YAML, заголовки, абзацы,
  * маркированные и нумерованные списки, таблицы, цитаты, рисунки, жирный текст, курсив,
- * код и ссылки. Текст экранируется; ссылки — только http(s), mailto и якоря внутри документа.
+ * код (в строке и блоками ``` — примеры запросов, JSON, 1С) и ссылки. Текст экранируется;
+ * ссылки — только http(s), mailto и якоря внутри документа.
  */
+import './markdown.css'
+
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 
 export function escapeHtml(text) {
@@ -70,6 +73,8 @@ const TABLE_SEPARATOR = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/
 const BULLET = /^[-*+]\s+(.*)$/
 const ORDERED = /^(\d+)[.)]\s+(.*)$/
 const FIGURE = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/
+// Блок кода: ``` или ~~~ (не короче трёх) и необязательный язык; закрывается той же строкой
+const FENCE = /^(`{3,}|~{3,})\s*([\w+-]*)\s*$/
 
 /**
  * Возвращает { html, headings, meta }: headings — заголовки с уровнем и якорем для оглавления,
@@ -98,6 +103,19 @@ export function renderMarkdown(source, options = {}) {
     const line = lines[i]
     const trimmed = line.trim()
     if (!trimmed) { flush(); continue }
+
+    // Блок кода — как есть, без разбора строк; отступ строки открытия (блок в пункте списка) снимается
+    const fence = trimmed.match(FENCE)
+    if (fence) {
+      flush()
+      const indent = line.length - line.trimStart().length
+      const closes = (text) => text.trim().startsWith(fence[1]) && !text.trim().replace(/^[`~]+/, '').trim()
+      const code = []
+      for (i += 1; i < lines.length && !closes(lines[i]); i++) code.push(lines[i].slice(Math.min(indent, lines[i].search(/\S|$/))))
+      const lang = fence[2] ? ` data-lang="${escapeHtml(fence[2])}"` : ''
+      out.push(`<pre class="md-code"${lang}><code>${escapeHtml(code.join('\n'))}</code></pre>`)
+      continue
+    }
 
     const heading = trimmed.match(/^(#{1,6})\s+(.+?)\s*#*$/)
     if (heading) {
