@@ -16,9 +16,10 @@
 // элементы входящих и значения показателей Jira за текущий и прошлый месяц. Нужны:
 // - папка «Входящие» сервера: INBOX_DIR=<каталог> у сервера и SHOTS_INBOX_DIR=<тот же каталог> у скрипта;
 // - планировщик (python -m app.cli worker) — отметка «Работает» на вкладке «Папка»;
-// - поддельные «По Делу», Jira и Confluence: sudo python3 tools/docs/fake_systems.py (127.0.0.2:80) и строка
-//   «127.0.0.2 podelu.almi-partner.local jira.almi-partner.local confluence.almi-partner.local» в /etc/hosts
-//   (у сервера эти узлы не должны идти через прокси).
+// - поддельные «По Делу», «Пульс проекта», Jira и Confluence: sudo python3 tools/docs/fake_systems.py (127.0.0.2:80)
+//   и строка «127.0.0.2 podelu.almi-partner.local podelu-old.almi-partner.local puls.almi-partner.local
+//   jira.almi-partner.local confluence.almi-partner.local» в /etc/hosts (у сервера эти узлы не должны идти через
+//   прокси — NO_PROXY); «По Делу» и «Пульс» подключаются по демонстрационным ключам интеграций.
 // Адрес в примерах запросов на снимках — адрес, по которому открыт стенд: удобно запустить сервер на
 // 127.0.0.1:80 с именем «127.0.0.1 dashboards.almi-partner.local» в /etc/hosts и задать
 // SHOTS_BASE_URL=http://dashboards.almi-partner.local. Время на снимках — московское (Europe/Moscow).
@@ -36,7 +37,10 @@ const OUT = resolve(ROOT, 'docs/manuals/images')
 const only = process.argv.slice(2)
 const wanted = (...names) => !only.length || names.some((n) => only.some((o) => n.includes(o)))
 
-const browser = await chromium.launch()
+// Полный Chromium с русским интерфейсом: поля дат — «дд.мм.гггг», время — 24 часа (у headless-оболочки
+// и без LANG формат полей дат американский, локаль контекста на него не влияет)
+const RU = { LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru', LC_ALL: 'ru_RU.UTF-8' }
+const browser = await chromium.launch({ channel: 'chromium', args: ['--lang=ru'], env: { ...process.env, ...RU } })
 const NORMAL = { width: 1440, height: 900 }
 // Боковая карточка пользователя и высокие окна целиком
 const TALL = { width: 1440, height: 1300 }
@@ -79,6 +83,18 @@ async function open(page, path, ms) {
 async function click(page, text) {
   await page.getByRole('button', { name: text }).first().click()
   await settle(page, 500)
+}
+
+/** Снимок области вокруг элемента (с полями), в пределах окна. */
+async function boxShot(page, name, locator, pad = 20) {
+  if (!wanted(name)) return
+  // По центру окна: у края области прокрутки элемент перекрывают закреплённые шапка и подвал окна
+  await locator.evaluate((el) => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(400)
+  const box = await locator.boundingBox()
+  const vp = page.viewportSize()
+  const x = Math.max(0, box.x - pad)
+  const y = Math.max(0, box.y - pad)
+  await shot(page, name, { clip: { x, y, width: Math.min(vp.width - x, box.width + 2 * pad), height: Math.min(vp.height - y, box.height + 2 * pad) } })
 }
 
 async function dialogShot(page, name) {
@@ -195,7 +211,7 @@ function memoryFile(name, mimeType, content) {
   await p.getByRole('tab', { name: 'Полномочия' }).click(); await settle(p, 300)
   // Вкладка короткая — снимаем верх карточки (пять полномочий)
   const drawer = await p.locator('aside.drawer').boundingBox()
-  await shot(p, 'admin/20-user-capabilities', { clip: { x: drawer.x, y: 0, width: drawer.width, height: 760 } })
+  await shot(p, 'admin/20-user-capabilities', { clip: { x: drawer.x, y: 0, width: drawer.width, height: 840 } })
   await p.keyboard.press('Escape'); await p.waitForTimeout(300)
   // Несохранённые изменения: система спрашивает, закрыть ли карточку
   const discard = p.getByRole('button', { name: /Закрыть без сохранения|Не сохранять|Закрыть/ })
@@ -424,10 +440,21 @@ const REPORT = { width: 1440, height: 1140 }
 // ---------------------------------------------------------------- входящие данные и интеграции (0.4.0)
 // Данные создаются через API: ключ «1С: Бухгалтерия» и приём файла значений по нему (применяется по правилу)
 // и его повтор; файлы в папке «Входящие» (недельный отчёт ТП — по правилу, нераспознанный файл, испорченная
-// выгрузка Naumen); подключения «По Делу», Jira (поддельные), Confluence (неверный токен — неудачная проверка)
-// и 1С (не проверено); загрузка метрик месяца руководителем службы персонала — через окно загрузки.
+// выгрузка Naumen); подключения «По Делу» и «Пульс проекта» по ключам интеграций, Jira (поддельные), Confluence
+// (неверный токен — неудачная проверка) и 1С (не проверено); загрузка метрик месяца руководителем службы
+// персонала — через окно загрузки; формы и проверки «По Делу» и «Пульса» по ключу — в окне нового подключения
+// (не сохраняются).
 const INBOX_DIR = process.env.SHOTS_INBOX_DIR || ''
-const FAKE = { podelu: 'http://podelu.almi-partner.local', jira: 'http://jira.almi-partner.local', confluence: 'http://confluence.almi-partner.local' }
+const FAKE = {
+  podelu: 'http://podelu.almi-partner.local', puls: 'http://puls.almi-partner.local',
+  jira: 'http://jira.almi-partner.local', confluence: 'http://confluence.almi-partner.local',
+}
+// Демонстрационные ключи поддельных систем (tools/docs/fake_systems.py)
+const KEYS = {
+  podelu: 'podelu_demo-dashboards-key-2026', podeluFiles: 'podelu_demo-files-only-key-2026',
+  puls: 'puls_demo-dashboards-key-2026',
+}
+const PULS_DIRECTIONS = 'Внедрение = PROJ\nСопровождение = АЛМИ Партнер / Техническая дирекция / Техническая служба\n7 = TECHDIR'
 const JIRA_RULES = [
   {
     indicator: 'jira.resolved', name: 'Решено задач в Jira', unit: 'шт.', direction: 'higher_is_better', measure: 'count',
@@ -488,7 +515,8 @@ async function integration(page, body) {
   return existing || api(page, 'POST', '/integrations', body)
 }
 
-if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 'admin/28', 'admin/29', 'admin/30', 'admin/31', 'admin/32', 'admin/33')) {
+if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 'admin/28', 'admin/29', 'admin/30', 'admin/31', 'admin/32', 'admin/33',
+  'admin/34', 'admin/35', 'admin/36', 'admin/37', 'admin/38', 'admin/39')) {
   const { context, page: p } = await session('admin', 'admin123', { viewport: TALL })
   // Ключи: рабочий ключ 1С и отозванный прежний
   const keys = await api(p, 'GET', '/integrations/keys')
@@ -524,12 +552,16 @@ if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 
   const partners = await upload(p, 'Реестр партнёрств.csv', csv(['№;Партнёр;Продукт партнёра;Продукт АЛМИ;Статус', '1;Базальт СПО;Альт Сервер 11;AlterOS 2.7;Сертифицировано']), { dataset: 'partnerships' })
   if (partners.actions?.reject) await api(p, 'POST', `/inbox/${partners.id}/reject`, { reason: 'Выгрузка за прошлый год — нужна текущая' })
 
-  // Подключения
+  // Подключения. «По Делу» — по ключу интеграции, одним подключением: структура раз в сутки, файлы из задач
+  // каждые 30 минут
   const podelu = await integration(p, {
     kind: 'podelu', name: 'По Делу',
-    config: { base_url: FAKE.podelu, login: 'dashboards-sync', data_list: 'Данные для дашбордов', data_tags: [] },
-    secrets: { password: 'demo-password' },
-    schedule: { mode: 'interval', minutes: 30, actions: ['pull'] },
+    config: { base_url: FAKE.podelu, mode: 'key', data_list: '', data_tags: [] },
+    secrets: { key: KEYS.podelu },
+    schedule: [
+      { mode: 'daily', time: '06:00', weekdays: [], actions: ['sync'] },
+      { mode: 'interval', minutes: 30, actions: ['pull'] },
+    ],
   })
   if (!podelu.enabled) {
     await api(p, 'POST', `/integrations/${podelu.id}/check`)
@@ -537,11 +569,22 @@ if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 
     await api(p, 'POST', `/integrations/${podelu.id}/run`, { action: 'sync' })
     await api(p, 'POST', `/integrations/${podelu.id}/run`, { action: 'pull' })
   }
+  const puls = await integration(p, {
+    kind: 'puls', name: 'Пульс проекта',
+    config: { base_url: FAKE.puls, mode: 'key', directions: PULS_DIRECTIONS },
+    secrets: { api_key: KEYS.puls },
+    schedule: [{ mode: 'daily', time: '07:00', weekdays: [], actions: ['indicators'] }],
+  })
+  if (!puls.enabled) {
+    await api(p, 'POST', `/integrations/${puls.id}/check`)
+    await api(p, 'PATCH', `/integrations/${puls.id}`, { enabled: true })
+    await api(p, 'POST', `/integrations/${puls.id}/run`, { action: 'indicators' })
+  }
   const jira = await integration(p, {
     kind: 'jira', name: 'Jira — поддержка',
     config: { base_url: FAKE.jira, instance: 'server', rules: JIRA_RULES, months: 2, owner_service: 'tech' },
     secrets: { token: 'demo-expired-token' },
-    schedule: { mode: 'daily', time: '06:30', weekdays: [], actions: ['refresh'] },
+    schedule: [{ mode: 'daily', time: '06:30', weekdays: [], actions: ['refresh'] }],
   })
   if (!jira.enabled) {
     // Первый запуск — с устаревшим токеном (ошибка в журнале), затем токен заменён
@@ -557,7 +600,7 @@ if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 
     kind: 'confluence', name: 'Confluence — сквозной отчёт',
     config: { base_url: FAKE.confluence, instance: 'server', space: 'REPORTS' },
     secrets: { token: 'demo-old-token' },
-    schedule: { mode: 'daily', time: '09:00', weekdays: [1], actions: ['publish'] },
+    schedule: [{ mode: 'daily', time: '09:00', weekdays: [1], actions: ['publish'] }],
   })
   if (!confluence.last_error) await api(p, 'POST', `/integrations/${confluence.id}/check`)
   await integration(p, {
@@ -601,8 +644,8 @@ if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 
   if (wanted('admin/29')) {
     await a.locator('[data-kind=jira]').getByTestId('integration-edit').click(); await settle(a, 500)
     const editor = a.getByRole('dialog').first()
-    await editor.locator('[data-field=rules]').scrollIntoViewIfNeeded()
-    await editor.getByRole('heading', { name: 'Подключение' }).scrollIntoViewIfNeeded()
+    // Верх снимка — блок «Название»: описание вида не обрезается шапкой окна
+    await editor.getByRole('heading', { name: 'Название', exact: true }).evaluate((el) => el.scrollIntoView({ block: 'start' }))
     await a.waitForTimeout(400)
     await shot(a, 'admin/29-integration-jira')
     await a.keyboard.press('Escape'); await a.waitForTimeout(300)
@@ -616,6 +659,47 @@ if (wanted('user/42', 'user/43', 'user/44', 'admin/25', 'admin/26', 'admin/27', 
     await shot(a, 'admin/30-integration-schedule', { clip: { x: box.x - 24, y: box.y - 20, width: box.width + 48, height: box.height + 40 } })
     await a.keyboard.press('Escape'); await a.waitForTimeout(300)
   }
+  if (wanted('admin/34')) {
+    await open(a, '/admin/integrations', 1000)
+    await shot(a, 'admin/34-integration-two-schedules', { element: a.locator('[data-kind=podelu]').first() })
+  }
+  if (wanted('admin/35', 'admin/36', 'admin/37')) {
+    // Новое подключение «По Делу» по ключу: форма, проверка, ключ без части областей (не сохраняется)
+    await open(a, '/admin/integrations', 800)
+    await a.getByTestId('integration-add').click()
+    await a.getByTestId('kind-podelu').click(); await settle(a, 500)
+    const editor = a.getByRole('dialog').first()
+    await editor.getByTestId('integration-name').fill('По Делу')
+    await editor.getByTestId('field-base_url').fill(FAKE.podelu)
+    await editor.getByTestId('secret-key').fill(KEYS.podelu)
+    await editor.getByRole('heading', { name: 'Подключение', exact: true }).scrollIntoViewIfNeeded(); await a.waitForTimeout(400)
+    await shot(a, 'admin/35-podelu-key-form')
+    const checkSec = editor.locator('section.check-sec')
+    await editor.getByTestId('editor-check').click()
+    await editor.getByTestId('editor-check-result').waitFor(); await a.waitForTimeout(500)
+    await boxShot(a, 'admin/36-podelu-key-check', checkSec)
+    await editor.getByTestId('secret-key').fill(KEYS.podeluFiles)
+    await editor.getByTestId('editor-check').click(); await a.waitForTimeout(300)
+    await editor.getByTestId('editor-check-result').waitFor(); await settle(a, 500)
+    await boxShot(a, 'admin/37-podelu-key-scopes', checkSec)
+  }
+  if (wanted('admin/38', 'admin/39')) {
+    // Новое подключение «Пульса проекта» по ключу (не сохраняется)
+    await open(a, '/admin/integrations', 800)
+    await a.getByTestId('integration-add').click()
+    await a.getByTestId('kind-puls').click(); await settle(a, 500)
+    const editor = a.getByRole('dialog').first()
+    await editor.getByTestId('integration-name').fill('Пульс проекта')
+    await editor.getByTestId('field-base_url').fill(FAKE.puls)
+    await editor.getByTestId('secret-api_key').fill(KEYS.puls)
+    await editor.locator('[data-field=directions] textarea').fill(PULS_DIRECTIONS)
+    await editor.getByRole('heading', { name: 'Подключение', exact: true }).scrollIntoViewIfNeeded(); await a.waitForTimeout(400)
+    await shot(a, 'admin/38-puls-key-form')
+    await editor.getByTestId('editor-check').click()
+    await editor.getByTestId('editor-check-result').waitFor(); await settle(a, 500)
+    await boxShot(a, 'admin/39-puls-key-check', editor.locator('section.check-sec'))
+  }
+  await open(a, '/admin/integrations', 800)
   if (wanted('admin/31')) {
     await a.locator('[data-kind=jira]').getByTestId('integration-journal').click(); await settle(a, 600)
     await shot(a, 'admin/31-integration-runs')
