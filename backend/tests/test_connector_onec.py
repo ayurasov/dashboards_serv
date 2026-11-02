@@ -222,7 +222,7 @@ def test_kind_is_described_in_russian(admin):
     for text in ("POST /api/inbound/v1/files", "Новый HTTPСоединение", "Новый HTTPЗапрос", "Bearer"):
         assert text in meta["description"], text
     fields = {f["key"]: f for f in meta["fields"]}
-    assert fields["password"]["secret"] and fields["queries"]["type"] == "text"
+    assert fields["password"]["secret"] and fields["queries"]["type"] == "json"
     assert [o["value"] for o in fields["department_match"]["options"]] == ["code", "name", "map"]
     assert {a["key"]: a["label"] for a in meta["actions"]} == {"load": "Загрузить данные",
                                                                "preview": "Проверить без записи"}

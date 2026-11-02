@@ -106,22 +106,19 @@ def monthly(*texts: str | None) -> bool:
 
 # ---------------------------------------------------------------- настройки JSON и списки соответствий
 
-def json_text(config: dict, key: str) -> dict:
-    """Список правил в настройке типа text: принимает и JSON-текст, и уже разобранный список из API."""
-    config = dict(config or {})
-    if isinstance(config.get(key), (list, dict)):
-        config[key] = json.dumps(config[key], ensure_ascii=False, indent=2)
-    return config
-
-
-def load_list(text: str | None, place: str, label: str, *, limit: int = 50) -> list[dict]:
-    if not (text or "").strip():
+def load_list(data: Any, place: str, label: str, *, limit: int = 50) -> list[dict]:
+    """Список правил из настройки типа json: разобранный список (или один объект) либо JSON-текст."""
+    if isinstance(data, str):
+        if not data.strip():
+            return []
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise ValidationFailed(f"{label}: ошибка JSON в строке {exc.lineno}, позиция {exc.colno} — проверьте "
+                                   "кавычки (только двойные), запятые и скобки",
+                                   fields={place: "Ошибка JSON"}) from None
+    if data is None:
         return []
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValidationFailed(f"{label}: ошибка JSON в строке {exc.lineno}, позиция {exc.colno} — проверьте "
-                               "кавычки (только двойные), запятые и скобки", fields={place: "Ошибка JSON"}) from None
     if isinstance(data, dict):
         data = [data]
     if not isinstance(data, list) or not all(isinstance(x, dict) for x in data):

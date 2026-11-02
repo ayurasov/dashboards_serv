@@ -551,3 +551,18 @@ def test_parallel_claims_on_postgres(pg_factory):
         t.join(10)
     claimed = sorted(i for batch in results for i, _ in batch)
     assert claimed == sorted(ids), "каждое подключение занято ровно одним процессом"
+
+
+def test_json_field_accepts_parsed_and_text_values():
+    from app.integrations.base import Connector, Field, _coerce
+
+    f = Field("rules", "Правила", "json")
+    assert _coerce(Connector, f, [{"a": 1}]) == [{"a": 1}]
+    assert _coerce(Connector, f, '[{"a": 1}]') == [{"a": 1}]
+    assert _coerce(Connector, f, "  ") is None
+    with pytest.raises(ValidationFailed) as exc:
+        _coerce(Connector, f, "[{'a': 1}]")
+    assert "ошибка JSON в строке 1" in exc.value.detail and "config.rules" in exc.value.fields
+    with pytest.raises(ValidationFailed) as exc:
+        _coerce(Connector, f, [{"x": "я" * 40000}])
+    assert "64 КБ" in exc.value.detail

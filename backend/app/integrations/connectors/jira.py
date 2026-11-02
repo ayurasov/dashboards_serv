@@ -157,7 +157,7 @@ def _queries(raw: dict, where: str) -> list[Query]:
     return out
 
 
-def parse_rules(text: str | None) -> list[Rule]:
+def parse_rules(text: object) -> list[Rule]:
     """Правила из настройки (JSON); ValidationFailed с полем config.rules при ошибке."""
     rules: list[Rule] = []
     seen: dict[tuple[str, str], int] = {}
@@ -294,7 +294,7 @@ class JiraConnector(Connector):
             "Jira", "https://jira.company.ru",
             "Адрес, по которому Jira открывается в браузере, с путём, если он есть (https://jira.company.ru/jira); "
             "Cloud — https://company.atlassian.net"),
-        Field("rules", "Правила показателей", "text", required=True, hint=RULES_HINT, placeholder=RULES_EXAMPLE),
+        Field("rules", "Правила показателей", "json", required=True, hint=RULES_HINT, placeholder=RULES_EXAMPLE),
         metrics.months_field(),
         metrics.owner_field("it"),
     )
@@ -309,10 +309,10 @@ class JiraConnector(Connector):
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
-        out = super().validate_config(metrics.json_text(config, "rules"))
+        out = super().validate_config(config)
         if not parse_rules(out["rules"]):
             raise ValidationFailed("Добавьте хотя бы одно правило показателя", fields={PLACE: "Нет правил"})
-        out["rules"] = metrics.pretty(json.loads(out["rules"]))
+        out["rules"] = metrics.load_list(out["rules"], PLACE, "")
         return out
 
     # --- подключение

@@ -23,7 +23,6 @@ $top/$skip или odata.nextLink); строки суммируются по по
 """
 from __future__ import annotations
 
-import json
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -138,7 +137,7 @@ def _field(raw: dict, key: str, where: str, *, required: bool = False) -> str:
     return value
 
 
-def parse_queries(text: str | None) -> list[Query]:
+def parse_queries(text: object) -> list[Query]:
     out: list[Query] = []
     seen: dict[str, int] = {}
     for number, raw in enumerate(metrics.load_list(text, PLACE, "Запросы", limit=MAX_QUERIES), start=1):
@@ -351,7 +350,7 @@ class OneCConnector(Connector):
               hint="Хранится зашифрованным и уходит только на адрес, для которого введён"),
         Field("verify_tls", "Проверять сертификат", "bool", default=True,
               hint="Выключайте только для самоподписанного или корпоративного сертификата"),
-        Field("queries", "Запросы", "text", required=True, hint=QUERIES_HINT, placeholder=QUERIES_EXAMPLE),
+        Field("queries", "Запросы", "json", required=True, hint=QUERIES_HINT, placeholder=QUERIES_EXAMPLE),
         Field("department_catalog", "Справочник подразделений 1С", default="Catalog_ПодразделенияОрганизаций",
               hint="Набор, по Ref_Key которого находятся код (Code) и наименование (Description) подразделения 1С"),
         Field("department_match", "Сопоставление подразделений", "select", default="code",
@@ -377,14 +376,14 @@ class OneCConnector(Connector):
 
     @classmethod
     def validate_config(cls, config: dict) -> dict:
-        out = super().validate_config(metrics.json_text(config, "queries"))
+        out = super().validate_config(config)
         if out.get("base_url") and not out["base_url"].lower().endswith("/odata/standard.odata"):
             raise ValidationFailed("Адрес OData заканчивается на /odata/standard.odata "
                                    "(https://1c.company.ru/zup/odata/standard.odata)",
                                    fields={"config.base_url": "Нужен адрес …/odata/standard.odata"})
         if not parse_queries(out["queries"]):
             raise ValidationFailed("Добавьте хотя бы один запрос", fields={PLACE: "Нет запросов"})
-        out["queries"] = metrics.pretty(json.loads(out["queries"]))
+        out["queries"] = metrics.load_list(out["queries"], PLACE, "")
         out["department_catalog"] = out.get("department_catalog") or "Catalog_ПодразделенияОрганизаций"
         metrics.parse_pairs(out.get("department_map"), "config.department_map", "Соответствие подразделений")
         return out

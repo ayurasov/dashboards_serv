@@ -28,6 +28,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -45,7 +46,8 @@ from .http import HttpClient, IntegrationError, allowed_hosts_env, check_base_ur
 if TYPE_CHECKING:
     from ..models import InboxItem, Integration, User
 
-FIELD_TYPES = ("string", "text", "url", "password", "int", "bool", "select", "multiselect", "list", "time")
+FIELD_TYPES = ("string", "text", "url", "password", "int", "bool", "select", "multiselect", "list", "time", "json")
+JSON_MAX_BYTES = 64 * 1024
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -60,7 +62,8 @@ class Option:
 @dataclass(frozen=True)
 class Field:
     """Поле настроек для интерфейса. type: string · text · url · password · int · bool · select ·
-    multiselect · list (список строк) · time (ЧЧ:ММ). secret=True — значение шифруется и не
+    multiselect · list (список строк) · time (ЧЧ:ММ) · json (разобранное значение JSON — список правил,
+    запросов; принимает и JSON-текст, до 64 КБ). secret=True — значение шифруется и не
     возвращается (в API — только признак «задано»). show_if — {поле: [значения]}: показывать поле,
     только когда другое поле имеет одно из значений (например, логин — только для типа «cloud»)."""
 
@@ -394,6 +397,8 @@ def _coerce(cls: type[Connector], f: Field, value: Any) -> Any:
         return [] if f.type in ("multiselect", "list") else (False if f.type == "bool" else None)
     if f.type in ("string", "text", "password"):
         return str(value).strip()
+    if f.type == "json":
+        return _coerce_json(f, value)
     if f.type == "url":
         try:
             return check_base_url(str(value), kind=cls.kind, title=f.label)
@@ -423,6 +428,26 @@ def _coerce(cls: type[Connector], f: Field, value: Any) -> Any:
     if f.type == "multiselect" and set(items) - values:
         raise ValidationFailed(f"{f.label}: недопустимое значение", fields=place)
     return items
+
+
+def _coerce_json(f: Field, value: Any) -> Any:
+    place = f"config.{f.key}"
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValidationFailed(f"{f.label}: ошибка JSON в строке {exc.lineno}, позиция {exc.colno} — проверьте "
+                                   "кавычки (только двойные), запятые и скобки",
+                                   fields={place: "Ошибка JSON"}) from None
+    try:
+        size = len(json.dumps(value, ensure_ascii=False).encode())
+    except (TypeError, ValueError):
+        raise ValidationFailed(f"{f.label}: недопустимое значение", fields={place: "Недопустимое значение"}) from None
+    if size > JSON_MAX_BYTES:
+        raise ValidationFailed(f"{f.label}: не больше {JSON_MAX_BYTES // 1024} КБ", fields={place: "Слишком большое"})
+    return value
 
 
 # ---------------------------------------------------------------- реестр

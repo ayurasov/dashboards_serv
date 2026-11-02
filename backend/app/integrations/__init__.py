@@ -22,7 +22,8 @@
 
 2. Настройки — кортеж Field(key, label, type, hint, required, secret, options, default, placeholder,
    min, max, show_if). Типы: string · text · url · password · int · bool · select · multiselect · list ·
-   time. secret=True — поле шифруется, в API не возвращается (только secret_fields: какие заданы).
+   time · json (разобранный JSON: списки правил и запросов, до 64 КБ). secret=True — поле шифруется,
+   в API не возвращается (только secret_fields: какие заданы).
    Поле verify_tls (bool, default True) по соглашению управляет проверкой сертификата в self.http().
    Пример: Field("instance", "Тип", "select", options=(Option("cloud", "Cloud"), Option("server", "Server")),
    required=True), Field("login", "Email", show_if={"instance": ("cloud",)}),

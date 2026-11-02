@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
 from datetime import date, timedelta
 
@@ -236,7 +237,7 @@ def test_kind_is_described_in_russian(admin):
     assert set(fields) == {"base_url", "instance", "login", "token", "verify_tls", "rules", "months", "owner_service"}
     assert [o["value"] for o in fields["instance"]["options"]] == ["cloud", "server", "server_basic"]
     assert fields["token"]["secret"] and fields["login"]["show_if"] == {"instance": ["cloud", "server_basic"]}
-    assert fields["rules"]["type"] == "text" and "{unit_code}" in fields["rules"]["hint"]
+    assert fields["rules"]["type"] == "json" and "{unit_code}" in fields["rules"]["hint"]
     assert fields["months"]["default"] == 2 and fields["verify_tls"]["default"] is True
     actions = {a["key"]: a for a in meta["actions"]}
     assert actions["refresh"]["label"] == "Обновить показатели" and actions["refresh"]["schedulable"]
@@ -246,7 +247,8 @@ def test_kind_is_described_in_russian(admin):
 def test_rules_are_validated_and_normalized():
     base = {"base_url": "https://jira.company.ru", "instance": "server"}
     out = JiraConnector.validate_config({**base, "rules": RULES})
-    assert out["rules"].startswith("[\n") and parse_count(out["rules"]) == 3, "список из API хранится JSON-текстом"
+    assert isinstance(out["rules"], list) and parse_count(out["rules"]) == 3, "правила хранятся разобранным JSON"
+    assert parse_count(json.dumps(RULES)) == 3, "JSON-текст тоже принимается"
     bad = [
         ("{", "ошибка JSON в строке 1, позиция 2"),
         ([{"indicator": "Bad Key", "jql": "x", "units": ["A"]}], "ключ показателя"),
@@ -260,7 +262,7 @@ def test_rules_are_validated_and_normalized():
         ([{"indicator": "a.b", "jql": "x", "units": ["A"]}, {"indicator": "a.b", "unit_jql": {"a": "y"}}],
          "уже считает правило 1"),
         ([{"indicator": "a.b", "jql": "x", "units": ["A"], "data_class": "financial"}], "operational"),
-        ([], "хотя бы одно"),
+        ([], "Обязательное поле"),
     ]
     for rules, text in bad:
         with pytest.raises(ValidationFailed) as exc:
@@ -268,7 +270,7 @@ def test_rules_are_validated_and_normalized():
         assert text in exc.value.detail and "config.rules" in exc.value.fields, rules
 
 
-def parse_count(text: str) -> int:
+def parse_count(text) -> int:
     return len(jira.parse_rules(text))
 
 
