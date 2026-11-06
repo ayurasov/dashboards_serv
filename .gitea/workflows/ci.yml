@@ -1,0 +1,204 @@
+# CI «Дашбордов компании АЛМИ» на локальном стенде (Gitea Actions): серверная
+# копия четырёх workflow GitHub (https://github.com/ayurasov/dashboards_serv):
+#   backend-ci.yml  → джоба backend   (ruff, pytest на SQLite и PostgreSQL,
+#                                     миграции с нуля с демо-данными)
+#   frontend-ci.yml → джоба frontend  (eslint, vitest, сборка)
+#   e2e.yml         → джоба e2e       (Playwright на демо-данных, uvicorn + SQLite)
+#   docker.yml      → джоба deploy    (стенд из docker-compose.yml + проверки:
+#                                     здесь это не репетиция, а прод-стенд сервера)
+#
+# Отличия от GitHub-версий продиктованы стендом (~/ci/README.md):
+#  - кэш раннера отключён — в setup-node нет `cache:`;
+#  - образ метки ubuntu-latest — node:20-bookworm без python: ставим 3.12 через uv;
+#  - job-контейнеры в сети ci_default: сервис postgres резолвится по имени
+#    (`postgres`), а не по localhost, публикация портов не используется;
+#  - e2e идёт после тестов, deploy — последним на выделенном deploy-раннере
+#    (alpine + docker-сокет сервера): сборка тяжёлая, с тестами вместе OOM;
+#  - в образе deploy нет node для actions/checkout — код берём tarball'ом из Gitea
+#    (автоматический секрет GITEA_TOKEN);
+#  - прод-стенд — проект `dashboards` на :8000, секреты стенда — в секрете
+#    репозитория DEPLOY_ENV; прод разворачивается только из main.
+name: CI
+
+on:
+  push:
+    branches: [main, 'v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 'Сервер: ruff + pytest (SQLite и PostgreSQL) + миграции'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dash
+          POSTGRES_PASSWORD: dash
+          POSTGRES_DB: dashboards
+        # Сервис поднимается в сети ci_default рядом с job-контейнером:
+        # адрес — по имени сервиса, публикация портов не используется
+        options: >-
+          --health-cmd "pg_isready -U dash"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      # В образе метки ubuntu-latest (node:20-bookworm) нет python — ставим 3.12 через uv
+      - name: Python 3.12 + зависимости (uv)
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uv venv /opt/py312 --python 3.12
+          ~/.local/bin/uv pip install --python /opt/py312/bin/python -r requirements-dev.txt
+          echo /opt/py312/bin >> "$GITHUB_PATH"
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Tests (SQLite + PostgreSQL migrations)
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://dash:dash@postgres:5432/dashboards
+        run: pytest --cov=app --cov-report=term-missing:skip-covered
+      - name: Миграции на PostgreSQL с нуля, с демо-данными
+        env:
+          DATABASE_URL: postgresql+psycopg://dash:dash@postgres:5432/dashboards
+          DEMO_DATA: "true"
+          ADMIN_PASSWORD: Ci-admin-2026
+        run: |
+          python -m app.cli migrate
+          python -m app.cli check-schema
+          python -m app.cli migrate
+
+  frontend:
+    name: 'Клиент: eslint + vitest + сборка'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Unit tests (vitest)
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: 'E2E: Playwright на демо-данных'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.12 + зависимости сервера (uv)
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uv venv /opt/py312 --python 3.12
+          ~/.local/bin/uv pip install --python /opt/py312/bin/python -r backend/requirements.txt
+          echo /opt/py312/bin >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Зависимости клиента и Playwright
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run build
+      - name: Сервер с демо-данными
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:////tmp/e2e.db
+          DEMO_DATA: "true"
+          INBOX_DIR: /tmp/e2e-inbox
+          INBOX_SETTLE_SECONDS: "1"
+        run: |
+          mkdir -p /tmp/e2e-inbox
+          python -m app.cli migrate
+          nohup uvicorn app.main:app --port 8000 > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/api/health && break; sleep 1; done
+      - name: Playwright
+        working-directory: frontend
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8000
+          E2E_INBOX_DIR: /tmp/e2e-inbox
+        run: npx playwright test
+      - name: Отчёт Playwright и журнал сервера
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            /tmp/server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  deploy:
+    name: 'Deploy прод-стенда + smoke'
+    runs-on: deploy
+    timeout-minutes: 30
+    needs: [e2e]
+    # Прод-стенд (:8000, проект dashboards) разворачивается только из main
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Docker CLI и compose
+        run: apk add --no-cache docker-cli docker-cli-compose curl
+      - name: Получить код (tarball из Gitea — в образе deploy нет node для actions/checkout)
+        run: |
+          curl -sfSL -H "Authorization: token ${{ secrets.GITEA_TOKEN }}" \
+            "http://gitea:3000/${{ github.repository }}/archive/${{ github.sha }}.tar.gz" \
+            | tar xz --strip-components=1
+      - name: Восстановить .env из секрета репозитория
+        env:
+          DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
+        run: printf '%s\n' "$DEPLOY_ENV" | tr -d '\r' > .env
+      - name: Сборка образов и развёртывание (проект dashboards)
+        # Пост-квантовый ClientHello Go (ML-KEM/Kyber) не проходит до auth.docker.io —
+        # TLS handshake timeout; отключаем, как и в остальных deploy-джобах стенда
+        env:
+          GODEBUG: tlsmlkem=0,tlskyber=0
+        run: docker compose -p dashboards up -d --build
+      - name: Готовность и smoke-пробы по HTTP
+        run: |
+          GW=$(ip route | awk '/default/ {print $3}')
+          echo "Прод-стенд через шлюз $GW:8000"
+          # app при старте применяет миграции и (первый запуск) создаёт демо-данные
+          for i in $(seq 1 60); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://$GW:8000/api/health 2>/dev/null)
+            [ "$CODE" = "200" ] && break
+            sleep 5
+          done
+          if [ "$CODE" != "200" ]; then
+            echo 'Стенд не поднялся за 5 минут'; docker compose -p dashboards logs app --tail 40; exit 1
+          fi
+          curl -fsS http://$GW:8000/ | grep -qi '<!DOCTYPE html>'
+          curl -fsS http://$GW:8000/api/health | grep -q '"status":"ok"'
+          # Демо-стенд: вход администратором (учётки — README, раздел «Быстрый запуск»)
+          curl -sf -o /dev/null -X POST http://$GW:8000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"admin123"}'
+          # Планировщик: worker поднялся и начал такт «Планировщик запущен»
+          test "$(docker compose -p dashboards ps worker --format '{{.State}}')" = "running"
+          docker compose -p dashboards logs worker | grep -q "Планировщик запущен"
+          echo 'Дымовой прогон прод-стенда пройден: SPA, /api/health, вход администратором, планировщик работает'
+      - name: Журналы контейнеров
+        if: failure()
+        run: docker compose -p dashboards logs --tail=200
