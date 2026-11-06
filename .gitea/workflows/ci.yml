@@ -33,6 +33,11 @@ concurrency:
 permissions:
   contents: read
 
+# Раннер выполняет шаги через bash, которого нет в alpine-образе метки deploy
+defaults:
+  run:
+    shell: sh
+
 jobs:
   backend:
     name: 'Сервер: ruff + pytest (SQLite и PostgreSQL) + миграции'
