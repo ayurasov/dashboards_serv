@@ -200,9 +200,17 @@ jobs:
           curl -sf -o /dev/null -X POST http://$GW:8000/api/auth/login \
             -H 'Content-Type: application/json' \
             -d '{"username":"admin","password":"admin123"}'
-          # Планировщик: worker поднялся и начал такт «Планировщик запущен»
+          # Планировщик: worker поднялся; первый такт пишет «Планировщик запущен»
+          # через несколько секунд после старта — ждём строку до минуты
           test "$(docker compose -p dashboards ps worker --format '{{.State}}')" = "running"
-          docker compose -p dashboards logs worker | grep -q "Планировщик запущен"
+          for i in $(seq 1 30); do
+            docker compose -p dashboards logs worker 2>/dev/null | grep -q "Планировщик запущен" && break
+            sleep 2
+          done
+          docker compose -p dashboards logs worker | grep -q "Планировщик запущен" || {
+            echo 'Планировщик не сообщил о запуске за минуту'
+            docker compose -p dashboards logs worker --tail 20; exit 1
+          }
           echo 'Дымовой прогон прод-стенда пройден: SPA, /api/health, вход администратором, планировщик работает'
       - name: Журналы контейнеров
         if: failure()
