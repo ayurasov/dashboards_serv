@@ -34,7 +34,16 @@ jobs:
           curl -sf -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' \
             -d '{"username":"admin","password":"Admin-12345"}' -o /dev/null
           test "$(docker compose ps worker --format '{{.State}}')" = "running"
-          docker compose logs worker | grep -q "Планировщик запущен"
+          # Первый такт пишет «Планировщик запущен» через несколько секунд после старта
+          # worker — на быстрых раннерах проверка успевала раньше строки (флейк 7b2538c)
+          for i in $(seq 1 30); do
+            docker compose logs worker 2>/dev/null | grep -q "Планировщик запущен" && break
+            sleep 2
+          done
+          docker compose logs worker | grep -q "Планировщик запущен" || {
+            echo 'Планировщик не сообщил о запуске за минуту'
+            docker compose logs worker --tail 20; exit 1
+          }
       - name: Журналы
         if: always()
         run: docker compose logs --tail=200
