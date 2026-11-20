@@ -35,7 +35,8 @@ const guideLink = computed(() => ({ path: adminGuide.value ? '/guide/admin' : '/
 
 <template>
   <header class="topbar">
-    <button class="tb-btn mobile-only" type="button" title="Меню" @click="app.mobileNavOpen = !app.mobileNavOpen">
+    <button class="tb-btn mobile-only" type="button" title="Меню" aria-label="Открыть основную навигацию" aria-controls="app-sidebar"
+            :aria-expanded="app.mobileNavOpen" @click="app.mobileNavOpen = !app.mobileNavOpen">
       <AppIcon name="menu" :size="18" />
     </button>
     <button class="tb-btn desktop-only" type="button" :title="app.sidebarCollapsed ? 'Развернуть меню' : 'Свернуть меню'" @click="app.toggleSidebar()">
