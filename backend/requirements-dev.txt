@@ -5,3 +5,5 @@ httpx2==2.16.0
 ruff==0.17.3
 # Чтение PDF в тестах отчётов (tests/test_reports_and_targets.py)
 pypdf==7.0.0
+# Снапшот контракта API (docs/openapi.yaml) — tests/test_openapi_snapshot.py
+pyyaml==6.0.3
