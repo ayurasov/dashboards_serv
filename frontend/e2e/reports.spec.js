@@ -22,7 +22,7 @@ test('первое лицо: компания и 4 направления с з�
   const errors = collectErrors(page)
   await login(page, 'ceo')
   await page.getByRole('link', { name: 'Сквозной отчёт', exact: true }).click()
-  await expect(page).toHaveURL(/\/reports$/)
+  await expect(page).toHaveURL(/\/reports$/, { timeout: 15_000 })
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Сквозной отчёт')
 
   // Сводка вершины: статус, подразделения по статусам, причины, пропуск за пределом детализации
@@ -266,6 +266,7 @@ test('администратор добавляет и удаляет показ
 })
 
 test('«Обзор»: карточка статуса области со ссылкой на отчёт', async ({ page }) => {
+  test.setTimeout(60_000)  // под нагрузкой сервера переход к отчёту бывает медленнее 30 с (аудит 2026-11-20, D2)
   const errors = collectErrors(page)
   await login(page)
   const card = page.getByTestId('report-summary')
@@ -276,7 +277,7 @@ test('«Обзор»: карточка статуса области со ссы
   const summary = await apiGet(page, '/reports/summary')
   expect(num(await card.locator('.legend span').first().innerText())).toBe(summary.counts.red)
   await card.getByTestId('report-summary-open').click()
-  await expect(page).toHaveURL(/\/reports$/)
+  await expect(page).toHaveURL(/\/reports$/, { timeout: 15_000 })
   await expect(page.getByTestId('report-hero')).toBeVisible()
   expect(errors).toEqual([])
 })

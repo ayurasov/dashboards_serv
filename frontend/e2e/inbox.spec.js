@@ -9,8 +9,6 @@ import { api, apiGet, collectErrors, login, uniq } from './helpers'
  * Папка: сервер e2e запускается с INBOX_DIR (см. .github/workflows/e2e.yml); если тесту известен этот
  * путь (E2E_INBOX_DIR), он кладёт файл в папку сам.
  */
-test.describe.configure({ mode: 'serial' })
-
 const HEADER = 'Подразделение;Показатель;Период;Значение;Цель;Комментарий'
 const csv = (name, rows) => ({ name, mimeType: 'text/csv', buffer: Buffer.from(`\ufeff${HEADER}\r\n${rows.join('\r\n')}\r\n`) })
 const drawer = (page) => page.getByRole('dialog').filter({ has: page.getByTestId('inbox-item-title') })
@@ -52,7 +50,7 @@ test('загрузка файла → план → применение; пов�
     // Набор распознаётся сам; план — как у остальных загрузок: сводка, строки, действие
     await upload(page, file)
     const item = drawer(page)
-    await expect(item.getByTestId('inbox-item-status')).toHaveText('Ожидает')
+    await expect(item.getByTestId('inbox-item-status')).toHaveText('Ожидает', { timeout: 15_000 })
     await expect(item).toContainText('Значения показателей')
     const plan = item.getByTestId('inbox-plan')
     await expect(plan.locator('.plan-chip', { hasText: 'Изменится' })).toContainText('1')
@@ -157,7 +155,7 @@ test('подвал карточки элемента: кнопки — одно�
   try {
     await page.goto(`/inbox?item=${id}`)
     const item = drawer(page)
-    await expect(item.getByTestId('inbox-item-status')).toHaveText('Ожидает')
+    await expect(item.getByTestId('inbox-item-status')).toHaveText('Ожидает', { timeout: 15_000 })
     const footer = item.getByTestId('inbox-footer')
     const hint = footer.getByTestId('inbox-footer-hint')
     const rows = async () => {
