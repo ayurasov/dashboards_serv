@@ -138,7 +138,7 @@ async function save() {
 .svc.chosen { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); background: color-mix(in srgb, var(--brand) 3%, var(--surface)); }
 .svc-name { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; }
 .svc-name :deep(svg) { color: var(--muted); flex: 0 0 auto; }
-.svc-name small { margin-left: auto; font-weight: 500; font-size: var(--fs-xs); color: var(--faint); }
+.svc-name small { margin-left: auto; font-weight: 500; font-size: var(--fs-xs); color: var(--muted); }
 .link-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: var(--fs-sm); cursor: pointer; }
 .link-btn:hover { text-decoration: underline; }
 .form-error { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: var(--fs-sm); color: var(--light-red); }

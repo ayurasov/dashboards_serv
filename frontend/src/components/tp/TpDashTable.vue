@@ -110,7 +110,7 @@ const hint = computed(() => {
 .period { font-weight: 560; }
 .note { display: inline-flex; vertical-align: -1px; margin-left: 6px; color: var(--muted); cursor: help; }
 .val { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
-td.empty { color: var(--faint); }
+td.empty { color: var(--muted); }
 td.picked { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .table th.picked { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
 .table tfoot td { position: sticky; bottom: 0; z-index: 1; border-bottom: 0; }

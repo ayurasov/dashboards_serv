@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { relative } from 'node:path'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -141,5 +142,66 @@ describe('вычисление цвета', () => {
     expect(mixed.a).toBeCloseTo(0.14, 5)
     expect([mixed.r, mixed.g, mixed.b].map(Math.round)).toEqual([63, 159, 107])
     expect(contrast({ r: 0, g: 0, b: 0 }, { r: 255, g: 255, b: 255 })).toBeCloseTo(21, 5)
+  })
+})
+
+describe('цвет var(--faint) — только декоративные элементы', () => {
+  // --faint ниже 4.5:1 (WCAG AA): смысловой текст — всегда --muted (см. tokens.css).
+  // Тест следит, чтобы var(--faint) в color: не появлялся вне этого списка декоративных
+  // мест (стрелки, разделители, hover-рамки, плейсхолдеры, отключённые кнопки).
+  const allowed = new Set([
+  'components/admin/AccessEditor.vue: .link-btn:disabled { color: var(--faint); cursor: not-allowed; }',
+  'components/admin/AuditDiff.vue: .arrow { width: 28px; padding-left: 0 !important; padding-right: 0 !important; color: var(--faint); }',
+  'components/admin/DimensionControl.vue: .cls:hover:not(.locked) { border-color: var(--faint); color: var(--text); }',
+  'components/admin/UnitPicker.vue: .control:hover:not(:disabled) { border-color: var(--faint); }',
+  'components/admin/UserDrawer.vue: .ev-chev { color: var(--faint); transition: transform var(--t-fast); }',
+  'components/integrations/KindPicker.vue: .chev { flex: 0 0 auto; margin-top: 12px; color: var(--faint); }',
+  'components/integrations/ScheduleEditor.vue: .day:hover { border-color: var(--faint); color: var(--text); }',
+  'components/layout/AppSidebar.vue: .chev { color: var(--faint); transition: transform var(--t); transform: rotate(-90deg); }',
+  'components/layout/AppTopbar.vue: .sep { color: var(--faint); }',
+  'components/org/OrgGroupCard.vue: .group-card:hover { border-color: var(--faint); background: var(--surface); }',
+  'components/org/OrgPersonPanel.vue: .p-crumbs :deep(svg) { color: var(--faint); margin-right: 2px; }',
+  'components/org/OrgPicker.vue: .picker-field:hover:not(:disabled) { border-color: var(--faint); }',
+  'components/org/OrgSearch.vue: .box:hover { border-color: var(--faint); }',
+  'components/org/OrgTreeView.vue: .sep { margin: 0 5px; color: var(--faint); }',
+  'components/reports/ReasonList.vue: .r-go { flex: 0 0 auto; margin-top: 3px; color: var(--faint); transition: color var(--t-fast), transform var(--t-fast); }',
+  'components/reports/ReportUnitPanel.vue: .crumbs .sep { color: var(--faint); }',
+  'components/reports/ReportUnitPanel.vue: .k-lock, .k-go { color: var(--faint); }',
+  'components/tp/TpRegWeekDialog.vue: .affix:hover { border-color: var(--faint); }',
+  'views/InboxView.vue: .gap { min-width: 20px; text-align: center; color: var(--faint); }',
+  'views/admin/AccessProfiles.vue: .p-foot .btn-danger:disabled { color: var(--faint); opacity: .45; }',
+  'views/admin/AdminAudit.vue: .chev { color: var(--faint); transition: transform var(--t-fast), color var(--t-fast); }',
+  'views/admin/AdminAudit.vue: .gap { min-width: 20px; text-align: center; color: var(--faint); }',
+  'views/admin/AdminSystem.vue: .c-go { color: var(--faint); }',
+  'views/admin/AdminUsers.vue: .dot { color: var(--faint); }',
+  'views/product/PartnershipsDashboard.vue: .legend-item .go { color: var(--faint); opacity: 0; transition: opacity var(--t-fast); }',
+  'views/product/PartnershipsRegistry.vue: .meta-icon { color: var(--faint); margin-top: 3px; }',
+  'views/product/PartnershipsTimeline.vue: .sep { color: var(--faint); margin: 0 1px; }',
+  'views/reports/ReportsEntry.vue: .cm { width: 30px; height: 32px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--faint); cursor: pointer; }',
+  'views/reports/ReportsEntry.vue: .in::placeholder { color: var(--faint); font-weight: 400; }',
+  ])
+  const src = resolve(process.cwd(), 'src')
+  const files = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(resolve(dir, entry.name))
+      else if (entry.name.endsWith('.vue')) files.push(resolve(dir, entry.name))
+    }
+  }
+  walk(src)
+  const found = []
+  for (const file of files) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.includes('color: var(--faint)')) {
+        found.push(`${relative(src, file).replaceAll('\\', '/')}: ${line.trim().replace(/\s+/g, ' ')}`)
+      }
+    }
+  }
+  it('все использования color: var(--faint) — в списке декоративных', () => {
+    const unexpected = found.filter((f) => !allowed.has(f))
+    expect(unexpected, `смысловой текст не должен использовать --faint (ниже AA):\n${unexpected.join('\n')}`).toEqual([])
+  })
+  it('список декоративных мест актуален: каждый пункт существует в коде', () => {
+    expect(found.filter((f) => allowed.has(f)).length, 'устаревшие пункты списка удалите').toBe(allowed.size)
   })
 })

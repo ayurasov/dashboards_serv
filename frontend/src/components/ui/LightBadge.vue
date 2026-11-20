@@ -17,8 +17,13 @@ defineProps({
 </template>
 
 <style scoped>
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; background: var(--light-gray); }
+/*
+ * Статус различим и без цвета: норма — круг, внимание — треугольник, критично — ромб
+ * (WCAG 1.4.1 «не передавать статус только цветом»; рядом всегда есть подпись или подсказка).
+ */
+.dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; background: var(--light-gray); }
+.dot.green, .dot.gray { border-radius: 50%; }
 .dot.green { background: var(--light-green); }
-.dot.yellow { background: var(--light-yellow); }
-.dot.red { background: var(--light-red); }
+.dot.yellow { background: var(--light-yellow); clip-path: polygon(50% 0, 100% 92%, 0 92%); }
+.dot.red { background: var(--light-red); border-radius: 1.5px; transform: rotate(45deg) scale(.82); }
 </style>

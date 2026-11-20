@@ -184,7 +184,7 @@ async function remove(ind) {
 .c-name { min-width: 240px; max-width: 360px; }
 .c-name strong { display: block; font-size: var(--fs-base); font-weight: 630; }
 .c-name .unit { font-weight: 500; color: var(--muted); }
-.c-name code { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+.c-name code { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 .c-name small { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.4; }
 .c-src { min-width: 170px; }
 .c-src small, .c-rule small { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.4; }
@@ -193,6 +193,6 @@ async function remove(ind) {
 .c-rule { min-width: 220px; max-width: 280px; }
 .c-kinds { min-width: 120px; }
 .kind { display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border-radius: 6px; background: var(--surface-3); font-size: var(--fs-xs); color: var(--text-2); }
-.faint { color: var(--faint); }
+.faint { color: var(--muted); }
 .c-act { white-space: nowrap; text-align: right; }
 </style>

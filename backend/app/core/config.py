@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     inbox_retention_days: int = Field(default=90, ge=1, le=3650)
     # Планировщик (python -m app.cli worker): период опроса папки и расписаний, секунд
     worker_tick_seconds: int = Field(default=30, ge=1, le=3600)
+    # Файл-сердцебиение планировщика (обновляется на каждом такте): healthcheck контейнера worker
+    # следит за его возрастом — база из healthcheck недоступна. Пусто — файл не пишется
+    worker_heartbeat_file: str = "/tmp/worker-heartbeat"
     # Запусков в журнале каждого подключения (старые удаляются)
     integration_runs_keep: int = Field(default=200, ge=10, le=10000)
     # Приём по API (/api/inbound/v1): запросов в минуту на один ключ

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import LightsLegend from '@/components/ui/LightsLegend.vue'
 import KpiCard from '@/components/ui/KpiCard.vue'
 import ChartCard from '@/components/ui/ChartCard.vue'
 import EChart from '@/components/charts/EChart.vue'
@@ -15,7 +16,7 @@ import { useQueryState } from '@/composables/useQueryState'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import { axisNumber, lightColor } from '@/components/charts/echarts'
+import { axisNumber, cssVar, lightColor } from '@/components/charts/echarts'
 import { deltaTone, formatDelta, formatNumber, monthLabel, plural } from '@/utils/format'
 import { KEY_METRICS, QUICK_PERIODS, funnelSteps, groupByCategory, kpiHint, kpiLabel, lastMonths, metricMap, metricSeries } from '@/domain/hr'
 
@@ -69,7 +70,7 @@ const flowOption = computed(() => ({
   legend: { data: ['Принято', 'Уволено', 'Прирост'] },
   tooltip: { valueFormatter: people },
   xAxis: { type: 'category', data: labels.value },
-  yAxis: { type: 'value', minInterval: 1 },
+  yAxis: { type: 'value', minInterval: 1, name: 'чел.', nameGap: 16, nameTextStyle: { color: cssVar('--muted'), fontSize: 11, align: 'right' } },
   series: [
     { name: 'Принято', type: 'bar', barMaxWidth: 26, itemStyle: { color: lightColor('green'), borderRadius: [4, 4, 0, 0] }, data: series.value.map((s) => s.hired) },
     { name: 'Уволено', type: 'bar', barMaxWidth: 26, itemStyle: { color: lightColor('red'), borderRadius: [4, 4, 0, 0] }, data: series.value.map((s) => s.fired) },
@@ -86,7 +87,7 @@ const turnoverOption = computed(() => {
     yAxis: { type: 'value', axisLabel: { formatter: (v) => `${axisNumber(v)}%` } },
     series: [
       { name: 'Текучесть', type: 'line', smooth: true, symbolSize: 7, areaStyle: { opacity: 0.08 }, lineStyle: { width: 2.5 }, data: metricSeries(series.value, 'turnover'),
-        markLine: target ? { symbol: 'none', label: { formatter: `Цель ${formatNumber(target)}%`, position: 'insideEndTop' }, lineStyle: { type: 'dashed', color: lightColor('red') }, data: [{ yAxis: target }] } : undefined },
+        markLine: target ? { symbol: 'none', label: { formatter: `Цель ${formatNumber(target)}%`, position: 'insideEndTop', fontSize: 12, color: cssVar('--text-2') }, lineStyle: { type: 'dashed', color: lightColor('red') }, data: [{ yAxis: target }] } : undefined },
       { name: 'По инициативе компании', type: 'line', smooth: true, symbolSize: 6, data: metricSeries(series.value, 'turnover_company') },
     ],
   }
@@ -145,6 +146,7 @@ const periodText = computed(() => {
       <router-link v-if="auth.can('hr', 'editor')" to="/hr/data" class="btn"><AppIcon name="edit" :size="15" />Ввод данных</router-link>
       <PdfButton report="hr/dashboard" :params="{ months: selected }" />
     </PageHeader>
+    <LightsLegend />
 
     <div class="period card">
       <div class="row-wrap">

@@ -317,7 +317,7 @@ function onImported() {
 .note-icon { color: var(--muted); }
 
 .cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-td.empty { color: var(--faint); }
+td.empty { color: var(--muted); }
 .actions-col { position: sticky; right: 0; z-index: 2; width: 44px; text-align: right; background: var(--surface); box-shadow: inset 1px 0 0 var(--border); }
 .reg thead th.actions-col { z-index: 4; background: var(--surface-2); }
 .reg tbody tr:hover td.actions-col { background: var(--row-hover); }

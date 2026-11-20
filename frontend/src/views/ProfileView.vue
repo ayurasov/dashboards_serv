@@ -242,7 +242,7 @@ async function closeOthers() {
 .domain-note strong { color: var(--text); }
 .domain-note p { margin-top: 3px; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.5; }
 .access-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 24px; }
-.access-grid h4 { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 8px; }
+.access-grid h4 { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
 .svc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .svc-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
 .svc-title { font-weight: 560; }

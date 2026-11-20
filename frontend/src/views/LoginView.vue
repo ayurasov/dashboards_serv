@@ -90,7 +90,7 @@ async function submit() {
           {{ busy ? 'Вход…' : 'Войти' }}
         </button>
       </form>
-      <p class="foot">Нет доступа или забыли пароль — обратитесь к администратору системы.</p>
+      <p class="foot">Нет доступа или забыли пароль — обратитесь к администратору системы.<br />Что нового и справка — внутри приложения, кнопка «?» в верхней панели.</p>
     </section>
     <aside class="art" aria-hidden="true">
       <div class="art-inner">
@@ -139,6 +139,6 @@ h1 { font-size: 28px; letter-spacing: -0.02em; }
 .a1 { top: 20%; left: 16%; } .a2 { top: 34%; right: 14%; } .a3 { top: 50%; left: 26%; }
 .dot { width: 9px; height: 9px; border-radius: 50%; }
 .dot.g { background: var(--light-green); } .dot.y { background: var(--light-yellow); }
-.version { position: absolute; bottom: 24px; right: 28px; color: var(--muted); font-size: var(--fs-xs); }
+.version { position: absolute; right: 24px; bottom: 20px; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
 @media (max-width: 900px) { .login { grid-template-columns: 1fr; } .art { display: none; } .panel { padding: 32px 24px; } }
 </style>

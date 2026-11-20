@@ -93,10 +93,10 @@ h2 { margin-top: 3px; font-size: var(--fs-lg); line-height: 1.25; overflow-wrap:
 .bar .gray { background: var(--light-gray); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: var(--fs-xs); color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
-.legend .zero { color: var(--faint); }
+.legend .zero { color: var(--muted); }
 .legend i { width: 7px; height: 7px; border-radius: 50%; }
 .legend b { color: var(--text); }
-.legend .zero b { color: var(--faint); }
+.legend .zero b { color: var(--muted); }
 .rs-why { padding: 20px 18px 12px; border-left: 1px solid var(--border); min-width: 0; }
 .rs-why .rs-label { margin-bottom: 4px; padding-left: 8px; }
 .ok { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: var(--fs-sm); color: var(--text-2); }

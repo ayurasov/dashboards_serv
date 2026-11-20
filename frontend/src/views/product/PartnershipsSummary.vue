@@ -268,7 +268,7 @@ function toRegistry(extra = {}) {
 .seg.yellow { background: var(--light-yellow); }
 .seg.red { background: var(--light-red); }
 .pct { display: inline-block; min-width: 42px; margin-left: 6px; color: var(--muted); font-size: var(--fs-xs); text-align: right; }
-.zero { color: var(--faint); }
+.zero { color: var(--muted); }
 tr.selected td { background: color-mix(in srgb, var(--chart-2) 7%, transparent); }
 tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--chart-2); }
 .products { white-space: nowrap; }

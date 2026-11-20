@@ -100,7 +100,7 @@ const unitsWord = (n) => plural(n, ['подразделение', 'подраз�
 .admin-note :deep(svg) { flex: 0 0 auto; margin-top: 2px; color: var(--brand); }
 .block { display: flex; flex-direction: column; gap: 1px; padding: 8px 0; border-bottom: 1px dashed var(--border); }
 .block:last-of-type { border-bottom: 0; }
-.k { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.k { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .v { font-size: var(--fs-sm); font-weight: 600; color: var(--text); line-height: 1.35; }
 .src { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.3; }
 .src i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--border-strong); }

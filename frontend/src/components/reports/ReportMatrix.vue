@@ -157,7 +157,7 @@ onBeforeUnmount(hideTip)
 .mx thead .corner { left: 0; z-index: 4; width: var(--first); min-width: var(--first); padding-left: 16px; }
 .mx thead .corner-status { left: var(--first); z-index: 4; padding-left: 6px; width: var(--status); min-width: var(--status); border-right: 1px solid var(--border-strong); }
 .corner span, .corner-status span { display: block; font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.corner small { font-size: var(--fs-xs); color: var(--faint); font-weight: 500; }
+.corner small { font-size: var(--fs-xs); color: var(--muted); font-weight: 500; }
 .ind { width: var(--col); min-width: var(--col); max-width: var(--col); }
 .i-name { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-xs); font-weight: 620; line-height: 1.3; color: var(--text); hyphens: auto; overflow-wrap: break-word; }
 .i-meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; min-width: 0; }
@@ -199,7 +199,7 @@ onBeforeUnmount(hideTip)
 /* ---- ячейки ---- */
 .mx-cell { width: var(--col); min-width: var(--col); max-width: var(--col); padding: 3px 2px !important; }
 .c {
-  --tone: transparent; position: relative; display: flex; align-items: center; justify-content: center; gap: 4px; height: 44px; padding: 0 6px;
+  --tone: transparent; position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 4px; height: 44px; padding: 0 8px;
   border-radius: 8px; background: color-mix(in srgb, var(--tone) 13%, var(--surface)); color: var(--text); white-space: nowrap; transition: opacity var(--t-fast);
 }
 .c.t-green { --tone: var(--light-green); }
@@ -207,7 +207,7 @@ onBeforeUnmount(hideTip)
 .c.t-red { --tone: var(--light-red); background: color-mix(in srgb, var(--tone) 15%, var(--surface)); }
 .c.t-red .c-val { font-weight: 720; }
 .c.t-gray { background: var(--surface-2); color: var(--text-2); }
-.c.t-none { background: transparent; color: var(--faint); }
+.c.t-none { background: transparent; color: var(--muted); }
 .c.t-missing {
   gap: 4px; color: var(--light-red); font-size: 10.5px; font-weight: 700;
   background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--light-red) 12%, var(--surface)) 0 5px, var(--surface) 5px 10px);

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
@@ -10,13 +10,19 @@ const app = useAppStore()
 const route = useRoute()
 const width = computed(() => (app.sidebarCollapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)'))
 watch(() => route.fullPath, () => { app.mobileNavOpen = false })
+// Escape закрывает мобильную шторку навигации — как модальные окна
+function onKey(event) {
+  if (event.key === 'Escape' && app.mobileNavOpen) app.mobileNavOpen = false
+}
+onMounted(() => document.addEventListener('keydown', onKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 </script>
 
 <template>
   <div class="shell" :style="{ '--sb': width }">
     <AppSidebar />
     <div v-if="app.mobileNavOpen" class="scrim" @click="app.mobileNavOpen = false" />
-    <div class="main">
+    <div class="main" :inert="app.mobileNavOpen || undefined">
       <AppTopbar />
       <main class="content">
         <slot />

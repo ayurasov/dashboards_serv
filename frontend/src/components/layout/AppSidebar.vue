@@ -63,7 +63,7 @@ async function logout() {
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ collapsed: app.sidebarCollapsed, open: app.mobileNavOpen }" aria-label="Главное меню">
+  <aside id="app-sidebar" class="sidebar" :class="{ collapsed: app.sidebarCollapsed, open: app.mobileNavOpen }" aria-label="Главное меню">
     <div class="brand">
       <img src="/logo.png" width="30" height="30" alt="" class="logo" />
       <div v-if="!app.sidebarCollapsed" class="brand-text">
@@ -147,7 +147,7 @@ async function logout() {
 .brand-text strong { font-size: 15px; letter-spacing: -0.01em; }
 .brand-text span { font-size: var(--fs-xs); color: var(--muted); }
 .nav { flex: 1; overflow-y: auto; padding: 10px 10px 16px; display: flex; flex-direction: column; gap: 1px; }
-.section-label { margin: 16px 10px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.section-label { margin: 16px 10px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .item, .group-head {
   position: relative; display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px;
   border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: var(--fs-base); font-weight: 520;

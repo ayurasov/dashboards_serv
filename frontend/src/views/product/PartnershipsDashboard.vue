@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import LightsLegend from '@/components/ui/LightsLegend.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import KpiCard from '@/components/ui/KpiCard.vue'
 import ChartCard from '@/components/ui/ChartCard.vue'
@@ -204,6 +205,7 @@ const periodText = computed(() => {
       <PdfButton report="partnerships/summary" :params="params" />
       <button v-if="canEdit" class="btn btn-primary" type="button" @click="adding = true"><AppIcon name="plus" :size="15" />Добавить партнёрство</button>
     </PageHeader>
+    <LightsLegend />
 
     <FilterBar :summary="data ? `${formatNumber(total)} ${countWord(total)}` : ''" :resettable="!isDefault()" @reset="reset">
       <label class="field"><span>Год сертификации</span>
