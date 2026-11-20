@@ -330,7 +330,7 @@ const summary = computed(() => (data.value
 .cls { --c: var(--chart-1); flex: 0 0 auto; height: 16px; padding: 0 5px; display: inline-flex; align-items: center; border-radius: 4px; font-size: 9.5px; font-weight: 700; background: color-mix(in srgb, var(--c) 13%, transparent); color: color-mix(in srgb, var(--c) 78%, var(--text)); }
 .c-financial { --c: var(--chart-3); }
 .c-personal { --c: var(--chart-2); }
-.i-cols { display: grid; grid-template-columns: 1fr 74px 30px; gap: 4px; margin-top: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); font-weight: 650; }
+.i-cols { display: grid; grid-template-columns: 1fr 74px 30px; gap: 4px; margin-top: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
 
 .eg tbody th, .eg tbody td { border-bottom: 1px solid var(--border); background: var(--surface); }
 .eg tbody tr:last-child > * { border-bottom: 0; }
@@ -353,7 +353,7 @@ const summary = computed(() => (data.value
 .cell.expected .in.v::placeholder { color: var(--light-red); font-weight: 600; }
 .cell.invalid .in { border-color: var(--light-red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--light-red) 18%, transparent); }
 .c-err { display: block; margin-top: 3px; font-size: 10.5px; color: var(--light-red); line-height: 1.3; }
-.na { display: block; text-align: center; color: var(--faint); }
+.na { display: block; text-align: center; color: var(--muted); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-xs); color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }

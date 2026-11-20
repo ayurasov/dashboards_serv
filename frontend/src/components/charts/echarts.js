@@ -77,7 +77,7 @@ export function baseOption() {
   return {
     color: chartColors(),
     textStyle: { fontFamily: cssVar('--font-sans'), color: text, fontSize: 12 },
-    grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 16, top: 28, bottom: 14, containLabel: true },
     legend: { top: 0, left: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 16, textStyle: { color: text, fontSize: 12 } },
     tooltip: {
       trigger: 'axis', confine: true, backgroundColor: surface, borderColor: border, borderWidth: 1, valueFormatter: tooltipValue,

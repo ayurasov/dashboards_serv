@@ -162,10 +162,10 @@ const notes = computed(() => roots.value.filter((r) => r.note))
 .seg-bar .gray, .seg-legend i.gray { background: var(--light-gray); }
 .seg-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); color: var(--text-2); }
 .seg-legend li { display: inline-flex; align-items: center; gap: 6px; }
-.seg-legend li.zero { color: var(--faint); }
+.seg-legend li.zero { color: var(--muted); }
 .seg-legend i { width: 8px; height: 8px; border-radius: 50%; }
 .seg-legend b { color: var(--text); font-weight: 680; }
-.seg-legend .zero b { color: var(--faint); }
+.seg-legend .zero b { color: var(--muted); }
 
 .who { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; }
 .who > div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; align-items: baseline; }
@@ -179,7 +179,7 @@ const notes = computed(() => roots.value.filter((r) => r.note))
 .w-red .who-chip { --c: var(--light-red); }
 .w-yellow .who-chip { --c: var(--light-yellow); }
 .who-chip:hover { border-color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
-.who-more { align-self: center; font-size: var(--fs-xs); color: var(--muted); }
+.who-more { align-self: center; height: 21px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: var(--radius-pill); border: 1px dashed var(--border-strong); font-size: var(--fs-xs); color: var(--muted); }
 
 .h-why { display: flex; flex-direction: column; gap: 6px; padding: 22px 22px 18px; border-left: 1px solid var(--border); min-width: 0; }
 .h-why h3 { padding: 0 10px; font-size: var(--fs-xs); font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }

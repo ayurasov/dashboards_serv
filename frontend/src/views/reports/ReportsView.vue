@@ -66,7 +66,8 @@ const periodOptions = computed(() => {
 })
 const description = computed(() => {
   if (!data.value) return 'Статус компании сверху вниз: подразделения, показатели, причины'
-  return hasValues.value ? `${data.value.period_label} · стрелки в ячейках — изменение к прошлому месяцу` : data.value.period_label
+  const arrows = hasValues.value && view.value === 'matrix' ? ' · стрелки в ячейках — изменение к прошлому месяцу' : ''
+  return `${data.value.period_label}${arrows}`
 })
 
 // ---------------------------------------------------------------- дерево и раскрытие

@@ -172,7 +172,7 @@ watch([data, () => props.focusIndicator], async () => {
         <h3>Почему такой статус</h3>
         <ReasonList v-if="unit.explanation.items.length" :items="unit.explanation.items" :can-open="(id) => id !== unit.id && canOpen(id)" dense @select="(id) => emit('select', id)" />
         <p v-else class="p-ok"><AppIcon name="check" :size="14" :stroke="2.4" />{{ reasonText(unit.explanation.text) || 'Оценённых показателей нет' }}</p>
-        <p v-if="unit.explanation.more" class="p-more">и ещё {{ unit.explanation.more }}</p>
+        <p v-if="unit.explanation.more" class="p-more" :title="'Показаны главные причины'">+{{ unit.explanation.more }}</p>
       </section>
 
       <section class="ps">
@@ -297,12 +297,12 @@ watch([data, () => props.focusIndicator], async () => {
 
 .ps h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .ps h3 .count { padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text-2); letter-spacing: 0; font-weight: 620; }
-.ps h3 .h-sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
+.ps h3 .h-sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); }
 .p-ok { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--text-2); }
 .p-ok :deep(svg) { color: var(--light-green); }
-.p-more { margin: 4px 8px 0; font-size: var(--fs-xs); color: var(--muted); }
+.p-more { display: inline-block; margin: 4px 8px 0; padding: 1px 8px; border-radius: var(--radius-pill); border: 1px dashed var(--border-strong); font-size: var(--fs-xs); color: var(--muted); }
 .p-muted { font-size: var(--fs-sm); color: var(--muted); }
-.p-foot { font-size: var(--fs-xs); color: var(--faint); }
+.p-foot { font-size: var(--fs-xs); color: var(--muted); }
 
 .note { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .n-icon { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
