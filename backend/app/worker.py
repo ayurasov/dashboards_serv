@@ -109,6 +109,16 @@ class Worker:
         return out
 
     def _heartbeat(self) -> None:
+        # Файл-сердцебиение: healthcheck контейнера worker следит за его возрастом (к базе из
+        # healthcheck не обратиться). Пишем атомарно, чтобы healthcheck не увидел половину файла
+        heartbeat = settings.worker_heartbeat_file
+        if heartbeat:
+            try:
+                with open(f"{heartbeat}.tmp", "w", encoding="utf-8") as f:
+                    f.write(utcnow().isoformat(timespec="seconds"))
+                os.replace(f"{heartbeat}.tmp", heartbeat)
+            except OSError:
+                log.warning("Планировщик: не удалось записать файл-сердцебиение %s", heartbeat)
         try:
             with core_db.SessionLocal() as db:
                 value = {"last_tick_at": utcnow().isoformat(timespec="seconds"), "host": socket.gethostname(),

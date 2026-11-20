@@ -20,7 +20,7 @@ services:
 
   app:
     build: .
-    image: dashboards:${APP_VERSION:-0.4.1}
+    image: dashboards:${APP_VERSION:-0.4.2}
     restart: unless-stopped
     depends_on:
       db:
@@ -77,7 +77,7 @@ services:
   # Планировщик: папка «Входящие», запуски подключений по расписанию, срок хранения.
   # Тот же образ; миграции выполняет только app — worker ждёт актуальную схему и не мигрирует сам.
   worker:
-    image: dashboards:${APP_VERSION:-0.4.1}
+    image: dashboards:${APP_VERSION:-0.4.2}
     restart: unless-stopped
     depends_on:
       db:
@@ -88,9 +88,15 @@ services:
     environment: *app-environment
     volumes:
       - inbox:/data/inbox
-    # У планировщика нет HTTP-сервера; признак работы — «Планировщик» на экране «Входящие → Папка»
+    # У планировщика нет HTTP-сервера: о его работе говорит файл-сердцебиение (WORKER_HEARTBEAT_FILE,
+    # обновляется каждым тактом, 30 с) — healthcheck следит за возрастом файла; отметка видна и на
+    # экране «Входящие → Папка». К базе из healthcheck не обратиться
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/worker-heartbeat') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     # SIGTERM: текущий такт (разбор файла, запуск подключения) доделывается
     stop_grace_period: 60s
 
