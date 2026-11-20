@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import LightsLegend from '@/components/ui/LightsLegend.vue'
 import KpiCard from '@/components/ui/KpiCard.vue'
 import ChartCard from '@/components/ui/ChartCard.vue'
 import EChart from '@/components/charts/EChart.vue'
@@ -346,6 +347,7 @@ const canManage = computed(() => auth.can('tech', 'manager'))
       <router-link to="/tp/registry" class="btn"><AppIcon :name="canEdit ? 'edit' : 'table'" :size="15" />Недельный отчёт</router-link>
       <PdfButton report="tp/dashboard" :params="pdfParams" />
     </PageHeader>
+    <LightsLegend />
 
     <!-- Период и фильтры -->
     <div class="filters card">

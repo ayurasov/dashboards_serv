@@ -43,12 +43,13 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
   <div class="kpi card" :class="[light ? `l-${light}` : '', { missing }]">
     <div class="top">
       <span class="label" :title="hint || label">{{ label }}</span>
-      <span v-if="light" class="light" :title="missing ? MISSING_LABEL : LIGHT_LABELS[light]" />
+      <span v-if="light" class="light" :title="missing ? MISSING_LABEL : `Статус по порогам светофора — ${LIGHT_LABELS[light]}`" />
     </div>
     <div v-if="loading" class="skeleton value-skel" />
     <div v-else class="value num">{{ display }}<span v-if="unitText" class="unit" :class="{ pct: unit === '%' }">{{ unit }}</span></div>
     <div class="bottom">
-      <span v-if="showDelta && deltaText" class="delta num" :class="`delta-${tone}`">
+      <span v-if="showDelta && deltaText" class="delta num" :class="`delta-${tone}`"
+            :title="`Изменение к прошлому периоду${deltaLabel ? ` (${deltaLabel})` : ''} — динамика, а не статус светофора`">
         <AppIcon v-if="tone !== 'flat'" :name="(deltaPct ?? delta) > 0 ? 'arrow-up' : 'arrow-down'" :size="12" :stroke="2.4" />
         {{ deltaText }}
       </span>

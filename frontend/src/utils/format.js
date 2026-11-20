@@ -52,16 +52,16 @@ export function plural(n, [one, few, many]) {
   return rule === 'one' ? one : rule === 'few' ? few : many
 }
 
-export function formatRelative(value, now = new Date()) {
+export function formatRelative(value, now = new Date(), short = false) {
   const d = toDate(value)
   if (!d) return '—'
   const minutes = Math.round((now - d) / 60000)
   if (minutes < 1) return 'только что'
-  if (minutes < 60) return `${minutes} ${plural(minutes, ['минуту', 'минуты', 'минут'])} назад`
+  if (minutes < 60) return short ? `${minutes} мин назад` : `${minutes} ${plural(minutes, ['минуту', 'минуты', 'минут'])} назад`
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} ${plural(hours, ['час', 'часа', 'часов'])} назад`
+  if (hours < 24) return short ? `${hours} ч назад` : `${hours} ${plural(hours, ['час', 'часа', 'часов'])} назад`
   const days = Math.round(hours / 24)
-  if (days < 30) return `${days} ${plural(days, ['день', 'дня', 'дней'])} назад`
+  if (days < 30) return short ? `${days} дн. назад` : `${days} ${plural(days, ['день', 'дня', 'дней'])} назад`
   return formatDate(d)
 }
 
