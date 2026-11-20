@@ -254,7 +254,7 @@ const servicesWord = (n) => plural(n, ['служба', 'службы', 'служ
 .inherited i { display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--faint); vertical-align: 1px; }
 .inherited b { color: var(--text); font-weight: 560; }
 .was { font-size: var(--fs-xs); color: var(--muted); line-height: 1.4; }
-.was.same { color: var(--faint); }
+.was.same { color: var(--muted); }
 .link-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: var(--fs-xs); font-weight: 540; cursor: pointer; }
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--faint); cursor: not-allowed; }

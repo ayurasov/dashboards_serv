@@ -251,7 +251,7 @@ const countText = computed(() => {
 .summary th.period { cursor: pointer; user-select: none; min-width: 108px; vertical-align: bottom; }
 .summary th.period:hover { color: var(--text); }
 .p-label { display: block; }
-.p-caption { display: block; margin-top: 1px; font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--faint); }
+.p-caption { display: block; margin-top: 1px; font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--muted); }
 .p-caption.partial { color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
 .summary th.focus { color: var(--text); background: color-mix(in srgb, var(--chart-2) 10%, var(--surface-2)); box-shadow: inset 0 -2px 0 var(--chart-2); }
 .summary td.focus { background: color-mix(in srgb, var(--chart-2) 5%, transparent); }

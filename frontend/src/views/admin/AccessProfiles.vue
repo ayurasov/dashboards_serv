@@ -123,7 +123,7 @@ async function remove(profile) {
 .p-head { display: flex; align-items: flex-start; gap: 10px; }
 .p-titles { flex: 1; min-width: 0; }
 .p-head h2 { font-size: var(--fs-md); line-height: 1.3; }
-.p-key { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+.p-key { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 .p-desc { font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; min-height: 4.35em; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .p-foot .btn-danger:disabled { color: var(--faint); opacity: .45; }
 .facts { margin: 0; display: flex; flex-direction: column; border-top: 1px dashed var(--border); padding-top: 6px; }

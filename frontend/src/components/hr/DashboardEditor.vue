@@ -181,7 +181,7 @@ async function save() {
 .mitem { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 0; font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
 .mitem.on { color: var(--text); }
 .mitem input { width: 15px; height: 15px; flex: 0 0 15px; accent-color: var(--brand); }
-.munit { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--faint); }
+.munit { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--muted); }
 .add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-sm); }
 .add .chip:disabled { opacity: .5; cursor: not-allowed; }
 .empty { padding: 16px; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius); font-size: var(--fs-sm); }

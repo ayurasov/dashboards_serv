@@ -348,7 +348,7 @@ const createDefaults = computed(() => ({ status: f.status || 'В работе', 
 .col-product .sub { max-width: 280px; }
 .col-almi { min-width: 110px; }
 .docs { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
-.doc { display: inline-flex; align-items: center; gap: 3px; height: 19px; padding: 0 7px 0 5px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 560; color: var(--faint); border: 1px solid transparent; }
+.doc { display: inline-flex; align-items: center; gap: 3px; height: 19px; padding: 0 7px 0 5px; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 560; color: var(--muted); border: 1px solid transparent; }
 .doc.on { color: var(--light-green); border: 1px solid transparent; background: color-mix(in srgb, var(--light-green) 12%, transparent); }
 .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sub { font-size: var(--fs-xs); color: var(--muted); margin-top: 1px; }
@@ -386,6 +386,6 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .ext { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
 .ext :deep(svg) { flex: 0 0 auto; }
 .comment { white-space: pre-line; color: var(--text-2); }
-.stamp { font-size: var(--fs-xs); color: var(--faint); }
+.stamp { font-size: var(--fs-xs); color: var(--muted); }
 @media (max-width: 640px) { .facts { grid-template-columns: 1fr; } .parts li { grid-template-columns: 8px 1fr auto; } .part-value { grid-column: 2 / -1; } }
 </style>

@@ -57,7 +57,7 @@ function title(m) {
 .cell { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: var(--fs-sm); font-weight: 540; cursor: pointer; white-space: nowrap; transition: all var(--t-fast); }
 .cell:hover { border-color: var(--border-strong); color: var(--text); }
 .cell.active { background: var(--text); border-color: var(--text); color: var(--bg-elevated); }
-.cell.ghost { border-style: dashed; background: transparent; color: var(--faint); font-weight: 450; }
+.cell.ghost { border-style: dashed; background: transparent; color: var(--muted); font-weight: 450; }
 span.cell.ghost { cursor: default; }
 button.cell.ghost:hover { color: var(--text-2); border-color: var(--border-strong); background: var(--surface-2); }
 .fill { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }

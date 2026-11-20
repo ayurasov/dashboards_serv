@@ -56,12 +56,12 @@ const groups = computed(() => [
 .col-name.static { cursor: default; color: var(--text-2); font-weight: 600; }
 .cmp tbody th { position: sticky; left: 0; z-index: 1; text-align: left; font-weight: 560; color: var(--text-2); background: var(--surface); white-space: nowrap; }
 .corner { position: sticky; left: 0; z-index: 2; min-width: 190px; }
-.group th { padding: 12px 12px 6px; background: var(--surface); border-bottom: 1px solid var(--border); text-align: left; font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.group th { padding: 12px 12px 6px; background: var(--surface); border-bottom: 1px solid var(--border); text-align: left; font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .cmp tbody tr:not(.group):hover td, .cmp tbody tr:not(.group):hover th { background: var(--row-hover); }
 .cmp tbody:last-child tr:last-child td, .cmp tbody:last-child tr:last-child th { border-bottom: 0; }
 .cmp td { color: var(--text); font-weight: 540; white-space: nowrap; }
 .t-mid { color: var(--text-2); }
-.t-off .no { color: var(--faint); }
+.t-off .no { color: var(--muted); }
 .yes { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--light-green) 14%, transparent); color: var(--light-green); }
 .indiv { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
 </style>

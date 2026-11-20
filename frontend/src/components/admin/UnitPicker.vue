@@ -179,7 +179,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocument))
 .option.none { border-bottom: 1px dashed var(--border); border-radius: 8px 8px 0 0; margin-bottom: 2px; }
 .check { width: 16px; flex: 0 0 16px; display: grid; place-items: center; color: var(--brand); }
 .o-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.3; }
-.count { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--faint); }
+.count { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--muted); }
 .empty { padding: 14px 12px; font-size: var(--fs-sm); color: var(--muted); }
 @keyframes drop { from { opacity: 0; transform: translateY(-4px); } }
 </style>

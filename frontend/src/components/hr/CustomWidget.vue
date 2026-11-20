@@ -134,7 +134,7 @@ const cell = (month, key) => monthMetric(month, key)
 th.month-col { font-weight: 620; }
 .table th { white-space: normal; min-width: 96px; vertical-align: bottom; }
 .th-label { display: block; text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); line-height: 1.3; }
-.th-unit { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--faint); }
+.th-unit { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--muted); }
 .cell { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .note { height: 100%; background: color-mix(in srgb, var(--light-yellow) 6%, var(--surface)); }
 .note .text { white-space: pre-line; color: var(--text-2); font-size: var(--fs-base); line-height: 1.55; }

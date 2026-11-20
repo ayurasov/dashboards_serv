@@ -56,7 +56,7 @@ const HEADINGS = { diff: ['Было', 'Стало'], after: [null, 'Значен
 .v { word-break: break-word; white-space: pre-line; font-variant-numeric: tabular-nums; }
 .old { color: var(--muted); }
 .old:not(.empty) span:not(.swatches) { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--light-red) 55%, transparent); }
-.empty { color: var(--faint); font-weight: 400; }
+.empty { color: var(--muted); font-weight: 400; }
 .new { color: var(--text); font-weight: 540; }
 .arrow { width: 28px; padding-left: 0 !important; padding-right: 0 !important; color: var(--faint); }
 .swatches { display: inline-flex; gap: 3px; vertical-align: middle; }

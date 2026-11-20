@@ -309,8 +309,8 @@ const locked = (u) => u.role === 'admin' && !auth.isAdmin
 .sum { display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
 .sum b { color: var(--text); font-weight: 650; }
 .sum:hover { background: var(--surface-3); }
-.sum.zero { color: var(--faint); }
-.sum.zero b { color: var(--faint); font-weight: 560; }
+.sum.zero { color: var(--muted); }
+.sum.zero b { color: var(--muted); font-weight: 560; }
 .sum.on { background: var(--brand-soft); color: var(--brand); }
 .sum.on b { color: var(--brand); }
 .search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--muted); min-width: 240px; background: var(--surface); }
@@ -354,7 +354,7 @@ const locked = (u) => u.role === 'admin' && !auth.isAdmin
 .login { font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .c-org { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; font-size: var(--fs-sm); }
 .pos { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pos.empty { color: var(--faint); font-style: italic; }
+.pos.empty { color: var(--muted); font-style: italic; }
 .dept { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dept b { color: var(--text-2); font-weight: 560; }
 .mgr { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -373,7 +373,7 @@ const locked = (u) => u.role === 'admin' && !auth.isAdmin
 .pill:hover:not(:disabled) { border-color: currentColor; }
 .pill:disabled { cursor: not-allowed; opacity: .75; }
 .pill:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.last { font-size: var(--fs-xs); color: var(--faint); white-space: nowrap; }
+.last { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 .c-actions { display: flex; justify-content: flex-end; gap: 2px; cursor: default; }
 .ibtn { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
 .ibtn:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }

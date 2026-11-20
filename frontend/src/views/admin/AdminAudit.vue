@@ -194,7 +194,7 @@ async function exportCsv() {
 .dates .input { width: 140px; min-width: 0; flex: 1 1 120px; }
 .lbl { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 620; }
 .reset { margin-left: auto; }
-.dash { color: var(--faint); }
+.dash { color: var(--muted); }
 .audit td { vertical-align: top; }
 .when { width: 150px; }
 .who { display: inline-flex; align-items: center; gap: 7px; }

@@ -318,7 +318,7 @@ const reset = computed(() => resetAction(props.user))
 .cap-text { display: flex; flex-direction: column; gap: 2px; }
 .cap-text b { font-weight: 600; }
 .cap-text small { font-size: var(--fs-sm); color: var(--muted); }
-.cap-text code { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); }
+.cap-text code { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 .history { display: flex; flex-direction: column; gap: 12px; }
 .events { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
 .events li { border-bottom: 1px solid var(--border); }
