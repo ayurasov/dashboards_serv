@@ -538,6 +538,26 @@ def test_folder_connector(admin, tmp_path, monkeypatch):
     assert run["status"] == "ok" and run["summary"]["taken"] == 1 and run["summary"]["items"]
 
 
+def test_folder_connector_reports_access_denied(admin, tmp_path, monkeypatch):
+    """OSError при разборе папки (чужой uid на bind-mount, пропавший носитель) — понятное сообщение,
+    а не «Внутренняя ошибка коннектора»: пользователь может исправить права сам."""
+    from app.core.config import settings
+    from app.services import inbox_folder
+
+    monkeypatch.setattr(settings, "inbox_dir", str(tmp_path / "inbox"))
+    created = admin.post("/api/integrations", json={"kind": "folder"}).json()
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(inbox_folder, "scan", denied)
+    run = admin.post(f"/api/integrations/{created['id']}/run", json={"action": "scan"}).json()
+    assert run["status"] == "error"
+    assert "Нет доступа к папке" in run["error"]
+    assert "Permission denied" in run["error"]
+    assert "права" in run["error"]
+
+
 # ---------------------------------------------------------------- расписание
 
 def test_schedule_normalization(demo):

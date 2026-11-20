@@ -45,7 +45,15 @@ class FolderConnector(Connector):
 
     def run(self, action: str, ctx: RunContext) -> RunResult:
         self.action(action)
-        result = inbox_folder.scan()
+        try:
+            result = inbox_folder.scan()
+        except OSError as exc:
+            # Нет прав или пропал носитель — типовая эксплуатационная ситуация, а не «внутренняя ошибка»:
+            # пользователь может исправить сам (владелец и права папки, uid пользователя контейнера)
+            reason = getattr(exc, "strerror", None) or str(exc)
+            return RunResult.failed(
+                f"Нет доступа к папке «Входящие» ({reason}). Проверьте, что путь существует и права позволяют "
+                "читать и писать в него пользователю, от которого работает контейнер (в Docker — том inbox)")
         counters = {k: v for k, v in result.as_dict().items() if isinstance(v, int) and not isinstance(v, bool)}
         if not result.enabled:
             return RunResult.failed("Папка не настроена: задайте INBOX_DIR")
