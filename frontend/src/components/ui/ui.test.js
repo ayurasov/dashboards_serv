@@ -5,6 +5,8 @@ import SegmentedControl from './SegmentedControl.vue'
 import LightBadge from './LightBadge.vue'
 import EmptyState from './EmptyState.vue'
 import AppModal from './AppModal.vue'
+import SparkLine from './SparkLine.vue'
+import MetricGlossary from './MetricGlossary.vue'
 import ChartCard from './ChartCard.vue'
 import { isTopModal, openModals, popModal, pushModal, trapFocus } from './modalStack'
 
@@ -151,5 +153,36 @@ describe('KpiCard: незаполненный показатель со свет
     expect(w.classes()).toContain('missing')
     expect(w.find('.missing-flag').text()).toBe('Не заполнено')
     expect(w.find('.light').attributes('title')).toBe('Нет данных')
+  })
+})
+
+describe('SparkLine', () => {
+  it('рисует полилинию при двух и более точках', () => {
+    const w = mount(SparkLine, { props: { points: [1, 2, 1.5, 3] } })
+    expect(w.find('polyline').attributes('points')).toBeTruthy()
+    expect(w.find('circle').exists()).toBe(true)
+  })
+  it('не рисует ничего без ряда (меньше двух точек)', () => {
+    const w = mount(SparkLine, { props: { points: [5, null, undefined] } })
+    expect(w.find('svg').exists()).toBe(false)
+  })
+})
+
+describe('MetricGlossary', () => {
+  it('скрыт без описания и направления', () => {
+    const w = mount(MetricGlossary, { props: { label: 'Текучесть', about: null } })
+    expect(w.find('button').exists()).toBe(false)
+  })
+  it('открывает окно с определением и направлением', async () => {
+    const w = mount(MetricGlossary, {
+      props: { label: 'Текучесть', unit: '%', about: { description: 'Уволенные к среднесписочной.', direction: 'lower_is_better' } },
+      attachTo: document.body,
+    })
+    await w.find('button').trigger('click')
+    const dialog = document.querySelector('[role=dialog]')  // AppModal телепортируется в body
+    expect(dialog).toBeTruthy()
+    expect(dialog.textContent).toContain('Уволенные к среднесписочной')
+    expect(dialog.textContent).toContain('Меньше — лучше')
+    w.unmount()
   })
 })
