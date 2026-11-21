@@ -70,7 +70,7 @@ h2 { font-size: 17px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes slide { from { transform: translateX(24px); opacity: .4; } }
 .grabber { display: none; }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .sheet { align-items: flex-end; }
   .sheet .drawer { width: 100% !important; height: auto; max-height: 92dvh; border-left: 0; border-top: 1px solid var(--border); border-radius: 18px 18px 0 0; animation: sheet-in .24s var(--ease); }
   .sheet .grabber { display: block; flex: 0 0 auto; width: 44px; height: 4px; margin: 8px auto 0; border-radius: 4px; background: var(--border-strong); }

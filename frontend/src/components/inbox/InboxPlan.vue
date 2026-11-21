@@ -208,7 +208,7 @@ tr.clear td.val:not(.muted) { color: var(--text-2); font-style: italic; }
 .empty { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 14px; border: 1px dashed var(--border-strong); border-radius: 12px; text-align: center; font-size: var(--fs-sm); color: var(--muted); }
 .more { margin-top: 8px; }
 .muted { color: var(--muted); }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .rows, .rows.with-values { min-width: 0; }
   .what, .val, .act, .line { min-width: 0; }
   .rows thead { display: none; }

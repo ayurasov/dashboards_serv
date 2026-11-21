@@ -302,7 +302,7 @@ function showFolderItems() {
 .page-btn.active { background: var(--text); color: var(--bg-elevated); font-weight: 600; }
 .gap { min-width: 20px; text-align: center; color: var(--faint); }
 .retention { font-size: var(--fs-xs); }
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   .inbox-table thead { display: none; }
   .inbox-table, .inbox-table tbody { display: block; }
   .inbox-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }

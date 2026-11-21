@@ -273,7 +273,7 @@ const heads0 = (d) => [...(d.heads || [])].sort((a, b) => Number(b.is_primary) -
 .skeleton-rows { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
 .skeleton-rows .skeleton { height: 40px; }
 .note { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); margin-top: -8px; }
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .deps thead { display: none; }
   .deps, .deps tbody, .deps tr, .deps td { display: block; }
   .deps tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 8px 0; border-bottom: 1px solid var(--border); }

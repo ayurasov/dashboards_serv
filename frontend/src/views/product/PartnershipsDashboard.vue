@@ -333,7 +333,7 @@ const periodText = computed(() => {
 .block { grid-column: span var(--span, 12); min-width: 0; }
 .block > :deep(.chart-card) { height: 100%; }
 @media (max-width: 1100px) { .block { grid-column: span var(--span-md, 12); } }
-@media (max-width: 860px) { .block { grid-column: 1 / -1; } }
+@media (max-width: 960px) { .block { grid-column: 1 / -1; } }
 .fill-skel { height: 100%; }
 
 .lights .card-head { align-items: flex-start; }
@@ -355,7 +355,7 @@ const periodText = computed(() => {
 .legend-item:hover .go { opacity: 1; }
 
 .groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); margin-top: var(--sp-5); }
-@media (max-width: 1280px) { .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .groups { grid-template-columns: minmax(0, 1fr); } }
 .group h4 { font-size: var(--fs-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 8px; }
 .group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

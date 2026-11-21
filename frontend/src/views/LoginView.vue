@@ -140,5 +140,5 @@ h1 { font-size: 28px; letter-spacing: -0.02em; }
 .dot { width: 9px; height: 9px; border-radius: 50%; }
 .dot.g { background: var(--light-green); } .dot.y { background: var(--light-yellow); }
 .version { position: absolute; right: 24px; bottom: 20px; margin: 0; font-size: var(--fs-sm); color: var(--muted); }
-@media (max-width: 900px) { .login { grid-template-columns: 1fr; } .art { display: none; } .panel { padding: 32px 24px; } }
+@media (max-width: 960px) { .login { grid-template-columns: 1fr; } .art { display: none; } .panel { padding: 32px 24px; } }
 </style>

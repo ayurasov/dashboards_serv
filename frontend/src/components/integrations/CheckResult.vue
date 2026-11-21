@@ -80,7 +80,7 @@ const message = computed(() => props.result.message || (props.result.ok ? 'По�
 .when { font-size: var(--fs-xs); color: var(--muted); }
 .more summary { font-size: var(--fs-xs); color: var(--text-2); cursor: pointer; }
 .tech summary { color: var(--muted); }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .details.grid { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
   .details.grid dd { margin-bottom: 5px; }
   .sub, .warnings { padding-left: 0; }

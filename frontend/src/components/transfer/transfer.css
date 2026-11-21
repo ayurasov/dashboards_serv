@@ -31,7 +31,7 @@
 .inset { margin: 0; }
 .list-inline { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .list-inline li { padding: 3px 10px; border-radius: var(--radius-pill); background: var(--surface-3); font-size: var(--fs-sm); color: var(--text-2); }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .block { padding: 16px; }
   .block-head { flex-wrap: wrap; }
   .block-head > .b-icon { display: none; }

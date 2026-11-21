@@ -402,7 +402,7 @@ const locked = (u) => u.role === 'admin' && !auth.isAdmin
   .c-status { flex-direction: column; align-items: flex-end; gap: 3px; }
   .access-btn { display: none; }
 }
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   .search { min-width: 0; flex: 1 1 100%; }
   .f-role, .f-dept, .f-profile, .f-auth { width: calc(50% - 6px) !important; }
 }

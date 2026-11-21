@@ -314,10 +314,10 @@ const modes = computed(() => NEW_USER_MODES.map((m) => (m.value === 'active' ? {
 .errors { color: var(--light-red); }
 .warnings { color: color-mix(in srgb, var(--light-yellow) 80%, var(--text)); }
 .more { align-self: center; }
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .modes { grid-template-columns: 1fr; }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .conflicts thead { display: none; }
   .conflicts tr { display: grid; grid-template-columns: 1fr 1fr; }
   .conflicts td { border: 0; }

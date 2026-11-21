@@ -167,7 +167,7 @@ function jump(year) {
   .nav-title { display: none; }
   .nav-item { gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .month { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .month-label { position: static; padding-top: 0; }
 }

@@ -337,7 +337,7 @@ const NOTES = computed(() => ({
 <style scoped>
 .chips { gap: 6px; }
 .kpis { display: grid; gap: var(--sp-4); grid-template-columns: repeat(6, minmax(0, 1fr)); }
-@media (max-width: 1360px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1280px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .table-head { flex-wrap: wrap; align-items: flex-start; gap: var(--sp-3); }

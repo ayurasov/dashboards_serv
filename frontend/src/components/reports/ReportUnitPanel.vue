@@ -363,7 +363,7 @@ watch([data, () => props.focusIndicator], async () => {
 .k-lock, .k-go { color: var(--faint); }
 .k-miss { display: inline-flex; align-items: center; gap: 2px; height: 19px; padding: 0 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--light-red) 12%, transparent); color: var(--light-red); font-size: 10.5px; font-weight: 700; }
 
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .i-body { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .i-spark { height: 48px; }
   .ph-title { font-size: var(--fs-lg); }

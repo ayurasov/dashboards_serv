@@ -255,7 +255,7 @@ async function closeOthers() {
 .l-label b { color: var(--text); font-weight: 620; }
 .lines p { margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); line-height: 1.45; }
 .card-foot { padding: 0 var(--sp-5) var(--sp-4); }
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   .access-grid, .lines { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

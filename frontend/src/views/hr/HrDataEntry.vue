@@ -446,7 +446,7 @@ const shortDate = (d) => formatDate(d).slice(0, 5)
 <style scoped>
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: var(--sp-4); align-items: start; }
 .main-col, .side-col { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
-@media (max-width: 1180px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
 .metrics { table-layout: fixed; min-width: 620px; }
 .metrics .c-metric { width: 36%; }

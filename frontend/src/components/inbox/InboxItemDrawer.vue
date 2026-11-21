@@ -329,10 +329,10 @@ async function downloadFile() {
   .hide-md { display: none; }
   .show-md { display: inline; }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .foot-hint { display: none; }
 }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .foot-actions { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
   .foot-actions .btn { flex: 1 1 auto; min-width: 0; }
 }
