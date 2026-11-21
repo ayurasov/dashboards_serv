@@ -20,7 +20,7 @@ const NARROW = [
   [390, ['/', '/reports', '/hr']],
 ]
 
-async function open(page, route, { theme = 'light', width, height } = {}) {
+async function open(page, route, { width, height } = {}) {
   if (width) await page.setViewportSize({ width, height })
   await page.clock.install({ time: FIXED_TIME })
   await login(page)
