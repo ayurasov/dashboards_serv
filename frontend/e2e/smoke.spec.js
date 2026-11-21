@@ -94,7 +94,6 @@ test('«Обзор»: выбор периода меняет месяц карт
   const first = await select.locator('option').nth(1).getAttribute('value')
   await select.selectOption(first)
   await expect(page).toHaveURL(new RegExp(`period=${first}`))
-  const hr = page.locator('article.service', { has: page.getByRole('heading', { name: 'Служба персонала' }) })
   await expect(page.getByTestId('report-summary')).toContainText(first.slice(0, 4))
   expect(errors).toEqual([])
 })
