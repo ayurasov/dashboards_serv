@@ -80,7 +80,7 @@ test('история версий и руководство встроены в 
   await expect(page.getByRole('dialog')).toContainText('Версия 0.4.1')
   await page.keyboard.press('Escape')
   await page.goto('/about')
-  await expect(page.getByTestId('about-version')).toHaveText('0.4.2')
+  await expect(page.getByTestId('about-version')).toHaveText('0.4.3')
   await page.goto('/guide')
   await page.getByPlaceholder('Найти в руководстве').fill('светофор')
   await expect(page.locator('.toc li').first()).toBeVisible()
