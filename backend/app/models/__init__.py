@@ -58,6 +58,12 @@ from .partnerships import (  # noqa: F401
     Partnership,
     PartnershipLightRule,
 )
+from .project_office import (  # noqa: F401
+    GitlabCommitDay,
+    GitlabMergeRequest,
+    GitlabPipelineDay,
+    GitlabProject,
+)
 from .reports import (  # noqa: F401
     INDICATOR_DIRECTIONS,
     INDICATOR_ROLLUPS,
