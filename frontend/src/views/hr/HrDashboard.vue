@@ -185,7 +185,8 @@ const periodText = computed(() => {
           <KpiCard label="Уволено за период" :value="data?.totals.fired" unit="чел." :loading="loading && !data" />
           <KpiCard label="Чистый прирост" :value="data?.totals.net" unit="чел." :loading="loading && !data" />
           <KpiCard v-for="m in keyMetrics" :key="m.key" :label="kpiLabel(m)" :value="m.value" :unit="m.unit" :light="m.light"
-                   :missing="m.missing" :delta="m.delta" :direction="m.direction" :target="m.target" :hint="kpiHint(m)" />
+                   :missing="m.missing" :delta="m.delta" :direction="m.direction" :target="m.target" :hint="kpiHint(m)"
+                   :series="metricSeries(series, m.key)" :about="{ description: m.description, direction: m.direction }" />
         </div>
       </section>
 

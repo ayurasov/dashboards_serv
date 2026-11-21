@@ -14,7 +14,8 @@ import { LIGHT_LABELS } from '@/utils/lights'
  * статусам, пропуски данных, три главные причины и переход к отчёту. Пустой отчёт — карточки нет.
  */
 const router = useRouter()
-const { data } = useAsync(() => reportsApi.summary())
+const props = defineProps({ period: { type: String, default: '' } })
+const { data } = useAsync(() => reportsApi.summary(props.period || undefined))
 const show = computed(() => data.value && !data.value.empty)
 const title = computed(() => (data.value?.roots?.length === 1 ? data.value.roots[0].name : 'ваша область'))
 const segments = computed(() => statusSegments(data.value?.counts || {}))
