@@ -196,5 +196,5 @@ async function save() {
 .form-error { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-sm); color: var(--light-red); line-height: 1.45; }
 .form-error :deep(svg) { margin-top: 2px; flex: 0 0 auto; }
 .foot-note { font-size: var(--fs-xs); color: var(--muted); max-width: 320px; }
-@media (max-width: 720px) { .foot-note { display: none; } }
+@media (max-width: 640px) { .foot-note { display: none; } }
 </style>

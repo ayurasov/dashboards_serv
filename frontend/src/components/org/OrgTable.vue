@@ -124,7 +124,7 @@ const ariaSort = (key) => (props.sort.key === key ? (props.sort.dir === 'asc' ? 
 .muted { color: var(--muted); }
 .table tfoot td { position: sticky; bottom: 0; }
 .empty { padding: 32px; text-align: center; color: var(--muted); }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .path-cell { min-width: 190px; max-width: 240px; }
   .table th:first-child, .table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
   .table th:first-child { z-index: 2; background: var(--surface-2); }

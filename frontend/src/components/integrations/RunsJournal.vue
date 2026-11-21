@@ -91,7 +91,7 @@ const hasMessage = (run) => !!run.message && run.message !== run.error
 .more .counters { margin-top: 5px; }
 .err { color: var(--light-red); font-size: var(--fs-xs); overflow-wrap: anywhere; white-space: pre-line; }
 .lbl { display: none; color: var(--muted); }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .runs thead { display: none; }
   .runs, .runs tbody { display: block; }
   .runs tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }

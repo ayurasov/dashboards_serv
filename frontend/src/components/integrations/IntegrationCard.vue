@@ -262,7 +262,7 @@ async function remove() {
 .running { font-size: var(--fs-sm); }
 .ic-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .badge-blue { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--on-blue); }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .facts { grid-template-columns: minmax(0, 1fr); }
   .ic-head { padding: 14px 14px 10px; }
   .ic-body { padding: 0 14px 12px; }

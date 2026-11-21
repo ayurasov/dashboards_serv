@@ -488,7 +488,7 @@ const zoomPercent = computed(() => `${Math.round(prefs.zoom * 100)} %`)
 .org-canvas, .org-fill { flex: 1; min-height: 0; }
 .canvas-skel { height: 100%; border-radius: var(--radius-lg); }
 
-@media (max-width: 1280px) {
+@media (max-width: 1100px) {
   .org-body.with-panel { grid-template-columns: minmax(0, 1fr) 340px; }
 }
 @media (max-width: 1100px) {
@@ -498,7 +498,7 @@ const zoomPercent = computed(() => `${Math.round(prefs.zoom * 100)} %`)
 @media (max-width: 960px) {
   .org-page { height: calc(100dvh - var(--topbar-h) - var(--sp-4) - var(--sp-8)); min-height: 520px; }
 }
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .org-body.with-panel { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {

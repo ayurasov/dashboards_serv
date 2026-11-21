@@ -81,5 +81,5 @@ const sourceList = (keys) => keys.map((k) => props.sourceNames[k] || k).join(', 
 .now :deep(svg) { color: var(--light-green); flex: 0 0 auto; }
 .now.warn, .now.warn :deep(svg) { color: var(--light-red); }
 .su-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; font-size: var(--fs-sm); }
-@media (max-width: 760px) { .su-list li { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .su-list li { grid-template-columns: minmax(0, 1fr); } }
 </style>

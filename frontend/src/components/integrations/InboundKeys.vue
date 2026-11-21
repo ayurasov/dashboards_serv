@@ -210,8 +210,8 @@ async function revoke(key) {
 .check small, .help { font-size: var(--fs-xs); color: var(--muted); }
 .form-error { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-sm); color: var(--light-red); }
 .form-error :deep(svg) { margin-top: 2px; flex: 0 0 auto; }
-@media (max-width: 1000px) { .usage { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 760px) {
+@media (max-width: 1100px) { .usage { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) {
   .keys-table thead { display: none; }
   .keys-table, .keys-table tbody { display: block; }
   .keys-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }

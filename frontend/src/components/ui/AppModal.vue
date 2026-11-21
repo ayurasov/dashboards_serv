@@ -74,5 +74,5 @@ h2 { font-size: 17px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.99); } }
 /* Телефон: окно во всю ширину с небольшим полем; колонка minmax(0, 1fr) не даёт окну шире экрана */
-@media (max-width: 560px) { .overlay { padding: 12px; } }
+@media (max-width: 640px) { .overlay { padding: 12px; } }
 </style>

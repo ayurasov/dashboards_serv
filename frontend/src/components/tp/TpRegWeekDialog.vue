@@ -140,7 +140,7 @@ async function save() {
 .affix input { flex: 1; min-width: 0; height: 100%; padding: 0 11px; border: 0; outline: 0; background: transparent; color: var(--text); text-align: right; }
 .affix .unit { padding-right: 11px; font-size: var(--fs-sm); color: var(--muted); }
 .form-error { display: inline-flex; align-items: center; gap: 6px; margin-right: var(--sp-2); font-size: var(--fs-sm); color: var(--light-red); }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .base { grid-template-columns: 1fr 1fr; }
   .base .note { grid-column: 1 / -1; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

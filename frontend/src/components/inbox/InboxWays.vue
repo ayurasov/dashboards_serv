@@ -78,7 +78,7 @@ const auth = useAuthStore()
 .list code, .mono { font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .list code { padding: 0 4px; border-radius: 4px; background: var(--surface-3); }
 .muted { color: var(--muted) !important; }
-@media (max-width: 1200px) { .list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
   .ways { padding: 18px 16px; }
   .ways-head { flex-direction: column; gap: 10px; }

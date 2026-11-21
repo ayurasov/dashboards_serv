@@ -111,7 +111,7 @@ async function save() {
 .matrix tfoot td { font-weight: 500; font-size: var(--fs-sm); color: var(--muted); }
 .save-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 94%, transparent); backdrop-filter: blur(6px); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .muted { color: var(--muted); font-size: var(--fs-sm); }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .matrix thead { display: none; }
   .matrix tr { display: grid; grid-template-columns: 1fr; padding: 10px 12px; border-bottom: 1px solid var(--border); }
   .matrix th.ds { padding: 0 0 6px; border: 0; }

@@ -123,5 +123,5 @@ h4 .muted { font-weight: 500; }
 section .help { margin-top: 6px; }
 .error { font-size: var(--fs-xs); color: var(--light-red); }
 .form-error { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: var(--fs-sm); color: var(--light-red); }
-@media (max-width: 900px) { .editor { grid-template-columns: 1fr; } .side { position: static; } .colors { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 960px) { .editor { grid-template-columns: 1fr; } .side { position: static; } .colors { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

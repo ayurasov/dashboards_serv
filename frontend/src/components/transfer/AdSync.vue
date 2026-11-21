@@ -157,7 +157,7 @@ const pathSource = computed(() => (config.value?.path_source === 'ou'
 code { font-family: var(--font-mono); font-size: .92em; padding: 1px 5px; border-radius: 5px; background: var(--surface-3); }
 .cmd { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 6px 6px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); max-width: 640px; }
 .cmd code { flex: 1; min-width: 0; padding: 0; background: transparent; overflow-x: auto; white-space: nowrap; font-size: var(--fs-sm); }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .config { grid-template-columns: 1fr; }
 }
 </style>

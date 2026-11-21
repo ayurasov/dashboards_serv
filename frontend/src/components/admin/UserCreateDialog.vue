@@ -219,7 +219,7 @@ async function save() {
 .cap b { font-weight: 560; }
 .cap small { font-size: var(--fs-xs); color: var(--muted); }
 .form-error { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: var(--fs-sm); color: var(--light-red); }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .svc-list, .methods { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

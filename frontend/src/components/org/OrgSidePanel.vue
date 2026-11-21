@@ -43,7 +43,7 @@ defineExpose({ scrollTop: () => body.value?.scrollTo({ top: 0 }) })
 .close:focus-visible { outline: 2px solid var(--focus); }
 .grabber { display: none; }
 @keyframes panel-in { from { opacity: 0; transform: translateX(10px); } }
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .org-panel {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; height: auto; max-height: min(76dvh, 680px);
     border-radius: 18px 18px 0 0; border-bottom: 0; box-shadow: 0 -10px 40px rgba(0, 0, 0, .18); animation: sheet-in .24s var(--ease);
