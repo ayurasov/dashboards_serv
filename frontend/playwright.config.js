@@ -15,7 +15,11 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'chromium', testIgnore: /mobile\.spec\.js/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    // Визуальная регрессия — первой: эталоны сняты на чистой демо-базе, а функциональные спеки
+    // ниже меняют данные («Входящие», показатели) и меняли бы снимок. Эталоны сгенерированы в том же
+    // образе, что и CI (метка ubuntu-latest — node:20-bookworm)
+    { name: 'visual', testMatch: /visual\.spec\.js/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    { name: 'chromium', testIgnore: /(mobile|visual)\.spec\.js/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     // Мобильная вёрстка обширна (100+ @media) — охраняется отдельным набором: инвариант «нет
     // горизонтальной прокрутки» на ключевых маршрутах + шторка навигации (аудит 2026-11-20, D3)
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] }, testMatch: /mobile\.spec\.js/ },
