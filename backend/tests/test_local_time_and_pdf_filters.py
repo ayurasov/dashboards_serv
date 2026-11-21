@@ -62,3 +62,35 @@ def test_tp_rows_for_several_years(db):
 def test_overview_tp_period_is_human_readable(admin):
     tech = next(s for s in admin.get("/api/overview").json()["services"] if s["key"] == "tech")
     assert "-я неделя " in tech["period"]
+
+def test_overview_period_sparklines_and_glossary(admin):
+    """0.5.0: период на «Обзоре», серии спарклайнов (12 точек) и описания для глоссария."""
+    data = admin.get("/api/overview").json()
+    hr = next(s for s in data["services"] if s["key"] == "hr")
+    tech = next(s for s in data["services"] if s["key"] == "tech")
+
+    # Спарклайны: ряд из не более 12 точек (месяц у персонала, неделя у ТП), None — пропуск
+    hr_metric = next(k for k in hr["kpis"] if k.get("light") is not None)
+    assert "series" in hr_metric and len(hr_metric["series"]) <= 12
+    tp_kpi = next(k for k in tech["kpis"] if "series" in k)
+    assert len(tp_kpi["series"]) <= 12
+    # Глоссарий: описание и направление есть у метрик с описанием в справочнике/словаре
+    assert hr_metric["about"]["direction"] in ("lower_is_better", "higher_is_better", "neutral")
+    assert tp_kpi["about"]["description"], "у столбцов ТП на «Обзоре» есть описания"
+
+    # Период: другой месяц меняет карточку персонала и год партнёрств
+    months = [m["key"] for m in admin.get("/api/hr/months").json()]
+    assert len(months) >= 2, "демо-данные: минимум два месяца"
+    chosen = months[0]
+    assert chosen != months[-1]
+    other = admin.get("/api/overview", params={"period": chosen}).json()
+    hr0 = next(s for s in other["services"] if s["key"] == "hr")
+    assert hr0["period"] != hr["period"], "выбранный месяц отражается в карточке"
+    pp0 = next(s for s in other["services"] if s["key"] == "project_product")
+    pp = next(s for s in data["services"] if s["key"] == "project_product")
+    assert f"Сертификатов в {chosen[:4]}" == next(k["label"] for k in pp0["kpis"] if "Сертификатов" in k["label"])
+    if chosen[:4] != sorted({m[:4] for m in months})[-1]:
+        assert pp0["kpis"] != pp["kpis"], "год партнёрств следует за выбранным периодом"
+
+    # Некорректный период — 422
+    assert admin.get("/api/overview", params={"period": "не-месяц"}).status_code == 422
