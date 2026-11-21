@@ -82,30 +82,48 @@ def _services(db: Session, user: User, all: bool) -> list[ServiceOut]:
                        level=levels.get(s.key), data_updated_at=updated.get(s.key)) for s in services]
 
 
-def _hr_overview(db: Session, user: User) -> dict:
-    data = hr_service.dashboard(db, [], access.department_scope(db, user))
+def _hr_overview(db: Session, user: User, period: str = "") -> dict:
+    data = hr_service.dashboard(db, [period] if period else [], access.department_scope(db, user))
     latest = data["latest"]
     if not latest:
         return {"empty": True}
     metric = {m["key"]: m for m in latest["metrics"]}
     pick = [k for k in ("turnover", "avg_time_to_fill", "offers_accepted_pct", "probation_pass_rate") if k in metric]
+    # Спарклайны: 12 последних точек периодичности метрики — месяц (план 0.5.0, решение 4)
+    months = data["series"][-12:]
+    by_key = [{m["key"]: m for m in entry["metrics"]} for entry in months]
+
+    def series_of(key):
+        return [entry.get(key, {}).get("value") for entry in by_key]
+
+    def about(m):
+        return {"description": m["description"], "direction": m["direction"]}
+
     return {
         "empty": False, "period": latest["label"], "light_counts": latest["light_counts"],
         "missing": latest.get("missing", []),
-        "kpis": [{"label": "Принято", "value": latest["hired"], "unit": "чел."},
-                 {"label": "Уволено", "value": latest["fired"], "unit": "чел."}]
+        "kpis": [{"label": "Принято", "value": latest["hired"], "unit": "чел.",
+                  "series": [e["hired"] for e in months],
+                  "about": {"description": "Сотрудники, принятые за месяц (реестр приёмов).",
+                            "direction": "neutral"}},
+                 {"label": "Уволено", "value": latest["fired"], "unit": "чел.",
+                  "series": [e["fired"] for e in months],
+                  "about": {"description": "Сотрудники, уволенные за месяц (реестр увольнений).",
+                            "direction": "neutral"}}]
         + [{"label": metric[k]["label"], "value": metric[k]["value"], "unit": metric[k]["unit"],
-            "light": metric[k]["light"], "delta": metric[k]["delta"], "direction": metric[k]["direction"]}
+            "light": metric[k]["light"], "delta": metric[k]["delta"], "direction": metric[k]["direction"],
+            "series": series_of(k), "about": about(metric[k])}
            for k in pick],
     }
 
 
 def _tp_overview(db: Session) -> dict:
     rows = list(db.scalars(select(TpWeeklyReport).order_by(TpWeeklyReport.year.desc(), TpWeeklyReport.week.desc())
-                           .limit(2)))
+                           .limit(12)))
     if not rows:
         return {"empty": True}
     last, prev = rows[0], (rows[1] if len(rows) > 1 else None)
+    chron = list(reversed(rows))  # спарклайны: 12 недель от старой к новой (план 0.5.0)
     rules = traffic_light.rules_for(db, "tech")
     keys = ("total_in_work", "total_solved_week", "ratio_solved_received", "altos_avg_time")
     kpis = []
@@ -116,7 +134,10 @@ def _tp_overview(db: Session) -> dict:
         kpis.append({"label": tp_service.META_BY_KEY[k]["label"], "value": value,
                      "unit": tp_service.META_BY_KEY[k]["unit"], "light": traffic_light.evaluate(value, rule),
                      "delta": None if value is None or prev_value is None else round(value - prev_value, 4),
-                     "direction": rule.direction if rule else "higher_is_better"})
+                     "direction": rule.direction if rule else "higher_is_better",
+                     "series": [getattr(r, k) for r in chron],
+                     "about": {"description": tp_service.COLUMN_DESCRIPTIONS.get(k, ""),
+                               "direction": rule.direction if rule else "higher_is_better"}})
     lights = [traffic_light.evaluate(getattr(last, k), r) for k, r in rules.items() if hasattr(last, k)]
     missing = [tp_service.META_BY_KEY[k]["label"] for k, r in rules.items()
                if hasattr(last, k) and k in tp_service.META_BY_KEY and traffic_light.is_missing(getattr(last, k), r)]
@@ -127,14 +148,14 @@ def _tp_overview(db: Session) -> dict:
             "kpis": kpis + [{"label": "Заявок Naumen в работе", "value": open_tickets, "unit": "шт."}]}
 
 
-def _pp_overview(db: Session) -> dict:
+def _pp_overview(db: Session, period: str = "") -> dict:
     rows = list(db.scalars(select(Partnership)))
     if not rows:
         return {"empty": True}
     rules = p_service.rule_map(db)
     lights = [p_service.record_light(r, rules)["light"] for r in rows]
     stats = p_service.analytics(rows)
-    year = local_today().year
+    year = int(period[:4]) if period else local_today().year
     return {"empty": False, "period": "Все партнёрства", "light_counts": traffic_light.counts(lights),
             "kpis": [{"label": "Всего партнёрств", "value": stats["total"], "unit": ""},
                      {"label": "Завершено", "value": stats["by_status"].get("Завершено", 0), "unit": ""},
@@ -143,19 +164,22 @@ def _pp_overview(db: Session) -> dict:
 
 
 @router.get("/overview", summary="Стартовая страница: главное по каждой доступной службе")
-def overview(db: Session = Depends(get_db), user: User = Depends(active_user)):
-    # Ключ — службы и уровни, область, классы данных и записи пользователя (ADR-0009)
-    # и дата: «сертификатов в этом году» и сроки сертификатов зависят от сегодняшнего дня
-    key = ("overview", tuple(sorted(access.accessible_services(user))), access.cache_scope(db, user, "hr"),
+def overview(period: str = Query("", pattern=r"^(\d{4}-\d{2})?$",
+                                 description="Месяц «ГГГГ-ММ»: карточка персонала, год партнёрств и "
+                                             "сквозная карточка; пусто — последний месяц"),
+             db: Session = Depends(get_db), user: User = Depends(active_user)):
+    # Ключ — службы и уровни, область, классы данных и записи пользователя (ADR-0009),
+    # выбранный период и дата: «сертификатов в этом году» и сроки зависят от сегодняшнего дня
+    key = ("overview", period, tuple(sorted(access.accessible_services(user))), access.cache_scope(db, user, "hr"),
            local_today().isoformat())
-    return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user))
+    return cached_json(db, DATA_SERVICES, key, lambda: _overview(db, user, period))
 
 
-def _overview(db: Session, user: User) -> dict:
+def _overview(db: Session, user: User, period: str = "") -> dict:
     levels = dict(access.accessible_services(user))
     updated = _data_updated(db)
-    builders = {"hr": lambda: _hr_overview(db, user), "tech": lambda: _tp_overview(db),
-                "project_product": lambda: _pp_overview(db)}
+    builders = {"hr": lambda: _hr_overview(db, user, period), "tech": lambda: _tp_overview(db),
+                "project_product": lambda: _pp_overview(db, period)}
     cards = []
     for service in db.scalars(select(Service).order_by(Service.sort_order)):
         if service.key not in levels:

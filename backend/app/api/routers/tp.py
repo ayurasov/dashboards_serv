@@ -59,7 +59,8 @@ def columns(db: Session = Depends(get_db), _: User = Depends(read)):
 
 
 def _columns():
-    return [TpColumnOut(key=k, label=label, group=g, group_label=tp_service.TP_GROUPS[g], unit=u)
+    return [TpColumnOut(key=k, label=label, group=g, group_label=tp_service.TP_GROUPS[g], unit=u,
+                        description=tp_service.COLUMN_DESCRIPTIONS.get(k, ""))
             for k, label, g, u in tp_service.COLUMN_META]
 
 

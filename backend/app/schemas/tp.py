@@ -43,3 +43,4 @@ class TpColumnOut(Schema):
     group: str
     group_label: str
     unit: str
+    description: str = ""  # глоссарий показателя (0.5.0)

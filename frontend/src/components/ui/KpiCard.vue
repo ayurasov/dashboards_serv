@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { LIGHT_LABELS, MISSING_HINT, MISSING_LABEL } from '@/utils/lights'
 import { deltaTone, formatDelta, formatNumber } from '@/utils/format'
 import AppIcon from './AppIcon.vue'
+import SparkLine from './SparkLine.vue'
+import MetricGlossary from './MetricGlossary.vue'
 
 /**
  * Показатель: значение, единица, светофор, изменение к прошлому периоду с оценкой по направлению.
@@ -22,6 +24,9 @@ const props = defineProps({
   caption: { type: String, default: '' },
   target: { type: Number, default: null },
   loading: { type: Boolean, default: false },
+  // 0.5.0: ряд для спарклайна (от старых точек к новым) и глоссарий { description, direction }
+  series: { type: Array, default: () => [] },
+  about: { type: Object, default: null },
   // Показатель со светофором не заполнен: «Нет данных» и отметка критичного нарушения
   missing: { type: Boolean, default: false },
 })
@@ -43,10 +48,14 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
   <div class="kpi card" :class="[light ? `l-${light}` : '', { missing }]">
     <div class="top">
       <span class="label" :title="hint || label">{{ label }}</span>
+      <MetricGlossary :label="label" :about="about" :unit="unit" />
       <span v-if="light" class="light" :title="missing ? MISSING_LABEL : `Статус по порогам светофора — ${LIGHT_LABELS[light]}`" />
     </div>
     <div v-if="loading" class="skeleton value-skel" />
-    <div v-else class="value num">{{ display }}<span v-if="unitText" class="unit" :class="{ pct: unit === '%' }">{{ unit }}</span></div>
+    <div v-else class="value-row">
+      <div class="value num">{{ display }}<span v-if="unitText" class="unit" :class="{ pct: unit === '%' }">{{ unit }}</span></div>
+      <SparkLine v-if="!loading && series.length >= 2" :points="series" :tone="showDelta ? tone : ''" class="value-spark" />
+    </div>
     <div class="bottom">
       <span v-if="showDelta && deltaText" class="delta num" :class="`delta-${tone}`"
             :title="`Изменение к прошлому периоду${deltaLabel ? ` (${deltaLabel})` : ''} — динамика, а не статус светофора`">
@@ -78,6 +87,8 @@ const unitText = computed(() => (props.unit && props.value !== null && props.val
 .l-yellow .light { background: var(--light-yellow); box-shadow: 0 0 0 3px color-mix(in srgb, var(--light-yellow) 22%, transparent); }
 .l-red .light { background: var(--light-red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--light-red) 20%, transparent); }
 .value { font-size: var(--fs-kpi); font-weight: 680; letter-spacing: -0.02em; line-height: 1.1; color: var(--text); }
+.value-row { display: flex; align-items: flex-end; gap: 10px; }
+.value-spark { margin-left: auto; margin-bottom: 4px; }
 .unit { margin-left: 4px; font-size: 15px; font-weight: 560; color: var(--muted); letter-spacing: 0; }
 .unit.pct { margin-left: 1px; }
 .value-skel { height: 31px; width: 60%; }

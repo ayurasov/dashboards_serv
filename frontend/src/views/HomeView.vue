@@ -1,20 +1,29 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import SparkLine from '@/components/ui/SparkLine.vue'
+import MetricGlossary from '@/components/ui/MetricGlossary.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import LightBadge from '@/components/ui/LightBadge.vue'
 import ReportSummaryCard from '@/components/reports/ReportSummaryCard.vue'
 import LightsLegend from '@/components/ui/LightsLegend.vue'
 import { api } from '@/api/client'
+import { reportsApi } from '@/api/reports'
 import { useAsync } from '@/composables/useAsync'
+import { useQueryState } from '@/composables/useQueryState'
 import { useAuthStore, LEVEL_LABELS } from '@/stores/auth'
 import { deltaTone, formatDateTime, formatDelta, formatNumber, formatRelative } from '@/utils/format'
 import { LIGHT_LABELS } from '@/utils/lights'
 
 /** Обзор: статус области пользователя из сквозного отчёта и главное по каждой доступной службе — показатели, светофор, свежесть данных. */
 const auth = useAuthStore()
-const { data, loading, error, reload } = useAsync(() => api.get('/overview'))
+// Период «Обзора» (0.5.0): карточка персонала, год партнёрств и сквозная карточка; ТП — последняя неделя
+const { state: q } = useQueryState({ period: '' })
+const periods = useAsync(() => reportsApi.periods())
+const period = computed(() => q.period || periods.data.value?.current || '')
+const { data, loading, error, reload } = useAsync(() => api.get('/overview', period.value ? { period: period.value } : null))
+watch(period, () => reload())
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -43,9 +52,18 @@ function lightTotal(counts) {
 
 <template>
   <div class="page">
-    <PageHeader :title="greeting" description="Главное по службам, к которым у вас есть доступ" />
+    <PageHeader :title="greeting" description="Главное по службам, к которым у вас есть доступ">
+      <label v-if="(periods.data.value?.periods || []).length > 1" class="period-picker">
+        <span>Период</span>
+        <select v-model="q.period" class="select select-sm" data-testid="overview-period"
+                title="Карточка персонала, год партнёрств и сквозной отчёт; техподдержка — последняя неделя">
+          <option value="">Последний месяц</option>
+          <option v-for="p in periods.data.value.periods" :key="p.period" :value="p.period">{{ p.label }}</option>
+        </select>
+      </label>
+    </PageHeader>
 
-    <ReportSummaryCard />
+    <ReportSummaryCard :period="period" />
     <LightsLegend />
 
     <div v-if="loading && !data" class="cards">
@@ -85,11 +103,15 @@ function lightTotal(counts) {
           </p>
           <dl class="kpis">
             <div v-for="k in s.kpis" :key="k.label" class="kpi">
-              <dt :title="k.label">{{ k.label }}</dt>
+              <dt :title="k.label">{{ k.label }}<MetricGlossary :label="k.label" :about="k.about" :unit="k.unit" /></dt>
               <dd class="num">
-                <LightBadge v-if="k.light && k.light !== 'gray'" :light="k.light" dot />
-                {{ formatNumber(k.value, { unit: k.unit }) }}
-                <small v-if="k.delta !== null && k.delta !== undefined" :class="`delta-${deltaTone(k.delta, k.direction)}`">{{ formatDelta(k.delta, k.unit) }}</small>
+                <span class="kpi-main">
+                  <LightBadge v-if="k.light && k.light !== 'gray'" :light="k.light" dot />
+                  {{ formatNumber(k.value, { unit: k.unit }) }}
+                  <small v-if="k.delta !== null && k.delta !== undefined" :class="`delta-${deltaTone(k.delta, k.direction)}`">{{ formatDelta(k.delta, k.unit) }}</small>
+                </span>
+                <SparkLine v-if="k.series?.length >= 2" :points="k.series" class="kpi-spark"
+                           :tone="k.delta !== null && k.delta !== undefined ? deltaTone(k.delta, k.direction) : ''" />
               </dd>
             </div>
           </dl>
@@ -149,7 +171,9 @@ function lightTotal(counts) {
 .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0; }
 .kpi { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
 .kpi dt { font-size: var(--fs-xs); color: var(--muted); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.kpi dd { margin: 3px 0 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; font-size: 19px; font-weight: 660; letter-spacing: -0.01em; }
+.kpi dd { margin: 3px 0 0; display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 660; letter-spacing: -0.01em; }
+.kpi-main { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; }
+.kpi-spark { margin-left: auto; }
 .kpi dd small { font-size: var(--fs-xs); font-weight: 600; }
 .s-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
 /* Свежесть данных важнее однострочности: на узкой карточке переносим, а не режем «назад» многоточием */
@@ -157,6 +181,8 @@ function lightTotal(counts) {
 .imports { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .imports li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); flex-wrap: wrap; }
 .imports li:last-child { border-bottom: 0; }
+.period-picker { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
+.period-picker .select { width: auto; }
 .waiting h3 { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 4px; }
 .waiting p { font-size: var(--fs-sm); }
 .missing { display: flex; align-items: flex-start; gap: 6px; margin: -4px 0 12px; font-size: var(--fs-xs); font-weight: 560; color: var(--light-red); line-height: 1.35; }
