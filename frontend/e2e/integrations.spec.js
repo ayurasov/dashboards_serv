@@ -27,7 +27,7 @@ test('папка «Входящие» как подключение: созда�
   const kinds = await apiGet(page, '/integrations/kinds')
   for (const k of kinds) await expect(picker.getByTestId(`kind-${k.kind}`)).toContainText(k.title)
   expect(await picker.locator('button.kind').evaluateAll((items) => items.map((b) => b.dataset.kind))).toEqual(kinds.map((k) => k.kind))
-  expect(kinds.map((k) => k.kind).slice(0, 4)).toEqual(['podelu', 'puls', 'jira', 'confluence'])
+  expect(kinds.map((k) => k.kind).slice(0, 5)).toEqual(['podelu', 'puls', 'jira', 'gitlab', 'confluence'])
   await picker.getByTestId('kind-folder').click()
 
   const editor = page.getByRole('dialog').filter({ hasText: 'Новое подключение' })
