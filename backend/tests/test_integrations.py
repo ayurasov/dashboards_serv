@@ -305,8 +305,8 @@ def test_admin_only_kind_is_read_only_for_integrations_manage(admin, demo, admin
 
 def test_kinds_order_and_counter_labels(admin):
     kinds = admin.get("/api/integrations/kinds").json()
-    assert [k["kind"] for k in kinds] == ["podelu", "puls", "jira", "confluence", "bitrix24", "exchange", "onec",
-                                          "folder"], "порядок для человека, а не по ключу"
+    assert [k["kind"] for k in kinds] == ["podelu", "puls", "jira", "gitlab", "confluence", "bitrix24",
+                                          "exchange", "onec", "folder"], "порядок для человека, а не по ключу"
     by_kind = {k["kind"]: k for k in kinds}
     assert by_kind["confluence"]["admin_only"] and not by_kind["jira"]["admin_only"]
     for kind in kinds:

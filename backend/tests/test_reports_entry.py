@@ -63,7 +63,8 @@ def test_catalog_read_by_classes(login, admin, db):
 def test_meta(login):
     data = _as(login, "engineer").get("/api/reports/meta").json()
     assert [s["key"] for s in data["sources"]] == ["hr.hired", "hr.fired", "hr.turnover", "hr.time_to_fill",
-                                                   "tech.in_work", "tech.solved", "tech.ratio", "pp.green_share"]
+                                                   "tech.in_work", "tech.solved", "tech.ratio",
+                                                   "po.hours", "po.lead_time", "po.overdue_share", "pp.green_share"]
     assert {r["key"] for r in data["rule_types"]} == {"threshold", "target"}
     assert {k["value"] for k in data["unit_kinds"]} >= {"company", "division", "service", "group"}
     assert data["statuses"][-1] == {"key": "missing", "label": "Нет данных"}
@@ -465,7 +466,7 @@ def test_unit_note_by_head_or_reports_manage(login, admin, db):
 def test_service_units_setting(login, admin, db):
     codes = _codes(admin)
     data = login("tp_lead").get("/api/reports/settings").json()
-    assert data["report_service_units"] == {"hr": None, "tech": None, "project_product": None}
+    assert data["report_service_units"] == {"hr": None, "tech": None, "project_product": None, "project_office": None}
     tech = next(s for s in data["services"] if s["key"] == "tech")
     assert tech["unit"]["id"] == codes["TECH"] and tech["default_code"] == "TECH"
     assert tech["sources"] == ["tech.in_work", "tech.solved", "tech.ratio"]

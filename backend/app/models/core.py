@@ -206,6 +206,8 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     ip_address: Mapped[str] = mapped_column(String(64), default="")
     user_agent: Mapped[str] = mapped_column(String(300), default="")
+    # Каким был последний вход до этой сессии — лента «что изменилось» (этап 4)
+    prev_login_at: Mapped[datetime | None] = mapped_column()
 
     user: Mapped[User] = relationship()
 

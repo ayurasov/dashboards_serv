@@ -39,7 +39,7 @@ def test_services_list_reflects_access(login):
 
 def test_admin_sees_every_service(admin):
     keys = [s["key"] for s in admin.get("/api/services").json()]
-    assert keys[:3] == ["hr", "tech", "project_product"] and len(keys) == 9
+    assert keys[:4] == ["hr", "tech", "project_product", "project_office"] and len(keys) == 10
 
 
 def test_viewer_cannot_change_data(login):

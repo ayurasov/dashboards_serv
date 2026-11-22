@@ -130,6 +130,14 @@ class Settings(BaseSettings):
     inbox_retention_days: int = Field(default=90, ge=1, le=3650)
     # Планировщик (python -m app.cli worker): период опроса папки и расписаний, секунд
     worker_tick_seconds: int = Field(default=30, ge=1, le=3600)
+    # Почтовая подписка на критичные статусы (этап 4): SMTP-ретранслятор; пусто — подписка не отправляет
+    smtp_host: str = ""
+    smtp_port: int = 25
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "dashboards@company.ru"
+    smtp_tls: bool = False
+
     # Файл-сердцебиение планировщика (обновляется на каждом такте): healthcheck контейнера worker
     # следит за его возрастом — база из healthcheck недоступна. Пусто — файл не пишется
     worker_heartbeat_file: str = "/tmp/worker-heartbeat"

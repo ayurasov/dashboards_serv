@@ -23,7 +23,7 @@ const PAGES = [
   ['/hr', 'Служба персонала'], ['/hr/registry', 'Приёмы и увольнения'], ['/hr/data', 'Ввод данных'],
   ['/hr/summary', 'Сводка'], ['/hr/targets', 'Цели'], ['/hr/dashboards', 'дашборд'],
   ['/tp', 'поддержк'], ['/tp/registry', 'Недельный отчёт'], ['/tp/compare', 'Сравнение'], ['/tp/naumen', 'Naumen'],
-  ['/tp/analytics', 'Naumen'], ['/product', 'артнёрств'], ['/product/registry', 'артнёрств'], ['/product/summary', 'Сводка'],
+  ['/tp/analytics', 'Naumen'], ['/projects', 'Проектный офис'], ['/product', 'артнёрств'], ['/product/registry', 'артнёрств'], ['/product/summary', 'Сводка'],
   ['/product/timeline', 'Хронология'], ['/settings/traffic-light/hr', 'Светофор'], ['/settings/traffic-light/tech', 'Светофор'],
   ['/settings/partnership-lights', 'Светофор'], ['/admin/users', 'Пользователи'], ['/admin/departments', 'Подразделения'],
   ['/admin/audit', 'Журнал'], ['/admin/palettes', 'Палитр'], ['/admin/system', 'систем'], ['/profile', 'Профиль'],
@@ -80,7 +80,7 @@ test('история версий и руководство встроены в 
   await expect(page.getByRole('dialog')).toContainText('Версия 0.4.1')
   await page.keyboard.press('Escape')
   await page.goto('/about')
-  await expect(page.getByTestId('about-version')).toHaveText('0.5.0')
+  await expect(page.getByTestId('about-version')).toHaveText('0.6.0')
   await page.goto('/guide')
   await page.getByPlaceholder('Найти в руководстве').fill('светофор')
   await expect(page.locator('.toc li').first()).toBeVisible()

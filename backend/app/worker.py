@@ -72,6 +72,29 @@ class Worker:
             self.stopping.wait(poll)
         return False
 
+    def _maybe_subscriptions(self, out: dict) -> None:
+        """Почтовая подписка на критичные статусы — раз в сутки (этап 4, ADR-0012)."""
+        from sqlalchemy import select
+
+        from .core.db import utcnow
+        from .models import StatusSubscription
+        from .services import subscription
+
+        try:
+            row = self._subscriptions_checked
+        except AttributeError:
+            row = None
+        if row is not None and row.date() == utcnow().date():
+            return
+        with core_db.SessionLocal() as db:
+            any_enabled = db.scalar(select(StatusSubscription.user_id)
+                                    .where(StatusSubscription.enabled.is_(True)).limit(1))
+            if any_enabled is None:
+                self._subscriptions_checked = utcnow()
+                return
+            out["subscriptions"] = subscription.run_daily(db)
+        self._subscriptions_checked = utcnow()
+
     def tick(self) -> dict:
         from .integrations import runner
         from .services import inbox, inbox_folder
@@ -82,6 +105,8 @@ class Worker:
                 out["folder"] = inbox_folder.scan().as_dict()
             except Exception:  # noqa: BLE001 — такт не должен падать
                 log.exception("Планировщик: ошибка разбора папки «Входящие»")
+        if not self.stopping.is_set():
+            self._maybe_subscriptions(out)
         if not self.stopping.is_set():
             try:
                 interrupted = runner.reclaim_stale()

@@ -31,12 +31,25 @@ import re
 from dataclasses import dataclass
 
 from ...core.errors import ValidationFailed
+from ...models import JiraIssue, JiraProject, JiraWorklog
 from ..base import Action, CheckResult, Connector, Field, RunContext, RunResult, register
 from ..http import HttpClient, IntegrationError, error_text
 from . import _atlassian as atlassian
 from . import _metrics as metrics
 
 PRODUCT = "Jira"
+
+def _raw_dt(value):
+    """ISO-дата Jira → наивный UTC (как хранит база)."""
+    if not value:
+        return None
+    from datetime import datetime
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+
 SEARCH_BATCH = 100    # задач в одном запросе Jira Cloud
 SERVER_BATCH = 500    # Server / DC отдаёт до 1000 задач за запрос (меньший предел дочитывается постранично)
 SEARCH_LIMIT = 5000
@@ -309,6 +322,11 @@ class JiraConnector(Connector):
         Action("preview", "Проверить правила без записи",
                "Выполнить JQL и показать план: что запишется и что изменится, — без записи и без создания "
                "показателей", schedulable=False),
+        Action("raw_projects", "Сырьё: проекты", "Справочник проектов Jira — весь список (запускайте первым)"),
+        Action("raw_issues", "Сырьё: задачи",
+               "Задачи окном по updated (по умолчанию 90 дней): статусы, исполнители, трудозатраты, метки"),
+        Action("raw_worklogs", "Сырьё: трудозатраты",
+               "Записи рабочих часов окном по started (по умолчанию 180 дней) — часы по людям и проектам"),
     )
 
     @classmethod
@@ -367,6 +385,8 @@ class JiraConnector(Connector):
     # --- запуск
     def run(self, action: str, ctx: RunContext) -> RunResult:
         self.action(action)
+        if action.startswith("raw_"):
+            return self._run_raw(action, ctx)
         preview = action == "preview"
         rules = self.rules()
         months = metrics.window(self.config.get("months") or 2)
@@ -430,3 +450,130 @@ class JiraConnector(Connector):
         if errors:
             return RunResult.partial(message, "; ".join(errors[:10]), counters=counters, details=details)
         return RunResult.ok(message, counters=counters, details=details)
+
+    # ---------------------------------------------------------------- сырьё (ADR-0012, этап 2)
+
+    RAW_PAGE = 100
+
+    def _run_raw(self, action: str, ctx: RunContext) -> RunResult:
+        from datetime import timedelta
+
+        from ...core.db import utcnow
+
+        db = ctx.db
+        with self.client() as client:
+            if action == "raw_projects":
+                return self._raw_projects(client, db)
+            days = {"raw_issues": int(self.config.get("raw_issue_days") or 90),
+                    "raw_worklogs": int(self.config.get("raw_worklog_days") or 180)}[action]
+            since = (utcnow() - timedelta(days=min(max(days, 1), 730))).strftime("%Y-%m-%d")
+            if action == "raw_issues":
+                return self._raw_issues(client, db, since)
+            return self._raw_worklogs(client, db, since)
+
+    def _raw_projects(self, client: HttpClient, db) -> RunResult:
+        projects = client.get_json(f"rest/api/{self.api}/project", kind=list)
+        created = updated = 0
+        for p in projects:
+            row = db.get(JiraProject, int(p["id"]))
+            values = dict(key=p.get("key", ""), name=p.get("name", ""),
+                          lead=(p.get("lead") or {}).get("displayName", ""),
+                          project_type=p.get("projectTypeKey", ""), archived=bool(p.get("archived")))
+            if row is None:
+                db.add(JiraProject(id=p["id"], **values))
+                created += 1
+            elif any(getattr(row, k) != v for k, v in values.items()):
+                for k, v in values.items():
+                    setattr(row, k, v)
+                updated += 1
+        db.commit()
+        return RunResult.ok(f"Проектов Jira: {len(projects)} (новых {created}, изменено {updated})",
+                            counters={"projects": len(projects), "created": created, "updated": updated})
+
+    def _search_pages(self, client: HttpClient, jql: str, fields: list[str]) -> list[dict]:
+        """POST /search со страницами по startAt (Server 8.x; Cloud использует nextPageToken —
+        коннектор Cloud работает по старому эндпоинту при api=2, REST 3 отдаёт и startAt)."""
+        out, start = [], 0
+        while True:
+            resp = client.post_json(f"rest/api/{self.api}/search",
+                                    {"jql": jql, "startAt": start, "maxResults": self.RAW_PAGE, "fields": fields})
+            out.extend(resp.get("issues", []))
+            total = int(resp.get("total") or 0)
+            start += self.RAW_PAGE
+            if not resp.get("issues") or (total and start >= total):
+                return out
+
+    def _raw_issues(self, client: HttpClient, db, since: str) -> RunResult:
+        issues = self._search_pages(client, f"updated >= \"{since}\" ORDER BY updated DESC",
+                                    ["summary", "issuetype", "status", "priority", "assignee", "reporter",
+                                     "created", "updated", "resolutiondate", "timespent", "labels", "project"])
+        created = updated = 0
+        for i in issues:
+            f = i["fields"]
+            row = db.get(JiraIssue, int(i["id"]))
+            values = dict(key=i["key"], project_key=(f.get("project") or {}).get("key", ""),
+                          summary=f.get("summary") or "", issue_type=(f.get("issuetype") or {}).get("name", ""),
+                          status=(f.get("status") or {}).get("name", ""),
+                          priority=(f.get("priority") or {}).get("name", "") if f.get("priority") else "",
+                          assignee_email=(f.get("assignee") or {}).get("emailAddress", "").lower(),
+                          assignee_name=(f.get("assignee") or {}).get("displayName", ""),
+                          reporter_email=(f.get("reporter") or {}).get("emailAddress", "").lower(),
+                          labels=f.get("labels") or [],
+                          jira_created=_raw_dt(f.get("created")), jira_updated=_raw_dt(f.get("updated")),
+                          resolved=_raw_dt(f.get("resolutiondate")),
+                          timespent_seconds=int(f.get("timespent") or 0))
+            if row is None:
+                db.add(JiraIssue(id=i["id"], **values))
+                created += 1
+            else:
+                for k, v in values.items():
+                    setattr(row, k, v)
+                updated += 1
+        db.commit()
+        return RunResult.ok(f"Задачи: {len(issues)} за окно (новых {created}, обновлено {updated})",
+                            counters={"issues": len(issues), "created": created, "updated": updated})
+
+    def _raw_worklogs(self, client: HttpClient, db, since: str) -> RunResult:
+        """Задачи с worklog за окно (worklogDate), полный список записей — постранично у каждой задачи."""
+        from sqlalchemy import select
+
+        issues = self._search_pages(client, f"worklogDate >= \"{since}\"", ["worklog"])
+        created = updated = 0
+        # Один словарь на запуск: одна и та же запись может прийти и в поле задачи, и страницей
+        # /worklog (у сессии autoflush=False — база не видит незаписанное, дедуплим в памяти)
+        by_jira_id: dict[int, dict] = {}
+        for i in issues:
+            embedded = (i["fields"].get("worklog") or {})
+            entries = list(embedded.get("worklogs") or [])
+            total = int(embedded.get("total") or len(entries))
+            while len(entries) < total:  # в поиске — только первые 20 записей задачи
+                page = client.get_json(f"rest/api/{self.api}/issue/{i['key']}/worklog",
+                                       params={"startAt": str(len(entries))})
+                more = page.get("worklogs") or []
+                if not more:
+                    break
+                entries.extend(more)
+            for w in entries:
+                started = _raw_dt(w.get("started"))
+                if started is None:  # за окном — поиск вернул и более старые задачи
+                    continue
+                by_jira_id[int(w["id"])] = dict(issue_key=i["key"],
+                                                author_email=(w.get("author") or {}).get("emailAddress", "").lower(),
+                                                author_name=(w.get("author") or {}).get("displayName", ""),
+                                                started=started,
+                                                time_spent_seconds=int(w.get("timeSpentSeconds") or 0),
+                                                comment=w.get("comment") or "")
+        for jira_id, values in by_jira_id.items():
+            row = db.scalar(select(JiraWorklog).where(JiraWorklog.jira_id == jira_id))
+            if row is None:
+                db.add(JiraWorklog(jira_id=jira_id, **values))
+                created += 1
+            else:
+                for k, v in values.items():
+                    setattr(row, k, v)
+                updated += 1
+        db.commit()
+        return RunResult.ok(f"Трудозатраты: задач с записями {len(issues)}, записей новых {created}, "
+                            f"обновлено {updated}",
+                            counters={"worklogs": created + updated, "created": created, "updated": updated,
+                                      "issues": len(issues)})

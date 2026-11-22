@@ -105,7 +105,7 @@ def test_layouts(login):
 def test_overview(login):
     data = login("hr_head").get("/api/overview").json()
     cards = {c["key"]: c for c in data["services"]}
-    assert set(cards) == {"hr", "tech", "project_product"}
+    assert set(cards) == {"hr", "tech", "project_product"}  # профиль head не включает проектный офис
     assert cards["hr"]["period"] == "Июль 2026" and cards["hr"]["kpis"][0]["label"] == "Принято"
     assert cards["tech"]["kpis"] and cards["project_product"]["kpis"][0]["value"] == 142
     assert data["recent_imports"]
@@ -136,7 +136,7 @@ def test_pdf_respects_access(login):
 def test_health_and_version(client):
     health = client.get("/api/health").json()
     assert health["status"] == "ok" and health["schema"]["current"] == health["schema"]["head"]
-    assert client.get("/api/version").json()["version"] == "0.5.0"
+    assert client.get("/api/version").json()["version"] == "0.6.0"
 
 
 def test_system_info(admin):
@@ -165,7 +165,7 @@ def test_security_headers(client):
 
 def test_openapi_is_generated(client):
     schema = client.get("/api/openapi.json").json()
-    assert schema["info"]["version"] == "0.5.0"
+    assert schema["info"]["version"] == "0.6.0"
     assert "/api/hr/analytics/dashboard" in schema["paths"] and "/api/tp/naumen/import" in schema["paths"]
     for path in ("/api/access/meta", "/api/access/profiles/{profile_id}", "/api/users/{user_id}/grant-access",
                  "/api/auth/config", "/api/system/ldap", "/api/system/ldap/test"):

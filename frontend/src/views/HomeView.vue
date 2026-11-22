@@ -23,6 +23,8 @@ const { state: q } = useQueryState({ period: '' })
 const periods = useAsync(() => reportsApi.periods())
 const period = computed(() => q.period || periods.data.value?.current || '')
 const { data, loading, error, reload } = useAsync(() => api.get('/overview', period.value ? { period: period.value } : null))
+// Лента «что изменилось с прошлого входа» (этап 4): только данные, не справочники
+const changes = useAsync(() => api.get('/auth/changes'), { silent: true })
 watch(period, () => reload())
 
 const greeting = computed(() => {
@@ -140,6 +142,21 @@ function lightTotal(counts) {
       </div>
     </section>
 
+    <section v-if="changes.data.value?.items?.length" class="card">
+      <header class="card-head">
+        <h3>Что изменилось с прошлого входа</h3>
+        <span class="hint">{{ formatDateTime(changes.data.value.since) }}</span>
+      </header>
+      <div class="card-body">
+        <ul class="feed">
+          <li v-for="(c, i) in changes.data.value.items" :key="i">
+            <span class="muted nowrap">{{ formatRelative(c.at) }}</span>
+            <span>{{ c.text }}</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <section v-if="waiting.length" class="waiting">
       <h3 class="muted">Службы без дашборда</h3>
       <p class="muted">Доступ выдан, показатели появятся в следующих версиях:
@@ -181,6 +198,9 @@ function lightTotal(counts) {
 .imports { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .imports li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); flex-wrap: wrap; }
 .imports li:last-child { border-bottom: 0; }
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.feed li:last-child { border-bottom: 0; }
 .period-picker { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
 .period-picker .select { width: auto; }
 .waiting h3 { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 4px; }

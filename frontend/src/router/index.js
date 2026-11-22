@@ -41,6 +41,9 @@ const routes = [
 
   // Проектный и продуктовый офис
   { path: '/product', name: 'product-dashboard', component: () => import('@/views/product/PartnershipsDashboard.vue'), meta: { service: 'project_product', title: 'Дашборд', guide: 'дашборд-партнёрств' } },
+  { path: '/projects', name: 'po-dashboard', component: () => import('@/views/project_office/ProjectOfficeDashboard.vue'), meta: { service: 'project_office', title: 'Проектный офис' } },
+  { path: '/projects/issues', name: 'po-issues', component: () => import('@/views/project_office/IssueRegistry.vue'), meta: { service: 'project_office', records: true, title: 'Задачи Jira' } },
+  { path: '/projects/mrs', name: 'po-mrs', component: () => import('@/views/project_office/MrRegistry.vue'), meta: { service: 'project_office', records: true, title: 'Мерж-реквесты' } },
   { path: '/product/registry', name: 'product-registry', component: () => import('@/views/product/PartnershipsRegistry.vue'), meta: { service: 'project_product', records: true, title: 'Реестр партнёрств', guide: 'реестр-партнёрств' } },
   { path: '/product/summary', name: 'product-summary', component: () => import('@/views/product/PartnershipsSummary.vue'), meta: { service: 'project_product', title: 'Сводка по годам', guide: 'сводка-и-хронология' } },
   { path: '/product/timeline', name: 'product-timeline', component: () => import('@/views/product/PartnershipsTimeline.vue'), meta: { service: 'project_product', records: true, title: 'Хронология', guide: 'сводка-и-хронология' } },

@@ -7215,7 +7215,7 @@ info:
   description: 'API дашбордов служб компании: служба персонала, техническая поддержка, технологические
     партнёрства. Аутентификация — сессионная cookie и заголовок X-CSRF-Token.'
   title: Дашборды компании — API
-  version: 0.5.0
+  version: 0.6.0
 openapi: 3.1.0
 paths:
   /api/access/meta:
@@ -7559,6 +7559,23 @@ paths:
       summary: Сменить пароль
       tags:
       - Вход и профиль
+  /api/auth/changes:
+    get:
+      description: 'Лента событий области пользователя с прошлого входа (не глубже 14 дней):
+
+        применённые элементы «Входящих» и новые критичные статусы. Справочники, права и входы
+
+        в систему — шум и не попадают (план 0.5.0, решение владельца).'
+      operationId: changes_since_last_login_api_auth_changes_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Что изменилось с прошлого входа
+      tags:
+      - Вход и профиль
   /api/auth/config:
     get:
       description: Включён ли вход по учётной записи домена и подсказка к нему (ADR-0008). Без входа в
@@ -7711,6 +7728,43 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Завершить сессию
+      tags:
+      - Вход и профиль
+  /api/auth/subscription:
+    get:
+      operationId: my_subscription_api_auth_subscription_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Моя подписка на критичные статусы
+      tags:
+      - Вход и профиль
+    put:
+      operationId: set_my_subscription_api_auth_subscription_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Включить или выключить подписку
       tags:
       - Вход и профиль
   /api/dashboards:
@@ -10878,6 +10932,376 @@ paths:
       summary: 'Техподдержка: заявки Naumen'
       tags:
       - PDF-отчёты
+  /api/project-office/dashboard:
+    get:
+      operationId: dashboard_api_project_office_dashboard_get
+      parameters:
+      - description: ГГГГ-ММ; пусто — последний месяц с трудозатратами
+        in: query
+        name: month
+        required: false
+        schema:
+          default: ''
+          description: ГГГГ-ММ; пусто — последний месяц с трудозатратами
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: 'Дашборд: часы, проекты, задачи, активность разработки'
+      tags:
+      - Проектный офис
+  /api/project-office/employees:
+    get:
+      operationId: employees_api_project_office_employees_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Сотрудники для сопоставления (кто видит службу)
+      tags:
+      - Проектный офис
+  /api/project-office/identities:
+    get:
+      operationId: identities_api_project_office_identities_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Сопоставления внешних авторов с сотрудниками
+      tags:
+      - Проектный офис
+    post:
+      operationId: add_identity_api_project_office_identities_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Сопоставить автора с сотрудником
+      tags:
+      - Проектный офис
+  /api/project-office/identities/unmatched:
+    get:
+      operationId: unmatched_api_project_office_identities_unmatched_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Авторы сырья без сопоставления
+      tags:
+      - Проектный офис
+  /api/project-office/identities/{identity_id}:
+    delete:
+      operationId: delete_identity_api_project_office_identities__identity_id__delete
+      parameters:
+      - in: path
+        name: identity_id
+        required: true
+        schema:
+          title: Identity Id
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Убрать сопоставление
+      tags:
+      - Проектный офис
+  /api/project-office/issues:
+    get:
+      operationId: issues_api_project_office_issues_get
+      parameters:
+      - in: query
+        name: project
+        required: false
+        schema:
+          default: ''
+          title: Project
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          default: ''
+          title: Status
+          type: string
+      - in: query
+        name: assignee
+        required: false
+        schema:
+          default: ''
+          title: Assignee
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          default: ''
+          title: Search
+          type: string
+      - in: query
+        name: open_only
+        required: false
+        schema:
+          default: false
+          title: Open Only
+          type: boolean
+      - in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          title: Page
+          type: integer
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          default: 50
+          maximum: 200
+          minimum: 1
+          title: Page Size
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Реестр задач Jira (окно сырья)
+      tags:
+      - Проектный офис
+  /api/project-office/issues/{issue_key}/merge-requests:
+    get:
+      operationId: issue_mrs_api_project_office_issues__issue_key__merge_requests_get
+      parameters:
+      - in: path
+        name: issue_key
+        required: true
+        schema:
+          title: Issue Key
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Мерж-реквесты задачи — связка «задача → код»
+      tags:
+      - Проектный офис
+  /api/project-office/merge-requests:
+    get:
+      operationId: merge_requests_api_project_office_merge_requests_get
+      parameters:
+      - in: query
+        name: project_id
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Project Id
+      - in: query
+        name: state
+        required: false
+        schema:
+          default: ''
+          title: State
+          type: string
+      - in: query
+        name: author
+        required: false
+        schema:
+          default: ''
+          title: Author
+          type: string
+      - in: query
+        name: jira_key
+        required: false
+        schema:
+          default: ''
+          title: Jira Key
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          default: ''
+          title: Search
+          type: string
+      - in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          title: Page
+          type: integer
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          default: 50
+          maximum: 200
+          minimum: 1
+          title: Page Size
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Реестр мерж-реквестов GitLab (окно сырья)
+      tags:
+      - Проектный офис
+  /api/project-office/plans:
+    get:
+      operationId: plans_api_project_office_plans_get
+      parameters:
+      - in: query
+        name: month
+        required: true
+        schema:
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: План часов по проектам на месяц
+      tags:
+      - Проектный офис
+  /api/project-office/plans/{project_key}:
+    delete:
+      operationId: delete_plan_api_project_office_plans__project_key__delete
+      parameters:
+      - in: path
+        name: project_key
+        required: true
+        schema:
+          title: Project Key
+          type: string
+      - in: query
+        name: month
+        required: true
+        schema:
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Удалить план часов
+      tags:
+      - Проектный офис
+    put:
+      operationId: set_plan_api_project_office_plans__project_key__put
+      parameters:
+      - in: path
+        name: project_key
+        required: true
+        schema:
+          title: Project Key
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Задать план часов проекта на месяц
+      tags:
+      - Проектный офис
   /api/reports/indicators:
     get:
       description: С полномочием «Сквозные отчёты» — весь каталог, иначе — активные показатели доступных

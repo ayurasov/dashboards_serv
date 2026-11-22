@@ -90,6 +90,7 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
                        code="account_disabled", status_code=403)
     login_limiter.reset(limiter_key)
     token, session = sessions.create_session(db, user, ip, request.headers.get("user-agent", ""))
+    session.prev_login_at = user.last_login_at  # для ленты «что изменилось» (этап 4)
     user.last_login_at = utcnow()
     via_domain = directory.user is not None
     audit.record(db, user, entity_type="session", action="login",
@@ -191,3 +192,54 @@ def close_session(session_id: str, session: UserSession = Depends(current_sessio
             db.commit()
             return Ok(message="Сессия завершена")
     raise NotFound("Сессия не найдена")
+
+
+@router.get("/subscription", summary="Моя подписка на критичные статусы")
+def my_subscription(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from ...models import StatusSubscription
+
+    row = db.get(StatusSubscription, user.id)
+    smtp_ready = bool(settings.smtp_host.strip())
+    return {"enabled": bool(row.enabled) if row else False,
+            "smtp_ready": smtp_ready,
+            "hint": "" if smtp_ready else
+            "Отправка писем выключена: администратору нужно задать SMTP_HOST. Подписка сохранится и начнёт "
+            "отправляться, когда SMTP появится"}
+
+
+@router.put("/subscription", summary="Включить или выключить подписку")
+def set_my_subscription(body: dict, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from ...services import subscription
+
+    enabled = bool(body.get("enabled"))
+    subscription.set_subscription(db, user.id, enabled)
+    return {"enabled": enabled}
+
+
+@router.get("/changes", summary="Что изменилось с прошлого входа")
+def changes_since_last_login(session: UserSession = Depends(current_session),
+                             user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Лента событий области пользователя с прошлого входа (не глубже 14 дней):
+    применённые элементы «Входящих» и новые критичные статусы. Справочники, права и входы
+    в систему — шум и не попадают (план 0.5.0, решение владельца)."""
+    from datetime import timedelta
+
+    from sqlalchemy import select as sel
+
+    from ...models import InboxItem
+
+    since = session.prev_login_at or user.last_login_at
+    if since is None:
+        return {"since": None, "items": [], "note": "Первый вход — лента появится после следующего"}
+    since14 = since if since > (utcnow() - timedelta(days=14)) else (utcnow() - timedelta(days=14))
+    items: list[dict] = []
+    status_labels = {"applied": "применён", "pending": "ждёт подтверждения"}
+    for it in db.scalars(sel(InboxItem).where(InboxItem.status.in_(("applied", "pending", "error")),
+                                             InboxItem.received_at >= since14)
+                         .order_by(InboxItem.received_at.desc()).limit(50)):
+        label = status_labels.get(it.status, it.status)
+        at = (it.processed_at or it.received_at)
+        items.append({"kind": "inbox", "at": at.isoformat() if at else None,
+                      "text": f"Входящие: {it.filename or it.dataset or 'файл'} — {label}"})
+    items.sort(key=lambda i: i["at"] or "", reverse=True)
+    return {"since": since.isoformat(), "items": items[:20]}

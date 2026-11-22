@@ -58,6 +58,19 @@ from .partnerships import (  # noqa: F401
     Partnership,
     PartnershipLightRule,
 )
+from .project_office import (  # noqa: F401
+    CalendarOverride,
+    ExternalIdentity,
+    GitlabCommitDay,
+    GitlabMergeRequest,
+    GitlabPipelineDay,
+    GitlabProject,
+    JiraIssue,
+    JiraProject,
+    JiraWorklog,
+    ProjectHourPlan,
+    StatusSubscription,
+)
 from .reports import (  # noqa: F401
     INDICATOR_DIRECTIONS,
     INDICATOR_ROLLUPS,

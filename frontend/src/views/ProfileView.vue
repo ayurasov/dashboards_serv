@@ -87,6 +87,14 @@ async function changePassword() {
 }
 
 const sessions = useAsync(() => api.get('/auth/sessions'))
+const subscription = useAsync(() => api.get('/auth/subscription'), { silent: true })
+async function toggleSubscription(event) {
+  const enabled = event.target.checked
+  try {
+    await api.put('/auth/subscription', { enabled })
+    await subscription.reload()
+  } catch { event.target.checked = !enabled }
+}
 function device(ua) {
   if (!ua) return 'Неизвестное устройство'
   const browser = /Edg\//.test(ua) ? 'Edge' : /YaBrowser/.test(ua) ? 'Яндекс Браузер' : /Firefox/.test(ua) ? 'Firefox' : /Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : 'Браузер'
@@ -194,6 +202,22 @@ async function closeOthers() {
         </ul>
       </div>
       <p v-if="!auth.isAdmin" class="card-foot muted small">Права выдаёт администратор: профиль доступа и личные настройки поверх него.</p>
+    </section>
+
+    <section class="card">
+      <header class="card-head">
+        <h3>Подписка на критичные статусы</h3>
+      </header>
+      <div class="card-body">
+        <label class="check">
+          <input type="checkbox" :checked="subscription.data.value?.enabled" data-testid="subscription-toggle"
+                 :disabled="subscription.loading.value" @change="toggleSubscription($event)" />
+          Письмо раз в сутки, если в моей области сквозного отчёта появились подразделения в «критично»
+        </label>
+        <p class="muted small sub-hint">
+          {{ subscription.data.value?.hint || 'Отправляется на ' + (auth.user?.email || '— ваш e-mail в профиле') }}
+        </p>
+      </div>
     </section>
 
     <section class="card">
