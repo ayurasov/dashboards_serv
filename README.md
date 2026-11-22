@@ -1,4 +1,4 @@
-# Дашборды компании v0.5.0
+# Дашборды компании v0.6.0
 
 Показатели служб АЛМИ Партнер в одном месте: служба персонала, техническая поддержка, технологические партнёрства. Светофор «норма — внимание — критично» по настраиваемым порогам, динамика к прошлому периоду, цели, реестры, загрузка отчётов из Excel, PDF-отчёты и выгрузки, структура компании с руководителями и подчинением, сквозной отчёт — статус компании сверху вниз по показателям подразделений, — входящие данные и интеграции с системами компании («По Делу», «Пульс проекта», Jira, Confluence, Bitrix24, Exchange, 1С), доступ по профилям для уровней сотрудников — от первого лица до рядового сотрудника, вход по учётной записи домена и журнал всех изменений.
 
@@ -24,14 +24,15 @@
 | [Руководство пользователя](docs/manuals/user-guide.md) ([PDF](docs/manuals/user-guide.pdf)) | сотрудники и руководители служб; встроено в приложение |
 | [Руководство администратора](docs/manuals/admin-guide.md) ([PDF](docs/manuals/admin-guide.pdf)) | администраторы системы и руководители служб |
 | [Руководство по развёртыванию](docs/manuals/deployment-guide.md) ([PDF](docs/manuals/deployment-guide.pdf)) | системные администраторы |
-| [CHANGELOG](CHANGELOG.md), [история версий](docs/versions.md), [для администраторов](docs/versions_admin.md), release notes [0.5.0](docs/release-notes/v0.5.0.md), [0.4.3](docs/release-notes/v0.4.3.md), [0.4.2](docs/release-notes/v0.4.2.md), [0.4.1](docs/release-notes/v0.4.1.md), [0.4.0](docs/release-notes/v0.4.0.md), [0.3.0](docs/release-notes/v0.3.0.md), [0.2.0](docs/release-notes/v0.2.0.md) | все |
+| [CHANGELOG](CHANGELOG.md), [история версий](docs/versions.md), [для администраторов](docs/versions_admin.md), release notes [0.6.0](docs/release-notes/v0.6.0.md), [0.5.0](docs/release-notes/v0.5.0.md), [0.4.3](docs/release-notes/v0.4.3.md), [0.4.2](docs/release-notes/v0.4.2.md), [0.4.1](docs/release-notes/v0.4.1.md), [0.4.0](docs/release-notes/v0.4.0.md), [0.3.0](docs/release-notes/v0.3.0.md), [0.2.0](docs/release-notes/v0.2.0.md) | все |
 | [Архитектурные решения (ADR)](docs/architecture) — последний: [ADR-0012, проектный офис](docs/architecture/adr-0012-project-office-data.md) | разработчики |
-| [Регламенты](docs/runbooks): [обновление до 0.5.0](docs/runbooks/upgrade-to-0.5.0.md), [до 0.4.3](docs/runbooks/upgrade-to-0.4.3.md), [до 0.4.2](docs/runbooks/upgrade-to-0.4.2.md), [до 0.4.1](docs/runbooks/upgrade-to-0.4.1.md), [до 0.4.0](docs/runbooks/upgrade-to-0.4.0.md), [до 0.3.0](docs/runbooks/upgrade-to-0.3.0.md), [до 0.2.0](docs/runbooks/upgrade-to-0.2.0.md), до 0.1.0, [неполадки интеграций и входящих данных](docs/runbooks/integrations-troubleshooting.md), миграции, резервное копирование | эксплуатация |
+| [Регламенты](docs/runbooks): [обновление до 0.6.0](docs/runbooks/upgrade-to-0.6.0.md), [до 0.5.0](docs/runbooks/upgrade-to-0.5.0.md), [до 0.4.3](docs/runbooks/upgrade-to-0.4.3.md), [до 0.4.2](docs/runbooks/upgrade-to-0.4.2.md), [до 0.4.1](docs/runbooks/upgrade-to-0.4.1.md), [до 0.4.0](docs/runbooks/upgrade-to-0.4.0.md), [до 0.3.0](docs/runbooks/upgrade-to-0.3.0.md), [до 0.2.0](docs/runbooks/upgrade-to-0.2.0.md), до 0.1.0, [неполадки интеграций и входящих данных](docs/runbooks/integrations-troubleshooting.md), миграции, резервное копирование | эксплуатация |
 | Нагрузочная проверка: [0.4.2](docs/performance/load-test-0.4.2.md) (smoke), [0.4.0](docs/performance/load-test-0.4.0.md), [0.3.0](docs/performance/load-test-0.3.0.md), [0.2.0](docs/performance/load-test-0.2.0.md), [0.1.0](docs/performance/load-test-0.1.0.md) | эксплуатация, разработчики |
 | OpenAPI — `/api/docs` работающего сервера; приём файлов по API — `/api/inbound/v1` (руководство администратора, раздел «Приём файлов по API») | интеграторы |
 
 ## Что нового
 
+- **0.6.0** — проектный офис: коннекторы GitLab и сырьё Jira (read-only), служба «Проектный офис» (часы против плана и календаря, связка «задача → код»), показатели сквозного отчёта из сырья, подписка на критичные статусы, лента «что изменилось».
 - **0.5.0** — спарклайны у показателей, глоссарий («?» у метрики), период на «Обзоре»; план 0.6.0 — проектный офис (Jira/GitLab).
 - **0.4.3** — лестница адаптива 640/960/1100/1280 и визуальные регрессионные тесты (18 эталонов, обе темы).
 - **0.4.2** — аудит интерфейса: понятная семантика «значок — статус, стрелка — динамика» на всех дашбордах, карточки «Обзора» по критичности, контраст мелкого текста (WCAG AA, автотест), формы статусов для дальтоников, мобильные e2e-тесты, «Ограничения» в этом README, снапшот OpenAPI в docs, понятная ошибка «нет прав на папку» у коннектора, здоровье `worker` по файлу-сердцебиению. Без миграций.
