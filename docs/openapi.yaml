@@ -10992,6 +10992,174 @@ paths:
       summary: Убрать сопоставление
       tags:
       - Проектный офис
+  /api/project-office/issues:
+    get:
+      operationId: issues_api_project_office_issues_get
+      parameters:
+      - in: query
+        name: project
+        required: false
+        schema:
+          default: ''
+          title: Project
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          default: ''
+          title: Status
+          type: string
+      - in: query
+        name: assignee
+        required: false
+        schema:
+          default: ''
+          title: Assignee
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          default: ''
+          title: Search
+          type: string
+      - in: query
+        name: open_only
+        required: false
+        schema:
+          default: false
+          title: Open Only
+          type: boolean
+      - in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          title: Page
+          type: integer
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          default: 50
+          maximum: 200
+          minimum: 1
+          title: Page Size
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Реестр задач Jira (окно сырья)
+      tags:
+      - Проектный офис
+  /api/project-office/issues/{issue_key}/merge-requests:
+    get:
+      operationId: issue_mrs_api_project_office_issues__issue_key__merge_requests_get
+      parameters:
+      - in: path
+        name: issue_key
+        required: true
+        schema:
+          title: Issue Key
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Мерж-реквесты задачи — связка «задача → код»
+      tags:
+      - Проектный офис
+  /api/project-office/merge-requests:
+    get:
+      operationId: merge_requests_api_project_office_merge_requests_get
+      parameters:
+      - in: query
+        name: project_id
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Project Id
+      - in: query
+        name: state
+        required: false
+        schema:
+          default: ''
+          title: State
+          type: string
+      - in: query
+        name: author
+        required: false
+        schema:
+          default: ''
+          title: Author
+          type: string
+      - in: query
+        name: jira_key
+        required: false
+        schema:
+          default: ''
+          title: Jira Key
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          default: ''
+          title: Search
+          type: string
+      - in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          title: Page
+          type: integer
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          default: 50
+          maximum: 200
+          minimum: 1
+          title: Page Size
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Реестр мерж-реквестов GitLab (окно сырья)
+      tags:
+      - Проектный офис
   /api/project-office/plans:
     get:
       operationId: plans_api_project_office_plans_get

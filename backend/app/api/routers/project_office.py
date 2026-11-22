@@ -63,6 +63,33 @@ def dashboard(month: str = Query("", description="ГГГГ-ММ; пусто — 
     return cached_json(db, ("project_office",), key, lambda: project_office.dashboard(db, chosen))
 
 
+# ---------------------------------------------------------------- реестры (этап 3b)
+
+
+@router.get("/issues", summary="Реестр задач Jira (окно сырья)")
+def issues(project: str = "", status: str = "", assignee: str = "", search: str = "",
+           open_only: bool = False, page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+           db: Session = Depends(get_db), user: User = Depends(active_user)):
+    _viewer(db, user)
+    return project_office.issue_registry(db, project=project, status=status, assignee=assignee,
+                                         search=search, open_only=open_only, page=page, page_size=page_size)
+
+
+@router.get("/issues/{issue_key}/merge-requests", summary="Мерж-реквесты задачи — связка «задача → код»")
+def issue_mrs(issue_key: str, db: Session = Depends(get_db), user: User = Depends(active_user)):
+    _viewer(db, user)
+    return project_office.issue_merge_requests(db, issue_key)
+
+
+@router.get("/merge-requests", summary="Реестр мерж-реквестов GitLab (окно сырья)")
+def merge_requests(project_id: int | None = None, state: str = "", author: str = "", jira_key: str = "",
+                   search: str = "", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+                   db: Session = Depends(get_db), user: User = Depends(active_user)):
+    _viewer(db, user)
+    return project_office.merge_request_registry(db, project_id=project_id, state=state, author=author,
+                                                 jira_key=jira_key, search=search, page=page, page_size=page_size)
+
+
 # ---------------------------------------------------------------- план часов
 
 

@@ -148,3 +148,51 @@ def test_api_dashboard_plans_and_access(admin, db, raw):
 def test_api_denies_without_service_access(login, db, raw):
     viewer = login("viewer")  # демо-пользователь без службы «Проектный офис»
     assert viewer.get("/api/project-office/dashboard").status_code == 403
+
+
+# ---------------------------------------------------------------- реестры (этап 3b)
+
+def test_issue_registry_filters_and_mr_link(db, raw):
+    db.add(JiraIssue(id=3, key="COP-181", project_key="COP", summary="Ещё спарклайны",
+                     status="В работе", jira_created=datetime(2026, 11, 20),
+                     jira_updated=datetime(2026, 11, 21)))
+    db.commit()
+    registry = project_office.issue_registry(db)
+    assert registry["total"] == 3
+    cop = project_office.issue_registry(db, project="cop")
+    assert {i["key"] for i in cop["items"]} == {"COP-180", "COP-181"}  # фильтр без учёта регистра
+    opened = project_office.issue_registry(db, open_only=True)
+    assert {i["key"] for i in opened["items"]} == {"SRM-100", "COP-181"}
+    found = project_office.issue_registry(db, search="спарк")  # в сводке COP-181
+    assert {i["key"] for i in found["items"]} == {"COP-181"}
+    by_key_text = project_office.issue_registry(db, search="srM-1")  # поиск по ключу без регистра
+    assert {i["key"] for i in by_key_text["items"]} == {"SRM-100"}
+    page = project_office.issue_registry(db, page=2, page_size=2)
+    assert page["total"] == 3 and len(page["items"]) == 1
+
+    # связка «задача → код»: у COP-180 один MR, у остальных нет
+    assert [m["iid"] for m in project_office.issue_merge_requests(db, "COP-180")] == [7]
+    assert project_office.issue_merge_requests(db, "COP-181") == []
+    # в реестре задач виден счётчик MR
+    by_key = {i["key"]: i for i in registry["items"]}
+    assert by_key["COP-180"]["merge_requests"] == 1 and by_key["COP-181"]["merge_requests"] == 0
+
+
+def test_merge_request_registry_filters(db, raw):
+    registry = project_office.merge_request_registry(db)
+    assert registry["total"] == 1
+    item = registry["items"][0]
+    assert item["project_path"] == "dev/dash" and item["jira_keys"] == ["COP-180"]
+    assert item["review_hours"] == 48.0  # 10 ноя 10:00 → 12 ноя 10:00
+    assert project_office.merge_request_registry(db, state="opened")["total"] == 0
+    assert project_office.merge_request_registry(db, jira_key="COP-180")["total"] == 1
+    assert project_office.merge_request_registry(db, jira_key="SRM-1")["total"] == 0
+
+
+def test_api_registries(admin, db, raw):
+    data = admin.get("/api/project-office/issues", params={"project": "COP"}).json()
+    assert data["total"] == 1 and data["items"][0]["merge_requests"] == 1
+    mrs = admin.get("/api/project-office/issues/COP-180/merge-requests").json()
+    assert mrs[0]["iid"] == 7 and mrs[0]["state"] == "merged"
+    mr_reg = admin.get("/api/project-office/merge-requests").json()
+    assert mr_reg["total"] == 1 and mr_reg["items"][0]["review_hours"] == 48.0

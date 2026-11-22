@@ -51,6 +51,8 @@ const months = computed(() => {
           <option v-for="m in months" :key="m.value" :value="m.value">{{ m.label }}</option>
         </select>
       </label>
+      <router-link to="/projects/issues" class="btn"><AppIcon name="ticket" :size="15" />Задачи Jira</router-link>
+      <router-link to="/projects/mrs" class="btn"><AppIcon name="code" :size="15" />Мерж-реквесты</router-link>
     </PageHeader>
     <LightsLegend />
 
