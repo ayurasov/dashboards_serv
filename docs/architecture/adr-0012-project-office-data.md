@@ -61,6 +61,18 @@
 Разрешённые узлы — `GITLAB_ALLOWED_HOSTS` (по образцу `JIRA_ALLOWED_HOSTS`). Все запросы —
 только GET/POST-поиск (Jira `/search` — чтение): **никаких изменяющих вызовов** в коде коннекторов.
 
+Инвентарь эндпоинтов (аудит read-only, подтверждён 2026-11-22):
+
+| Система | Вызовы коннекторов |
+| --- | --- |
+| GitLab | `GET /api/v4/user`, `GET /api/v4/version`, `GET /api/v4/projects`, `GET /api/v4/projects/{id}/repository/commits`, `GET /api/v4/projects/{id}/merge_requests`, `GET /api/v4/projects/{id}/pipelines` — только GET |
+| Jira | `GET /rest/api/2/project`, `GET /rest/api/2/myself`, `GET /rest/api/2/serverInfo`, `GET /rest/api/2/issue/{key}/worklog`, `POST /rest/api/2/search` (поиск — чтение, тот же эндпоинт уже использовался правилами JQL) |
+| Confluence | публикация отчёта — существующее действие, только ручной запуск; чтение в 0.6.0 не добавляется |
+
+Действия, изменяющие данные (публикация в Confluence), не ставятся в расписание; расписания
+этапов 1–2 — только чтение (GitLab 04:40, Jira 04:20). Токен GitLab — `read_api`, у учётной записи
+Jira — обычные права пользователя (нужны только «просмотр проектов и задач»).
+
 ### 3. Сопоставление людей
 
 Логины/почты совпадают во всех системах: `jira_worklogs.author.email` и email коммиттера GitLab
