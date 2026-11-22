@@ -7559,6 +7559,23 @@ paths:
       summary: Сменить пароль
       tags:
       - Вход и профиль
+  /api/auth/changes:
+    get:
+      description: 'Лента событий области пользователя с прошлого входа (не глубже 14 дней):
+
+        применённые элементы «Входящих» и новые критичные статусы. Справочники, права и входы
+
+        в систему — шум и не попадают (план 0.5.0, решение владельца).'
+      operationId: changes_since_last_login_api_auth_changes_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Что изменилось с прошлого входа
+      tags:
+      - Вход и профиль
   /api/auth/config:
     get:
       description: Включён ли вход по учётной записи домена и подсказка к нему (ADR-0008). Без входа в
@@ -7711,6 +7728,43 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Завершить сессию
+      tags:
+      - Вход и профиль
+  /api/auth/subscription:
+    get:
+      operationId: my_subscription_api_auth_subscription_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Моя подписка на критичные статусы
+      tags:
+      - Вход и профиль
+    put:
+      operationId: set_my_subscription_api_auth_subscription_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Включить или выключить подписку
       tags:
       - Вход и профиль
   /api/dashboards:

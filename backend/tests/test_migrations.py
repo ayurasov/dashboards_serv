@@ -22,7 +22,7 @@ from tests.conftest import drop_pg_database
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
-HEAD = "0019_project_office_service"
+HEAD = "0021_session_prev_login"
 
 
 def _diff(url: str) -> list:

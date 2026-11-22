@@ -183,3 +183,16 @@ class ProjectHourPlan(TimestampMixin, Base):
     month: Mapped[date] = mapped_column(Date)  # первый день месяца
     hours: Mapped[float] = mapped_column(Float, default=0.0)
     note: Mapped[str] = mapped_column(String(300), default="")
+
+
+class StatusSubscription(Base):
+    """Подписка пользователя на критичные статусы сквозного отчёта (этап 4): письмо, если
+    подразделение его области перешло в «критично» за сутки. Вкл/выкл — в профиле."""
+
+    __tablename__ = "status_subscriptions"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    # последняя проверка и последний отправленный день — чтобы не слать дважды
+    last_checked_at: Mapped[datetime | None] = mapped_column()
+    last_sent_day: Mapped[date | None] = mapped_column(Date)

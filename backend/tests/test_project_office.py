@@ -196,3 +196,72 @@ def test_api_registries(admin, db, raw):
     assert mrs[0]["iid"] == 7 and mrs[0]["state"] == "merged"
     mr_reg = admin.get("/api/project-office/merge-requests").json()
     assert mr_reg["total"] == 1 and mr_reg["items"][0]["review_hours"] == 48.0
+
+
+# ---------------------------------------------------------------- показатели сквозного отчёта (этап 4)
+
+def test_computed_indicators_from_raw(db, raw):
+    """po.hours — по подразделению сотрудника с веткой; po.lead_time / po.overdue_share — компания."""
+    from app.services import reports as reports_service
+
+    # hr_head (ivanov@) сидит в демо-структуре — его часы уходят в его подразделение и выше
+    snap = org_snapshot(db)
+    data = reports_service.load_service_data(db, snap, {}, {"po.hours", "po.lead_time", "po.overdue_share"})
+    hours = data.by_period.get(date(2026, 11, 1), {}).get("po.hours", {})
+    assert sum(hours.values()) > 0
+    lead = data.by_period.get(date(2026, 11, 1), {}).get("po.lead_time", {})
+    assert lead and any(v == 42.6 for v in lead.values())
+    overdue = data.by_period.get(date(2026, 11, 1), {}).get("po.overdue_share", {})
+    assert overdue  # COP-180 решён за 42,6 дн (> 14) → 100%
+
+
+def org_snapshot(db):
+    from app.services import org
+    return org.snapshot(db)
+
+
+# ---------------------------------------------------------------- подписка (этап 4)
+
+def test_subscription_toggle_and_daily(admin, db, raw, monkeypatch):
+
+    from app.services import subscription
+
+    # по умолчанию выключена, SMTP не настроен — API честно предупреждает
+    state = admin.get("/api/auth/subscription").json()
+    assert state["enabled"] is False and "hint" in state
+    assert admin.put("/api/auth/subscription", json={"enabled": True}).json()["enabled"] is True
+    assert admin.get("/api/auth/subscription").json()["enabled"] is True
+
+    # без SMTP — прогон помечает проверку, ничего не отправляет
+    result = subscription.run_daily(db)
+    assert result["sent"] == 0 and result["subscribers"] == 1 and "SMTP" in result["note"]
+    from app.models import StatusSubscription
+    row = db.get(StatusSubscription, admin_user_id(db))
+    assert row.last_checked_at is not None and row.last_sent_day is None
+
+    # с SMTP (фейк) — письмо уходит один раз за день; у демо-админа нет e-mail — зададим
+    from app.models import User as UserModel
+    admin_row = db.get(UserModel, admin_user_id(db))
+    admin_row.email = "admin@almi-partner.ru"
+    db.commit()
+    sent: list[tuple[str, str]] = []
+
+    def fake_send(to, subject, body):
+        sent.append((to, subject, body))
+
+    monkeypatch.setattr(subscription, "send_mail", fake_send)
+    monkeypatch.setattr(subscription.settings, "smtp_host", "mail.test")
+    result = subscription.run_daily(db)
+    assert result["failed"] == 0
+    if sent:  # критичные в демо-области есть — письмо одно и по делу
+        assert "критичн" in sent[0][1].lower()
+    # повторный прогон того же дня — письмо не дублируется
+    result = subscription.run_daily(db)
+    assert result["sent"] == 0
+
+
+def admin_user_id(db):
+    from sqlalchemy import select
+
+    from app.models import User
+    return db.scalar(select(User.id).where(User.username == "admin"))

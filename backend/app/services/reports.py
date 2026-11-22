@@ -46,6 +46,8 @@ from ..models import (
     HrMonth,
     Indicator,
     IndicatorValue,
+    JiraIssue,
+    JiraWorklog,
     Partnership,
     PartnershipLightRule,
     ReportRevision,
@@ -425,7 +427,56 @@ def load_service_data(db: Session, snap: org.OrgSnapshot, units: dict[str, int |
         _load_tech(db, data, units.get("tech"), sources)
     if "pp.green_share" in sources:
         _load_pp(db, data, units.get("project_product"))
+    if sources & {"po.hours", "po.lead_time", "po.overdue_share"}:
+        _load_project_office(db, snap, data, sources)
     return data
+
+
+def _load_project_office(db: Session, snap: org.OrgSnapshot, data: ServiceData, sources: set[str]) -> None:
+    """Проектный офис (ADR-0012): часы — по подразделениям сотрудников (сопоставление авторов Jira),
+    lead time и доля просроченных — уровня компании."""
+    from . import project_office as po_service
+
+    company_root = snap.roots()[0] if snap.roots() else None
+    if "po.hours" in sources:
+        # Автор → сотрудник → его подразделение (домашнее) → свёртка вверх по ветке
+        matched = po_service.resolve_map(db, "jira", [e for (e,) in db.execute(
+            select(JiraWorklog.author_email).where(JiraWorklog.author_email != "").distinct())])
+        home_units = {uid: snap.home_unit(uid) for uid in {u for u in matched.values() if u}}
+        contrib: dict[date, Counter] = defaultdict(Counter)
+        tracked: set[int] = {company_root} if company_root is not None else set()
+        for started, email, seconds in db.execute(select(JiraWorklog.started, JiraWorklog.author_email,
+                                                         JiraWorklog.time_spent_seconds)
+                                                  .where(JiraWorklog.time_spent_seconds > 0)):
+            uid = matched.get((email or "").lower())
+            unit = home_units.get(uid) if uid else None
+            if unit is None or unit not in snap.units:
+                continue
+            period = started.date().replace(day=1) if started else None
+            if period is None:
+                continue
+            hours = seconds / 3600.0
+            for ancestor in snap.path(unit):
+                contrib[period][ancestor] += hours
+                tracked.add(ancestor)
+        for period, branch in contrib.items():
+            data.put(period, "po.hours", {u: round(branch.get(u, 0.0), 2) for u in tracked})
+    if company_root is None:
+        return
+    # Медиана и доля просроченных — по решённым за месяц
+    by_month: dict[date, list[float]] = defaultdict(list)
+    for created, resolved in db.execute(select(JiraIssue.jira_created, JiraIssue.resolved)
+                                        .where(JiraIssue.resolved.is_not(None), JiraIssue.jira_created.is_not(None))):
+        days = (resolved - created).total_seconds() / 86400.0
+        if days >= 0:
+            by_month[resolved.date().replace(day=1)].append(days)
+    for period, values in by_month.items():
+        values.sort()
+        if "po.lead_time" in sources and values:
+            data.put(period, "po.lead_time", {company_root: round(values[len(values) // 2], 1)})
+        if "po.overdue_share" in sources and values:
+            overdue = sum(1 for d in values if d > 14)  # согласованный срок — 2 недели, пока не хранится
+            data.put(period, "po.overdue_share", {company_root: round(100.0 * overdue / len(values), 1)})
 
 
 # ================================================================ значения периода и свёртка

@@ -69,6 +69,7 @@ from .project_office import (  # noqa: F401
     JiraProject,
     JiraWorklog,
     ProjectHourPlan,
+    StatusSubscription,
 )
 from .reports import (  # noqa: F401
     INDICATOR_DIRECTIONS,

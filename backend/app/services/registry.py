@@ -405,6 +405,16 @@ INDICATOR_SOURCES: tuple[IndicatorSourceDef, ...] = (
     IndicatorSourceDef("tech.ratio", "tech", "Отношение решено / получено", "", "service",
                        "Решено за месяц к принятым новым заявкам за месяц по недельному отчёту",
                        "higher_is_better", "avg"),
+    IndicatorSourceDef("po.hours", "project_office", "Часы проектного офиса", "ч", "unit",
+                       "Трудозатраты Jira за месяц: часы авторов, сопоставленных сотрудникам структуры, "
+                       "по подразделениям сотрудников; у вышестоящих — по всей ветке",
+                       "neutral", "sum"),
+    IndicatorSourceDef("po.lead_time", "project_office", "Время решения задач", "дн.", "company",
+                       "Медиана (p50) времени от создания до решения задач Jira за месяц — уровня компании",
+                       "lower_is_better", "none"),
+    IndicatorSourceDef("po.overdue_share", "project_office", "Доля просроченных задач", "%", "company",
+                       "Решённые за месяц задачи Jira, решённые позже согласованного срока, — уровня компании",
+                       "lower_is_better", "none"),
     IndicatorSourceDef("pp.green_share", "project_product", "Доля партнёрств «в норме»", "%", "service",
                        "Доля записей реестра партнёрств со светофором «Норма» на конец месяца: срок сертификата — "
                        "на конец месяца, статус, NDA и соглашение — текущие (истории изменений реестр не хранит)",
@@ -412,7 +422,8 @@ INDICATOR_SOURCES: tuple[IndicatorSourceDef, ...] = (
 )
 INDICATOR_SOURCE_BY_KEY = {s.key: s for s in INDICATOR_SOURCES}
 # Подразделение службы по умолчанию — по коду подразделения структуры
-REPORT_SERVICE_UNIT_DEFAULTS: dict[str, str] = {"hr": "HR", "tech": "TECH", "project_product": "PROJ"}
+REPORT_SERVICE_UNIT_DEFAULTS: dict[str, str] = {"hr": "HR", "tech": "TECH", "project_product": "PROJ",
+                                             "project_office": "TECH"}
 REPORT_SETTING_KEY = "report_service_units"
 
 INDICATOR_DIRECTION_LABELS = {"higher_is_better": "Больше — лучше", "lower_is_better": "Меньше — лучше",
