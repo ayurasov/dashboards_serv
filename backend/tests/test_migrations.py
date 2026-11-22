@@ -22,7 +22,7 @@ from tests.conftest import drop_pg_database
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
-HEAD = "0017_project_office"
+HEAD = "0018_jira_raw"
 
 
 def _diff(url: str) -> list:

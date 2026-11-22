@@ -88,3 +88,57 @@ class GitlabPipelineDay(Base):
     status: Mapped[str] = mapped_column(String(30), default="")  # success · failed · canceled …
     count: Mapped[int] = mapped_column(Integer, default=0)
     duration_total: Mapped[float] = mapped_column(Float, default=0.0)  # сумма секунд, среднее = /count
+
+
+# ---------------------------------------------------------------- Jira: сырьё (ADR-0012, этап 2)
+
+
+class JiraProject(TimestampMixin, Base):
+    """Проект Jira (справочник; обновляется действием `raw_projects` целиком)."""
+
+    __tablename__ = "jira_projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # идентификатор проекта Jira
+    key: Mapped[str] = mapped_column(String(30), unique=True)
+    name: Mapped[str] = mapped_column(String(300), default="")
+    lead: Mapped[str] = mapped_column(String(300), default="")  # displayName ведущего
+    project_type: Mapped[str] = mapped_column(String(30), default="")
+    archived: Mapped[bool] = mapped_column(default=False)
+
+
+class JiraIssue(TimestampMixin, Base):
+    """Задача Jira: окно перезаливки по updated (по умолчанию 90 дней, ADR-0012)."""
+
+    __tablename__ = "jira_issues"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # идентификатор задачи Jira
+    key: Mapped[str] = mapped_column(String(60), unique=True)
+    project_key: Mapped[str] = mapped_column(String(30), index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    issue_type: Mapped[str] = mapped_column(String(60), default="")
+    status: Mapped[str] = mapped_column(String(100), default="", index=True)
+    priority: Mapped[str] = mapped_column(String(60), default="")
+    assignee_email: Mapped[str] = mapped_column(String(320), default="", index=True)
+    assignee_name: Mapped[str] = mapped_column(String(300), default="")
+    reporter_email: Mapped[str] = mapped_column(String(320), default="")
+    labels: Mapped[list | None] = mapped_column(JSON)
+    jira_created: Mapped[datetime | None] = mapped_column()
+    jira_updated: Mapped[datetime | None] = mapped_column()
+    resolved: Mapped[datetime | None] = mapped_column()
+    timespent_seconds: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class JiraWorklog(TimestampMixin, Base):
+    """Запись трудозатрат: автор, задача, дата, часы (окно по started, по умолчанию 180 дней)."""
+
+    __tablename__ = "jira_worklogs"
+    __table_args__ = (UniqueConstraint("jira_id", name="uq_jira_worklog_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    jira_id: Mapped[str] = mapped_column(BigInteger)  # идентификатор worklog в Jira
+    issue_key: Mapped[str] = mapped_column(String(60), index=True)
+    author_email: Mapped[str] = mapped_column(String(320), default="", index=True)
+    author_name: Mapped[str] = mapped_column(String(300), default="")
+    started: Mapped[datetime | None] = mapped_column(index=True)
+    time_spent_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    comment: Mapped[str] = mapped_column(Text, default="")

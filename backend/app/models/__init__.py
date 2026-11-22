@@ -63,6 +63,9 @@ from .project_office import (  # noqa: F401
     GitlabMergeRequest,
     GitlabPipelineDay,
     GitlabProject,
+    JiraIssue,
+    JiraProject,
+    JiraWorklog,
 )
 from .reports import (  # noqa: F401
     INDICATOR_DIRECTIONS,
