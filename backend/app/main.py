@@ -32,6 +32,7 @@ from .api.routers import (
     tp,
     users,
 )
+from .api.routers import project_office as po_router
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging
@@ -100,8 +101,8 @@ def create_app() -> FastAPI:
                                 "status": response.status_code, "duration_ms": duration})
         return response
 
-    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships, reports, pdf,
-                   inbox, integrations, inbound, system):
+    for module in (auth, users, access, org, common, hr, custom_dashboards, tp, naumen, partnerships,
+                   po_router, reports, pdf, inbox, integrations, inbound, system):
         app.include_router(module.router)
     app.include_router(org.departments_router)
 

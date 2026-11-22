@@ -23,7 +23,7 @@ const PAGES = [
   ['/hr', 'Служба персонала'], ['/hr/registry', 'Приёмы и увольнения'], ['/hr/data', 'Ввод данных'],
   ['/hr/summary', 'Сводка'], ['/hr/targets', 'Цели'], ['/hr/dashboards', 'дашборд'],
   ['/tp', 'поддержк'], ['/tp/registry', 'Недельный отчёт'], ['/tp/compare', 'Сравнение'], ['/tp/naumen', 'Naumen'],
-  ['/tp/analytics', 'Naumen'], ['/product', 'артнёрств'], ['/product/registry', 'артнёрств'], ['/product/summary', 'Сводка'],
+  ['/tp/analytics', 'Naumen'], ['/projects', 'Проектный офис'], ['/product', 'артнёрств'], ['/product/registry', 'артнёрств'], ['/product/summary', 'Сводка'],
   ['/product/timeline', 'Хронология'], ['/settings/traffic-light/hr', 'Светофор'], ['/settings/traffic-light/tech', 'Светофор'],
   ['/settings/partnership-lights', 'Светофор'], ['/admin/users', 'Пользователи'], ['/admin/departments', 'Подразделения'],
   ['/admin/audit', 'Журнал'], ['/admin/palettes', 'Палитр'], ['/admin/system', 'систем'], ['/profile', 'Профиль'],

@@ -96,3 +96,15 @@ export const adminApi = {
   deletePalette: (id) => api.del(`/palettes/${id}`),
   systemInfo: () => api.get('/system/info'),
 }
+
+export const projectOfficeApi = {
+  dashboard: (month) => api.get('/project-office/dashboard', { month }, { silent: true }),
+  plans: (month) => api.get('/project-office/plans', { month }),
+  setPlan: (projectKey, body) => api.put(`/project-office/plans/${projectKey}`, body),
+  deletePlan: (projectKey, month) => api.del(`/project-office/plans/${projectKey}`, { month }),
+  employees: () => api.get('/project-office/employees'),
+  identities: () => api.get('/project-office/identities'),
+  unmatched: () => api.get('/project-office/identities/unmatched'),
+  addIdentity: (body) => api.post('/project-office/identities', body),
+  deleteIdentity: (id) => api.del(`/project-office/identities/${id}`),
+}

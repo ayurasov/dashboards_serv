@@ -87,7 +87,8 @@ def test_effective_access_by_profile(db):
     ceo = access.effective(_user(db, "ceo"))
     assert ceo.profile_key == "executive" and ceo.org_scope == "company" and ceo.drill_depth == 1
     assert ceo.allows("financial") and not ceo.can_view_records
-    assert set(ceo.services) == {"hr", "tech", "project_product"} and ceo.sources["org_scope"] == "profile"
+    assert set(ceo.services) == {"hr", "tech", "project_product", "project_office"} \
+        and ceo.sources["org_scope"] == "profile"
 
     engineer = access.effective(_user(db, "engineer"))
     assert engineer.profile_key == "employee" and engineer.services == {}

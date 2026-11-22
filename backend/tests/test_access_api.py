@@ -57,7 +57,7 @@ def test_meta_for_any_user(client, login):
     assert all(word in labels["integrations.manage"] for word in ("подключения", "запускает", "ключи", "Confluence"))
     hr = data["services"][0]
     assert hr["key"] == "hr" and hr["has_dashboard"] and hr["levels"] == ["none", "viewer", "editor", "manager"]
-    assert len(data["services"]) == 9
+    assert len(data["services"]) == 10
 
 
 # ---------------------------------------------------------------- профили доступа
@@ -219,7 +219,8 @@ def test_me_reports_access_and_account(login):
     me = _as(login, "ceo").get("/api/auth/me").json()
     eff = me["effective_access"]
     assert eff["profile_key"] == "executive" and eff["org_scope"] == "company" and not eff["can_view_records"]
-    assert set(eff["services"]) == {"hr", "tech", "project_product"} and eff["data_classes"][-1] == "financial"
+    assert set(eff["services"]) == {"hr", "tech", "project_product", "project_office"} \
+        and eff["data_classes"][-1] == "financial"
     assert me["profile"]["key"] == "executive" and me["profile"]["name"] == "Высшее руководство"
     assert me["department"]["name"] == "АЛМИ Партнер" and me["department"]["path"] == "АЛМИ Партнер"
     assert me["auth_source"] == "local" and me["has_password"] and me["capabilities"] == []

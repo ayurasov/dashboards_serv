@@ -10878,6 +10878,208 @@ paths:
       summary: 'Техподдержка: заявки Naumen'
       tags:
       - PDF-отчёты
+  /api/project-office/dashboard:
+    get:
+      operationId: dashboard_api_project_office_dashboard_get
+      parameters:
+      - description: ГГГГ-ММ; пусто — последний месяц с трудозатратами
+        in: query
+        name: month
+        required: false
+        schema:
+          default: ''
+          description: ГГГГ-ММ; пусто — последний месяц с трудозатратами
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: 'Дашборд: часы, проекты, задачи, активность разработки'
+      tags:
+      - Проектный офис
+  /api/project-office/employees:
+    get:
+      operationId: employees_api_project_office_employees_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Сотрудники для сопоставления (кто видит службу)
+      tags:
+      - Проектный офис
+  /api/project-office/identities:
+    get:
+      operationId: identities_api_project_office_identities_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Сопоставления внешних авторов с сотрудниками
+      tags:
+      - Проектный офис
+    post:
+      operationId: add_identity_api_project_office_identities_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Сопоставить автора с сотрудником
+      tags:
+      - Проектный офис
+  /api/project-office/identities/unmatched:
+    get:
+      operationId: unmatched_api_project_office_identities_unmatched_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      summary: Авторы сырья без сопоставления
+      tags:
+      - Проектный офис
+  /api/project-office/identities/{identity_id}:
+    delete:
+      operationId: delete_identity_api_project_office_identities__identity_id__delete
+      parameters:
+      - in: path
+        name: identity_id
+        required: true
+        schema:
+          title: Identity Id
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Убрать сопоставление
+      tags:
+      - Проектный офис
+  /api/project-office/plans:
+    get:
+      operationId: plans_api_project_office_plans_get
+      parameters:
+      - in: query
+        name: month
+        required: true
+        schema:
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: План часов по проектам на месяц
+      tags:
+      - Проектный офис
+  /api/project-office/plans/{project_key}:
+    delete:
+      operationId: delete_plan_api_project_office_plans__project_key__delete
+      parameters:
+      - in: path
+        name: project_key
+        required: true
+        schema:
+          title: Project Key
+          type: string
+      - in: query
+        name: month
+        required: true
+        schema:
+          title: Month
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Удалить план часов
+      tags:
+      - Проектный офис
+    put:
+      operationId: set_plan_api_project_office_plans__project_key__put
+      parameters:
+      - in: path
+        name: project_key
+        required: true
+        schema:
+          title: Project Key
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Body
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Задать план часов проекта на месяц
+      tags:
+      - Проектный офис
   /api/reports/indicators:
     get:
       description: С полномочием «Сквозные отчёты» — весь каталог, иначе — активные показатели доступных

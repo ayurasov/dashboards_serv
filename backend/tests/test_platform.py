@@ -105,7 +105,7 @@ def test_layouts(login):
 def test_overview(login):
     data = login("hr_head").get("/api/overview").json()
     cards = {c["key"]: c for c in data["services"]}
-    assert set(cards) == {"hr", "tech", "project_product"}
+    assert set(cards) == {"hr", "tech", "project_product"}  # профиль head не включает проектный офис
     assert cards["hr"]["period"] == "Июль 2026" and cards["hr"]["kpis"][0]["label"] == "Принято"
     assert cards["tech"]["kpis"] and cards["project_product"]["kpis"][0]["value"] == 142
     assert data["recent_imports"]

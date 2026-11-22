@@ -30,6 +30,10 @@ SERVICES: tuple[ServiceDef, ...] = (
     ServiceDef("project_product", "Проектный и продуктовый офис", "Партнёрства",
                "Технологические партнёрства и сертификация совместимости продуктов",
                "handshake", "/product", True),
+    ServiceDef("project_office", "Проектный офис", "Проекты",
+               "Часы и проекты из Jira, активность разработки из GitLab: факт против плана, "
+               "скорость задач, ревью и сборки",
+               "code", "/projects", True),
     ServiceDef("apparat_gd", "Аппарат генерального директора", "Аппарат ГД", "", "building", "/apparat", False),
     ServiceDef("it", "ИТ-служба", "ИТ", "", "monitor", "/it", False),
     ServiceDef("commercial", "Коммерческая служба", "Коммерция", "", "briefcase", "/commercial", False),

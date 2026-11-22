@@ -142,3 +142,44 @@ class JiraWorklog(TimestampMixin, Base):
     started: Mapped[datetime | None] = mapped_column(index=True)
     time_spent_seconds: Mapped[int] = mapped_column(Integer, default=0)
     comment: Mapped[str] = mapped_column(Text, default="")
+
+
+# ---------------------------------------------------------------- служба «Проектный офис» (этап 3)
+
+
+class ExternalIdentity(Base):
+    """Сопоставление внешнего автора с сотрудником: Jira/GitLab ↔ пользователь структуры.
+
+    Автоматически автор сопоставляется по e-mail (users.email, без регистра); эта таблица —
+    для исключений: другая почта в системе, несколько учёток, CI-бот на человека."""
+
+    __tablename__ = "external_identities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service: Mapped[str] = mapped_column(String(30), index=True)  # jira · gitlab
+    external_email: Mapped[str] = mapped_column(String(320), index=True)  # в нижнем регистре
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    note: Mapped[str] = mapped_column(String(300), default="")
+
+
+class CalendarOverride(Base):
+    """Корпоративное отличие от производственного календаря РФ (ADR-0012, этап 3)."""
+
+    __tablename__ = "calendar_overrides"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    hours: Mapped[float] = mapped_column(Float, default=0.0)  # 0 — выходной, 8/7 — рабочая длительность
+    note: Mapped[str] = mapped_column(String(300), default="")
+
+
+class ProjectHourPlan(TimestampMixin, Base):
+    """План часов по проекту на месяц: задаёт руководитель проекта (доля ёмкости)."""
+
+    __tablename__ = "project_hour_plans"
+    __table_args__ = (UniqueConstraint("project_key", "month", name="uq_project_hour_plan"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_key: Mapped[str] = mapped_column(String(60), index=True)  # ключ Jira
+    month: Mapped[date] = mapped_column(Date)  # первый день месяца
+    hours: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str] = mapped_column(String(300), default="")
